@@ -7,34 +7,64 @@
   <body>
     <header><h1><span class="semi-2">nextGen |</span><span> &nbsp;Webp</span></h1></header>
     <form id="convert" onsubmit="">
-
       <div class="row-subheader">
-          <div class="container-2">
-              <div class="input-container">
-                  <input type="file" id="inputPath">
-                  <button class="input-browse-btn">
-                    Input File
-                  </button>
-                  <span class="input-File-info" id="input-file-info">Select a file</span>
-                </div>
-                <span class="submition-error" id="inputError"></span>
+        <div class="container-2">
+          <div class="input-container">
+            <input type="file" id="inputPath">
+            <button class="input-browse-btn">
+              Input File
+            </button>
+            <span class="input-File-info" id="input-file-info">Select a file</span>
           </div>
-
-          <div class="container-2">
-              <div class="input-container">
-                  <input type="file" id="outputPath" webkitdirectory directory>
-                  <button class="output-browse-btn">
-                    Output Directory
-                  </button>
-                  <span class="output-file-info" id="output-file-info">Select a Directory</span>
-                </div>
-                <span class="submition-error" id="outputError"></span>
+          <span class="submition-error" id="inputError"></span>
+        </div>
+        <div class="container-2">
+          <div class="input-container">
+            <input type="file" id="outputPath" webkitdirectory directory>
+            <button class="output-browse-btn">
+              Output Directory
+            </button>
+            <span class="output-file-info" id="output-file-info">Select a Directory</span>
           </div>
-      </div>
-      <div class="container-submit">
-        <button class="fab" id="fab" type="submit"><img id="fabImg" class="submit" width="35px" style="transition: opacity 500ms linear; opacity: 1;" src="./resources/images/thumbs-up.svg"></button>
-      </div>
+          <span class="submition-error" id="outputError"></span>
+        </div>
+        <div class="container-1">
+          <div class="advanced" id="advanced">
+            <div class="options visible toggleAdvanced" onclick="optionsClick()">--- Advanced Options ---</div>
+            <div class="container-2 options">
+              <div class="advanced-container">
+                <button class="quality-btn">
+                  Quality:
+                </button>
+                <span class="quality-info" id="quality-info">75</span>
+              </div>
+              <input type="range" id="quality" min="0" max="100" value="75">
+            </div>
+            <div class="container-2 options">
+                <div class="advanced-container">
+                  <button class="alphaQuality-btn">
+                    Transparency Compression Quality:
+                  </button>
+                  <span class="alphaQuality-info" id="alphaQuality-info">100</span>
+                </div>
+                <input type="range" id="alphaQuality" min="0" max="100" value="100">
+              </div>
+              <div class="container-2 options">
+                  <div class="advanced-container">
+                    <button class="cMethod-btn">
+                      Compression Method:
+                    </button>
+                    <span class="cMethod-info" id="cMethod-info">4</span>
+                  </div>
+                  <input type="range" id="cMethod" min="0" max="6" value="4">
+                </div>
+          </div>
+        </div>
+        <div class="container-submit">
+          <button class="fab" id="fab" type="submit"><img id="fabImg" class="submit" width="35px" style="transition: opacity 500ms linear; opacity: 1;" src="./resources/images/thumbs-up.svg"></button>
+        </div>
     </form>
+    <div class="footSpacer"></div>
     <div class="container" style="position:relative;">
       <footer></footer>
     </div>
@@ -55,9 +85,13 @@
     const outputFileInfo = document.querySelector('.output-file-info');
     const realOutput = document.getElementById('outputPath');
     const submit = document.querySelector('.fab');
+    const quality = document.getElementById('quality');
+    const alphaQuality = document.getElementById('alphaQuality');
+    const cMethod = document.getElementById('cMethod');
 
     var inputPath = "";
     var outputPath = "";
+    var advanced = false;
 
     /**********************/
     // event listeners 
@@ -97,6 +131,18 @@
         : name;
       
         outputFileInfo.innerHTML = truncated;
+    });
+
+    quality.addEventListener('change',()=>{
+      document.getElementById('quality-info').textContent = quality.value.toString();
+    });
+
+    alphaQuality.addEventListener('change',()=>{
+      document.getElementById('alphaQuality-info').textContent = alphaQuality.value.toString();
+    });
+
+    cMethod.addEventListener('change',()=>{
+      document.getElementById('cMethod-info').textContent = cMethod.value.toString();
     });
 
 
@@ -139,11 +185,21 @@
 
       if(formCheck()){
         // Send collected data to main.js for processing
-        ipcRenderer.send('inputPath', inputPath,);
-        ipcRenderer.send('outputPath', outputPath); 
+        ipcRenderer.send('inputPath', inputPath); 
+        console.log('Advanced:'+advanced.toString());
+        if(advanced){
+          console.log('Quality: '+quality.value.toString());
+          console.log('Alpha Quality: '+alphaQuality.value.toString());
+          ipcRenderer.send('quality', quality.value.toString());
+          ipcRenderer.send('alphaQuality', alphaQuality.value.toString());
+          ipcRenderer.send('cMethod', cMethod.value.toString());
+        }
+        ipcRenderer.send('outputPath', outputPath);
         isconvertComplete();
-        document.getElementById('convert').reset();
+        //document.getElementById('convert').reset();
+        document.getElementById('inputPath').value = "";
         document.getElementById('input-file-info').textContent = "Select a file";
+        document.getElementById('outputPath').value = "";
         document.getElementById('output-file-info').textContent = "Select a directory";
         document.getElementById('fabImg').style.opacity = 0;
       }
@@ -170,8 +226,7 @@
           document.getElementById('outputError').textContent = "Error: Missing output selection.";
           return false;
         }
-        return true;
-        
+          return true;
       }
       else{
         document.getElementById('inputError').textContent = "Error: Invalid input file type (JPEG, PNG, TIFF, WebP).";
@@ -189,7 +244,6 @@
 
       if(isconverted == '0'){
         setTimeout(function(){
-          console.log('1');
           document.getElementById('fabImg').src = './resources/images/check-mark.svg';
           document.getElementById('fabImg').style.opacity = "1";
           document.getElementById('fab').style.backgroundColor = 'rgba(71,171,108)';
@@ -203,14 +257,32 @@
           document.getElementById('fabImg').src = './resources/images/thumbs-up.svg';
           document.getElementById('fabImg').style.opacity = "1";
           document.getElementById('fab').style.backgroundColor = 'rgba(71,171,108)';
-        }, 3000);  
+        }, 3000);
         
       }
       else
       {
-        document.getElementById('fab').style.backgroundColor = 'red';
+        document.getElementById('fab').style.backgroundColor = red;
       }
     }
 
+    function optionsClick(){
+      if(advanced){advanced = false;}else{advanced=true;}
+      var i = 1;
+      if(document.getElementsByClassName('options')[0].textContent == '--- Advanced Options ---'){
+        document.getElementsByClassName('options')[0].textContent = "--- Basic ---";
+        do{
+          document.getElementsByClassName('options')[i].style.display = 'inline-block';
+          i++;
+        }while(i < document.getElementsByClassName('options').length);
+      }
+      else{
+        document.getElementsByClassName('options')[0].textContent = "--- Advanced Options ---";
+        do{
+          document.getElementsByClassName('options')[i].style.display = 'none';
+          i++;
+        }while(i < document.getElementsByClassName('options').length);
+      }
+    }
   </script>
 </html>

@@ -8,7 +8,7 @@ function createWindow () {
   // Create the browser window.
   win = new BrowserWindow({ 
     width: 800, 
-    height: 500, 
+    height: 600, 
     webPreferences:{
       nodeIntegration: true
     },
@@ -77,6 +77,9 @@ var binariesPath = path.join("./resources","./bin");
 var input ="";
 var output = "";
 var cwebpShellScript = "";
+var quality = "";
+var alphaQuality = "";
+var cMethod = "";
 
 // Define OS platform in order to load required executables
 function getPlatform(){
@@ -116,6 +119,13 @@ console.log("Location of cwebp.exe: "+cwebpPath);
 // Detect ipcMain data recived and assign data to variable
 ipcMain.on('inputPath',function(e,inputPath){input = inputPath;});
 
+ipcMain.on('quality',function(e,qualityValue){quality = ' -q '+qualityValue; console.log('Quality Recieved: '+quality);});
+
+ipcMain.on('alphaQuality',function(e,alphaQualityValue){alphaQuality = ' -alpha_q '+alphaQualityValue; console.log('Alpha Quality Recieved: '+alphaQuality);});
+
+ipcMain.on('cMethod',function(e,cMethodValue){cMethod = ' -m '+cMethodValue; console.log('Compression Method Recieved: '+cMethod);});
+
+
 // Detect ipcMain data recived and assign it to a variable
 // Because it is know that this data will be send last we can
 // execute shell functions to cwebp
@@ -129,7 +139,7 @@ ipcMain.on('outputPath',function(e,outputPath){
   console.log('Output File: '+output);
 
   // Bring all inputs together into a shell script
-  cwebpShellScript = [' "'+input+'" -o "'+output+'"'];
+  cwebpShellScript = [' "'+input+'"'+quality+alphaQuality+cMethod+' -o "'+output+'"'];
 
   // Send the shell script the convert function
   convertToWebp(cwebpShellScript);
