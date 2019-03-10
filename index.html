@@ -1,0 +1,216 @@
+<html>
+  <head>
+    <title>ba | Next Generation Images</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline'">
+    <link rel="stylesheet" href="index.css">
+  </head>
+  <body>
+    <header><h1><span class="semi-2">nextGen |</span><span> &nbsp;Webp</span></h1></header>
+    <form id="convert" onsubmit="">
+
+      <div class="row-subheader">
+          <div class="container-2">
+              <div class="input-container">
+                  <input type="file" id="inputPath">
+                  <button class="input-browse-btn">
+                    Input File
+                  </button>
+                  <span class="input-File-info" id="input-file-info">Select a file</span>
+                </div>
+                <span class="submition-error" id="inputError"></span>
+          </div>
+
+          <div class="container-2">
+              <div class="input-container">
+                  <input type="file" id="outputPath" webkitdirectory directory>
+                  <button class="output-browse-btn">
+                    Output Directory
+                  </button>
+                  <span class="output-file-info" id="output-file-info">Select a Directory</span>
+                </div>
+                <span class="submition-error" id="outputError"></span>
+          </div>
+      </div>
+      <div class="container-submit">
+        <button class="fab" id="fab" type="submit"><img id="fabImg" class="submit" width="35px" style="transition: opacity 500ms linear; opacity: 1;" src="./resources/images/thumbs-up.svg"></button>
+      </div>
+    </form>
+    <div class="container" style="position:relative;">
+      <footer></footer>
+    </div>
+  </body>
+
+  <script>
+    /**********************/
+    // Define Constants
+    /**********************/
+    const electron = require('electron');
+    const { ipcRenderer } = electron;
+    const path = require('path');
+    const form = document . querySelector('form');
+    const inputUploadButton = document.querySelector('.input-browse-btn');
+    const inputFileInfo = document.querySelector('.input-File-info');
+    const realInput = document.getElementById('inputPath');
+    const outputUploadButton = document.querySelector('.output-browse-btn');
+    const outputFileInfo = document.querySelector('.output-file-info');
+    const realOutput = document.getElementById('outputPath');
+    const submit = document.querySelector('.fab');
+
+    var inputPath = "";
+    var outputPath = "";
+
+    /**********************/
+    // event listeners 
+    /**********************/
+    // Listen for the vanity input file button to be clicked.
+    // This fire the input file box click event.
+    inputUploadButton.addEventListener('click', () => {
+      realInput.click();
+    });
+
+
+    // Listen for a change in the value of the input file box.
+    // Then change the vanity input box value to match.
+    realInput.addEventListener('change', () => {
+      console.log("input changed");
+      const name = realInput.value.split(/\\|\//).pop();
+      const truncated = name.length > 20 
+        ? name.substr(name.length - 20) 
+        : name;
+        inputFileInfo.innerHTML = truncated;
+    });
+
+
+    // Listen for the vanity output file button to be clicked.
+    // This fire the output file box click event.
+    outputUploadButton.addEventListener('click', () => {
+      realOutput.click();
+    });
+
+
+    // Listen for a change in the value of the output file box.
+    // Then change the vanity output box value to match.
+    realOutput.addEventListener('change', () => {
+      const name = realOutput.value.split(/\\|\//).pop();
+      const truncated = name.length > 20 
+        ? name.substr(name.length - 20) 
+        : name;
+      
+        outputFileInfo.innerHTML = truncated;
+    });
+
+
+
+    // Listen for form submition
+    submit.addEventListener('click', submitForm); 
+    form.addEventListener('submit', prevent);
+    function prevent(e){
+      e.preventDefault();
+      console.log("form submit");
+    }
+
+    // Detect call to ipcRenderer and log sent data to console
+    ipcRenderer.on('consoleSend',function(e,consoleSend){
+      console.log(consoleSend);
+    });
+
+
+    /**********************/
+    // establish connection to main.js 
+    /**********************/
+
+    // Send identifier to establish relationship with main.js
+    ipcRenderer.send('indentifier', "index.html");
+
+
+    /**********************/
+    // form submition functions
+    /**********************/
+    // On form submition send collected data to main.js
+    function submitForm(e){
+
+      // Prevent default handling of form submition
+      e.preventDefault();
+
+
+      // Load collected data into variables
+      //var inputPath = document.querySelector('#inputPath').files[0].path;
+      //var outputPath = document.querySelector('#outputPath').files[0].path;
+
+      if(formCheck()){
+        // Send collected data to main.js for processing
+        ipcRenderer.send('inputPath', inputPath,);
+        ipcRenderer.send('outputPath', outputPath); 
+        isconvertComplete();
+        document.getElementById('convert').reset();
+        document.getElementById('input-file-info').textContent = "Select a file";
+        document.getElementById('output-file-info').textContent = "Select a directory";
+        document.getElementById('fabImg').style.opacity = 0;
+      }
+     
+    }
+
+    function formCheck(){
+      document.getElementById('inputError').textContent = "";
+      document.getElementById('outputError').textContent = "";
+      try{
+        inputPath = document.querySelector('#inputPath').files[0].path;
+      }catch{
+        console.error("Error: Missing input selection.");
+        document.getElementById('inputError').textContent = "Error: Missing input selection.";
+        return false;
+      }
+      var inputExt = path.extname(inputPath).toUpperCase();
+      if((inputExt == ".PNG" || inputExt == ".JPG" || inputExt == ".JPEG" || inputExt == ".JPE" || inputExt == ".Jif" || inputExt == ".JFIF" || inputExt == ".JFI" || inputExt == ".TIF" || inputExt == ".TIFF" || inputExt == ".WEBP")){
+        try{
+          outputPath = document.querySelector('#outputPath').files[0].path;
+        }
+        catch{
+          console.error("Error: Missing input selection.");
+          document.getElementById('outputError').textContent = "Error: Missing output selection.";
+          return false;
+        }
+        return true;
+        
+      }
+      else{
+        document.getElementById('inputError').textContent = "Error: Invalid input file type (JPEG, PNG, TIFF, WebP).";
+        console.log("Error: Wrong input file type.");
+        return false;
+      }
+      return false;
+    }
+
+    async function isconvertComplete(){
+      ipcRenderer.sendSync('isConverted', 'webp');
+      console.log(ipcRenderer.sendSync('isConverted', 'webp'));
+      var isconverted = ipcRenderer.sendSync('isConverted', 'webp').toString();
+      console.log(isconverted);
+
+      if(isconverted == '0'){
+        setTimeout(function(){
+          console.log('1');
+          document.getElementById('fabImg').src = './resources/images/check-mark.svg';
+          document.getElementById('fabImg').style.opacity = "1";
+          document.getElementById('fab').style.backgroundColor = 'rgba(71,171,108)';
+        }, 500);
+
+        setTimeout(function(){ 
+          document.getElementById('fabImg').style.opacity = "0";
+        }, 2500);  
+
+        setTimeout(function(){ 
+          document.getElementById('fabImg').src = './resources/images/thumbs-up.svg';
+          document.getElementById('fabImg').style.opacity = "1";
+          document.getElementById('fab').style.backgroundColor = 'rgba(71,171,108)';
+        }, 3000);  
+        
+      }
+      else
+      {
+        document.getElementById('fab').style.backgroundColor = 'red';
+      }
+    }
+
+  </script>
+</html>

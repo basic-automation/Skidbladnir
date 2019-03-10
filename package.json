@@ -1,0 +1,40 @@
+{
+  "name": "ba-nextgenimg",
+  "version": "0.0.1",
+  "description": "Convert images to next generation open-source formats.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "postinstall": "electron-builder install-app-deps",
+    "nodeGypRebuild": "true"
+  },
+  "author": "Basic Autonomy: Justin Icenhour",
+  "license": "ISC",
+  "nodeGypRebuild": "true",
+  "devDependencies": {
+    "electron": "^4.0.7",
+    "electron-builder": "^20.38.5"
+  },
+  "dependencies": {
+    "@rauschma/stringio": "^1.4.0",
+    "app-root-dir": "^1.0.2",
+    "electron-is-dev": "^1.0.1"
+  },
+  "build": {
+    "appId": "ba.nextgenimg",
+    "win": {
+      "target": "portable"
+    },
+    "extraFiles": [
+      {
+        "from": "resources/win/bin",
+        "to": "Resources/bin",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
+  }
+}
