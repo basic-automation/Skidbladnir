@@ -287,6 +287,17 @@ input[type="button" i]:active{
   font-size: 0.9em;
 }
 
+.sns-btn {
+  background: var(--main-color);
+  color: var(--accent-color);
+  min-height: 35px;
+  padding: 10px;
+  border: none;
+}
+.sns-info {
+  font-size: 0.9em;
+}
+
 .btn{
   background: var(--main-color);
   color: var(--accent-color);
@@ -353,4 +364,45 @@ input[type=number]
 .numberContainer{
   display: inline-flex;
   width: calc(100% - 120px);
+}
+
+.info{
+  position: relative;
+  float: right;
+  top:50%;
+  height: 16pt;
+}
+
+
+
+.tooltip {
+  position: relative;
+  display: inline-block;
+  float:right;
+}
+
+.tooltip .tooltiptext {
+  visibility: hidden;
+  width: calc(50vw - 83px);
+  background-color: var(--main-color);
+  color: var(--accent-color);
+  text-align: center;
+  padding: 10px;
+  position: absolute;
+  z-index: 1;
+  bottom: 150%;
+  left: 50%;
+  margin-left: calc(((50vw - 83px) / 2) * -1);
+}
+
+.tooltip .tooltiptext::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  margin-left: -5px;
+}
+
+.tooltip:hover .tooltiptext {
+  visibility: visible;
 }
