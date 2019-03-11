@@ -58,6 +58,24 @@
                   </div>
                   <input type="range" id="cMethod" min="0" max="6" value="4">
                 </div>
+                <div class="container-2 options">
+                    <div class="advanced-container">
+                      <button class="segments-btn">
+                        Number of Segments:
+                      </button>
+                      <span class="segments-info" id="segments-info">4</span>
+                    </div>
+                    <input type="range" id="segments" min="1" max="4" value="4">
+                  </div>
+                  <div class="container-2 options">
+                    <div class="advanced-container">
+                      <button class="targetSize-btn">
+                        Target File Size:
+                      </button>
+                      <div class="numberContainer"><input type="number" id="targetSize" min="1" step="1" value="1"> bytes </div><br>
+                      <button class="btn" id="originalSize">(original)</button>
+                    </div>
+                  </div>
           </div>
         </div>
         <div class="container-submit">
@@ -77,6 +95,7 @@
     const electron = require('electron');
     const { ipcRenderer } = electron;
     const path = require('path');
+    const fileBytes = require('file-bytes');
     const form = document . querySelector('form');
     const inputUploadButton = document.querySelector('.input-browse-btn');
     const inputFileInfo = document.querySelector('.input-File-info');
@@ -88,6 +107,8 @@
     const quality = document.getElementById('quality');
     const alphaQuality = document.getElementById('alphaQuality');
     const cMethod = document.getElementById('cMethod');
+    const segments = document.getElementById('segments');
+    const targetSize = document.getElementById('targetSize');
 
     var inputPath = "";
     var outputPath = "";
@@ -112,6 +133,12 @@
         ? name.substr(name.length - 20) 
         : name;
         inputFileInfo.innerHTML = truncated;
+
+      ipcRenderer.sendSync('fileSize', document.querySelector('#inputPath').files[0].path);
+      var filesize = ipcRenderer.sendSync('fileSize', document.querySelector('#inputPath').files[0].path);
+      console.log('File Size: '+filesize);
+      document.getElementById('originalSize').textContent = filesize+' bytes (original)';
+      document.getElementById('targetSize').value = filesize;
     });
 
 
@@ -129,7 +156,6 @@
       const truncated = name.length > 20 
         ? name.substr(name.length - 20) 
         : name;
-      
         outputFileInfo.innerHTML = truncated;
     });
 
@@ -145,7 +171,9 @@
       document.getElementById('cMethod-info').textContent = cMethod.value.toString();
     });
 
-
+    segments.addEventListener('change',()=>{
+      document.getElementById('segments-info').textContent = segments.value.toString();
+    });
 
     // Listen for form submition
     submit.addEventListener('click', submitForm); 
@@ -193,6 +221,8 @@
           ipcRenderer.send('quality', quality.value.toString());
           ipcRenderer.send('alphaQuality', alphaQuality.value.toString());
           ipcRenderer.send('cMethod', cMethod.value.toString());
+          ipcRenderer.send('segments', segments.value.toString());
+          ipcRenderer.send('targetSize', targetSize.value.toString());
         }
         ipcRenderer.send('outputPath', outputPath);
         isconvertComplete();

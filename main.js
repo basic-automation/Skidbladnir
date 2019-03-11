@@ -80,6 +80,7 @@ var cwebpShellScript = "";
 var quality = "";
 var alphaQuality = "";
 var cMethod = "";
+var segments = "";
 
 // Define OS platform in order to load required executables
 function getPlatform(){
@@ -116,6 +117,11 @@ const cwebpPath  = '"'+path.resolve(path.join(binariesPath, "./cwebp"))+'"';
 // Log determined path to cwebp.exe
 console.log("Location of cwebp.exe: "+cwebpPath);
 
+ipcMain.on('fileSize',(event, filePath) =>{
+  var fileStats = fs.statSync(filePath);
+  event.returnValue = fileStats['size'];
+});
+
 // Detect ipcMain data recived and assign data to variable
 ipcMain.on('inputPath',function(e,inputPath){input = inputPath;});
 
@@ -124,6 +130,10 @@ ipcMain.on('quality',function(e,qualityValue){quality = ' -q '+qualityValue; con
 ipcMain.on('alphaQuality',function(e,alphaQualityValue){alphaQuality = ' -alpha_q '+alphaQualityValue; console.log('Alpha Quality Recieved: '+alphaQuality);});
 
 ipcMain.on('cMethod',function(e,cMethodValue){cMethod = ' -m '+cMethodValue; console.log('Compression Method Recieved: '+cMethod);});
+
+ipcMain.on('segments',function(e,segmentsValue){segments = ' -segments '+segmentsValue; console.log('Number of Segments Recieved: '+segments);});
+
+ipcMain.on('targetSize',function(e,targetSizeValue){targetSize = ' -size '+targetSizeValue; console.log('Target File Size Recieved: '+targetSize);});
 
 
 // Detect ipcMain data recived and assign it to a variable
@@ -139,7 +149,7 @@ ipcMain.on('outputPath',function(e,outputPath){
   console.log('Output File: '+output);
 
   // Bring all inputs together into a shell script
-  cwebpShellScript = [' "'+input+'"'+quality+alphaQuality+cMethod+' -o "'+output+'"'];
+  cwebpShellScript = [' "'+input+'"'+quality+alphaQuality+cMethod+segments+targetSize+' -o "'+output+'"'];
 
   // Send the shell script the convert function
   convertToWebp(cwebpShellScript);
@@ -174,7 +184,6 @@ async function convertToWebp(cwebpShellScript){
     console.log(`child process exited with code ${code}`);
     isConvertedWebP = code;
     console.log(isConvertedWebP);
-
   });
 }
 

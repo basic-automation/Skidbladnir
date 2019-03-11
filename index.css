@@ -265,6 +265,37 @@ input[type="button" i]:active{
   font-size: 0.9em;
 }
 
+.segments-btn {
+  background: var(--main-color);
+  color: var(--accent-color);
+  min-height: 35px;
+  padding: 10px;
+  border: none;
+}
+.segments-info {
+  font-size: 0.9em;
+}
+
+.targetSize-btn {
+  background: var(--main-color);
+  color: var(--accent-color);
+  min-height: 35px;
+  padding: 10px;
+  border: none;
+}
+.targetSize-info {
+  font-size: 0.9em;
+}
+
+.btn{
+  background: var(--main-color);
+  color: var(--accent-color);
+  min-height: 35px;
+  padding: 10px;
+  border: none;
+  width:100%;
+}
+
 .advanced-container{
   color: var(--main-color);
   background-color: var(--accent-color);
@@ -305,4 +336,21 @@ input[type=range]::-webkit-slider-thumb {
   cursor: pointer;
   display: block !important;
   padding:10px;
+}
+
+
+
+input[type=number]
+{
+  -webkit-appearance: none;
+  margin: 0;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--main-color);
+}
+
+.numberContainer{
+  display: inline-flex;
+  width: calc(100% - 120px);
 }
