@@ -1,6 +1,6 @@
 {
   "name": "ba-nextgenimg",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "description": "Convert images to next generation open-source formats.",
   "main": "main.js",
   "scripts": {
@@ -9,6 +9,7 @@
     "dist": "electron-builder",
     "postinstall": "electron-builder install-app-deps",
     "nodeGypRebuild": "true"
+
   },
   "author": "Basic Autonomy: Justin Icenhour",
   "license": "ISC",
@@ -37,6 +38,7 @@
           "**/*"
         ]
       }
-    ]
+    ],
+    "files": ["**/*", "build/icon.*"]
   }
 }

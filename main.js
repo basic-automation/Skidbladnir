@@ -82,6 +82,10 @@ var alphaQuality = "";
 var cMethod = "";
 var segments = "";
 var sns = "";
+var mt = " -mt ";
+var af = " -af ";
+var targetSize = "";
+
 
 // Define OS platform in order to load required executables
 function getPlatform(){
@@ -152,7 +156,7 @@ ipcMain.on('outputPath',function(e,outputPath){
   console.log('Output File: '+output);
 
   // Bring all inputs together into a shell script
-  cwebpShellScript = [' "'+input+'"'+quality+alphaQuality+cMethod+segments+targetSize+sns+' -o "'+output+'"'];
+  cwebpShellScript = [af+mt+quality+alphaQuality+cMethod+segments+targetSize+sns+' "'+input+'"'+' -o "'+output+'"'];
 
   // Send the shell script the convert function
   convertToWebp(cwebpShellScript);
@@ -198,7 +202,6 @@ ipcMain.on('isConverted', (event, arg) => {
     for (var i = 1; i <= k; i++) {
       var tick = function(i) {
           return function() {
-              console.log(i);
               if(isConvertedWebP != '0'){
               }
               else{
