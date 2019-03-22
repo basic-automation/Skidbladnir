@@ -28,7 +28,8 @@
   "build": {
     "appId": "ba.nextgenimg",
     "win": {
-      "target": "portable"
+      "target": "portable",
+      "icon": "build/icon.png"
     },
     "extraFiles": [
       {

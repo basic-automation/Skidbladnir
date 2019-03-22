@@ -66,3 +66,4 @@ typings/
 # lock files
 yarn.lock
 package-lock.json
+documentation/planning-implementation.docx

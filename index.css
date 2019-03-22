@@ -8,6 +8,7 @@
     --accent-semi-2-color: rgba(14,18,20,.2);
     --accent-positive: rgba(71,171,108);
     --accent-negative: rgba(255,0,0);
+    --accent-inactive: rgba(14,18,20,.1);
 
     /*   dots   */
     --dot-size: 10px;
@@ -27,6 +28,10 @@ body{
     margin: 0;
     padding: 0;
     color: var(--main-color);
+}
+
+.inactive{
+  color: var(--accent-inactive) !important;
 }
 
 footer{
@@ -102,6 +107,28 @@ h1{
   width: calc(50% - 83px);
   padding: 20px;
   margin: 20px;
+  align-content: center;
+  vertical-align: middle;
+  text-align: center;
+}
+
+.group-1{
+  display: inline-block;
+  width: calc(100% - 83px);
+  padding: 5px;
+  margin: 20px;
+  align-content: center;
+  vertical-align: middle;
+  text-align: center;
+  border: dotted;
+  border-width: 2px
+}
+
+.subcontainer-5{
+  display: inline-block;
+  /*width: calc(20% - 20px);*/
+  padding: 5px;
+  margin: 5px;
   align-content: center;
   vertical-align: middle;
   text-align: center;
@@ -298,6 +325,17 @@ input[type="button" i]:active{
   font-size: 0.9em;
 }
 
+.mode-btn {
+  background: var(--main-color);
+  color: var(--accent-color);
+  min-height: 35px;
+  padding: 10px;
+  border: none;
+}
+.mode-info {
+  font-size: 0.9em;
+}
+
 .btn{
   background: var(--main-color);
   color: var(--accent-color);
@@ -314,7 +352,10 @@ input[type="button" i]:active{
   align-content: left;
   vertical-align: middle;
   text-align: left;
-  
+}
+
+.inlineB{
+  display: inline-block;
 }
 
 /************************
@@ -335,9 +376,9 @@ input[type=range] {
 input[type=range]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%; 
+  width: 15px;
+  height: 15px;
+  border-radius: 0%; 
   background: var(--accent-positive);
   
   cursor: pointer;
@@ -405,4 +446,149 @@ input[type=number]
 
 .tooltip:hover .tooltiptext {
   visibility: visible;
+}
+
+
+
+
+
+/* Customize the label (the container) */
+.checkboxContainer {
+  display: block;
+  position: relative;
+  padding-left: 35px;
+  margin-bottom: 12px;
+  cursor: pointer;
+  font-size: 22px;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+
+/* Hide the browser's default checkbox */
+.checkboxcontainer input {
+  position: absolute;
+  opacity: 0;
+  cursor: pointer;
+  height: 0;
+  width: 0;
+}
+
+/* Create a custom checkbox */
+.checkboxcheckmark {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 25px;
+  width: 25px;
+  background-color: #eee;
+}
+
+/* On mouse-over, add a grey background color */
+.checkboxcontainer:hover input ~ .checkmark {
+  background-color: #ccc;
+}
+
+/* When the checkbox is checked, add a blue background */
+.checkboxcontainer input:checked ~ .checkmark {
+  background-color: #2196F3;
+}
+
+/* Create the checkmark/indicator (hidden when not checked) */
+.checkboxcheckmark:after {
+  content: "";
+  position: absolute;
+  display: none;
+}
+
+/* Show the checkmark when checked */
+.checkboxcontainer input:checked ~ .checkmark:after {
+  display: block;
+}
+
+/* Style the checkmark/indicator */
+.checkboxcontainer .checkmark:after {
+  left: 9px;
+  top: 5px;
+  width: 5px;
+  height: 10px;
+  border: solid white;
+  border-width: 0 3px 3px 0;
+  -webkit-transform: rotate(45deg);
+  -ms-transform: rotate(45deg);
+  transform: rotate(45deg);
+}
+
+
+
+
+
+
+
+
+
+/* Customize the label (the container) */
+.radioContainer {
+  display: block;
+  position: relative;
+  padding-left: 25px;
+  /*margin-bottom: 12px;*/
+  cursor: pointer;
+  font-size: .9em;
+  -webkit-user-select: none;
+  user-select: none;
+  text-align: left;
+}
+
+/* Hide the browser's default radio button */
+.radioContainer input {
+  position: absolute;
+  opacity: 0;
+  cursor: pointer;
+  height: 0;
+  width: 0;
+}
+
+/* Create a custom radio button */
+.radioCheckmark {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 15px;
+  width: 15px;
+  background-color: var(--accent-semi-2-color);
+  border-radius: 0%;
+}
+
+/* On mouse-over, add a grey background color */
+.radioContainer:hover input ~ .radioCheckmark {
+  background-color: var(--accent-color);
+}
+
+/* When the radio button is checked, add a blue background */
+.radioContainer input:checked ~ .radioCheckmark {
+  background-color: var(--accent-positive);
+}
+
+/* Create the indicator (the dot/circle - hidden when not checked) */
+.radioCheckmark:after {
+  content: "";
+  position: absolute;
+  display: none;
+}
+
+/* Show the indicator (dot/circle) when checked */
+.radioContainer input:checked ~ .radioCheckmark:after {
+  display: block;
+}
+
+/* Style the indicator (dot/circle) */
+.radioContainer .radioCheckmark:after {
+  top: 4.5px;
+  left: 4.5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 0%;
+  background: var(--main-color);
 }

@@ -32,60 +32,99 @@
         <div class="container-1">
           <div class="advanced" id="advanced">
             <div class="options visible toggleAdvanced" onclick="optionsClick()">--- Advanced Options ---</div>
-            <div class="container-2 options">
-              <div class="advanced-container">
-                <button class="quality-btn">
-                  Quality:
-                </button>
-                <span class="quality-info" id="quality-info">75</span>
+            <div class="group-1 options">
+              <div><h2>Mode</h2></div>
+              <div class="subcontainer-5 inactive">
+                <label class="radioContainer">JPEG Like
+                  <input type="radio" name="mode" value="jpegLike" disabled="true">
+                  <span class="radioCheckmark"></span>
+                </label>
               </div>
-              <input type="range" id="quality" min="0" max="100" value="75">
+              <div class="subcontainer-5">
+                <label class="radioContainer">Lossy
+                  <input type="radio" checked="checked" name="mode" value="lossy">
+                  <span class="radioCheckmark"></span>
+                </label>
+              </div>
+              <div class="subcontainer-5 inactive">
+                <label class="radioContainer">Lossless
+                  <input type="radio" name="mode" value="lossless" disabled="true">
+                  <span class="radioCheckmark"></span>
+                </label>
+              </div>
+              <div class="subcontainer-5 inactive">
+                <label class="radioContainer">Near Lossless
+                  <input type="radio" name="mode" value="nearLossless" disabled="true">
+                  <span class="radioCheckmark"></span>
+                </label>
+              </div>
+              <div class="subcontainer-5 inactive">
+                <label class="radioContainer">Preset
+                  <input type="radio" name="mode" value="preset" disabled="true">
+                  <span class="radioCheckmark"></span>
+                </label>
+              </div>
             </div>
-            <div class="container-2 options">
+            <div class="group-1 options">
+              <h2>Quality</h2>
+              <div class="container-2 options">
+                <div class="advanced-container">
+                  <button class="quality-btn">
+                    Quality:
+                  </button>
+                  <span class="quality-info" id="quality-info">75</span>
+                </div>
+                <input type="range" id="quality" min="0" max="100" value="75">
+              </div>
+              <div class="container-2 options">
                 <div class="advanced-container">
                   <button class="alphaQuality-btn">
-                    Transparency Compression Quality:
+                    Transparency Quality:
                   </button>
                   <span class="alphaQuality-info" id="alphaQuality-info">100</span>
                 </div>
                 <input type="range" id="alphaQuality" min="0" max="100" value="100">
               </div>
               <div class="container-2 options">
-                  <div class="advanced-container">
-                    <button class="cMethod-btn">
-                      Compression Method:
-                    </button>
-                    <span class="cMethod-info" id="cMethod-info">4</span>
-                  </div>
-                  <input type="range" id="cMethod" min="0" max="6" value="4">
+                <div class="advanced-container">
+                  <button class="cMethod-btn">
+                    Compression Method:
+                  </button>
+                  <span class="cMethod-info" id="cMethod-info">4</span>
                 </div>
-                <div class="container-2 options">
-                    <div class="advanced-container">
-                      <button class="segments-btn">
-                        Number of Segments:
-                      </button>
-                      <span class="segments-info" id="segments-info">4</span>
-                    </div>
-                    <input type="range" id="segments" min="1" max="4" value="4">
+                <input type="range" id="cMethod" min="0" max="6" value="4">
+              </div>
+            </div>
+            <div class="group-1 options">
+              <h2>Lossy Options</h2>
+              <div class="container-2 options">
+                <div class="advanced-container">
+                  <button class="segments-btn">
+                    Number of Segments:
+                  </button>
+                  <span class="segments-info" id="segments-info">4</span>
                 </div>
-                  <div class="container-2 options">
-                    <div class="advanced-container">
-                      <button class="targetSize-btn">
-                        Target File Size:
-                      </button>
-                      <div class="numberContainer"><input type="number" id="targetSize" min="1" step="1" value="1"> bytes </div><br>
-                      <button class="btn" id="originalSize">(original)</button>
-                    </div>
-                  </div>
-                  <div class="container-2 options">
-                      <div class="advanced-container">
-                        <button class="sns-btn">
-                          Spacial Noise Shaping:
-                        </button>
-                        <span class="sns-info" id="sns-info">50</span>
-                      </div>
-                      <input type="range" id="sns" min="0" max="100" value="50">
-                  </div>
+                <input type="range" id="segments" min="1" max="4" value="4">
+              </div>
+              <div class="container-2 options">
+                <div class="advanced-container">
+                  <button class="targetSize-btn">
+                    Target File Size:
+                  </button>
+                  <div class="numberContainer"><input type="number" id="targetSize" min="1" step="1" value="1"> bytes </div><br>
+                  <button class="btn" id="originalSize">(original)</button>
+                </div>
+              </div>
+              <div class="container-2 options">
+                <div class="advanced-container">
+                  <button class="sns-btn">
+                    Spacial Noise Shaping:
+                  </button>
+                  <span class="sns-info" id="sns-info">50</span>
+                </div>
+                <input type="range" id="sns" min="0" max="100" value="50">
+              </div>
+            </div>
           </div>
         </div>
         <div class="container-submit">
@@ -129,7 +168,7 @@
     // event listeners 
     /**********************/
     // Listen for the vanity input file button to be clicked.
-    // This fire the input file box click event.
+    // Then fire the input file box click event.
     inputUploadButton.addEventListener('click', () => {
       realInput.click();
     });

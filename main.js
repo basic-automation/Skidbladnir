@@ -14,9 +14,6 @@ function createWindow () {
     },
     icon: path.join(__dirname, 'resources/icons/icon-1024.png')
   })
-
-  
-
   // and load the index.html of the app.
   win.loadFile('index.html')
 
@@ -85,6 +82,7 @@ var sns = "";
 var mt = " -mt ";
 var af = " -af ";
 var targetSize = "";
+var alphaFilter = " -alpha_filter best ";
 
 
 // Define OS platform in order to load required executables
@@ -156,7 +154,7 @@ ipcMain.on('outputPath',function(e,outputPath){
   console.log('Output File: '+output);
 
   // Bring all inputs together into a shell script
-  cwebpShellScript = [af+mt+quality+alphaQuality+cMethod+segments+targetSize+sns+' "'+input+'"'+' -o "'+output+'"'];
+  cwebpShellScript = [af+mt+alphaFilter+quality+alphaQuality+cMethod+segments+targetSize+sns+' "'+input+'"'+' -o "'+output+'"'];
 
   // Send the shell script the convert function
   convertToWebp(cwebpShellScript);
