@@ -83,6 +83,7 @@ var mt = " -mt ";
 var af = " -af ";
 var targetSize = "";
 var alphaFilter = " -alpha_filter best ";
+var lossless = "";
 
 
 // Define OS platform in order to load required executables
@@ -128,6 +129,17 @@ ipcMain.on('fileSize',(event, filePath) =>{
 // Detect ipcMain data recived and assign data to variable
 ipcMain.on('inputPath',function(e,inputPath){input = inputPath;});
 
+ipcMain.on('lossless',function(e,losslessValue){
+  if(losslessValue=="true"){
+    lossless = ' -lossless -exact ';
+    console.log('Mode: Lossless');
+  }
+  else {
+    lossless='';
+    console.log('Mode: Lossless');
+  }
+});
+
 ipcMain.on('quality',function(e,qualityValue){quality = ' -q '+qualityValue; console.log('Quality Recieved: '+quality);});
 
 ipcMain.on('alphaQuality',function(e,alphaQualityValue){alphaQuality = ' -alpha_q '+alphaQualityValue; console.log('Alpha Quality Recieved: '+alphaQuality);});
@@ -154,7 +166,7 @@ ipcMain.on('outputPath',function(e,outputPath){
   console.log('Output File: '+output);
 
   // Bring all inputs together into a shell script
-  cwebpShellScript = [af+mt+alphaFilter+quality+alphaQuality+cMethod+segments+targetSize+sns+' "'+input+'"'+' -o "'+output+'"'];
+  cwebpShellScript = [lossless+af+mt+alphaFilter+quality+alphaQuality+cMethod+segments+targetSize+sns+' "'+input+'"'+' -o "'+output+'"'];
 
   // Send the shell script the convert function
   convertToWebp(cwebpShellScript);
@@ -188,15 +200,15 @@ async function convertToWebp(cwebpShellScript){
   proc.on('close', (code) => {
     console.log(`child process exited with code ${code}`);
     isConvertedWebP = code;
-    console.log(isConvertedWebP);
+    resetWebpScript();
   });
 }
 
 ipcMain.on('isConverted', (event, arg) => {  
-  console.log(arg);   // Print Im the message from the renderer
+  console.log("Conversion Type: "+arg);   // Print Im the message from the renderer
   if(arg == 'webp'){
     var j = 0;
-    var k = 5;
+    var k = 60;
     for (var i = 1; i <= k; i++) {
       var tick = function(i) {
           return function() {
@@ -209,20 +221,33 @@ ipcMain.on('isConverted', (event, arg) => {
           }
       };
       if(j==0){setTimeout(tick(i), 1000 * i);}
-      else{return;}
+      else{
+        console.log("Return Value: "+event.returnValue);
+        return;
+      }
     }
   }
+});
 
-    /*
-    var i = 5;
-    do{
-      if(fisConvertedWebP() != '0'){
-        i++;
-      }
-      else{
-        event.returnValue = isConvertedWebP.toString();
-      }
-    }while(i>0);
+function resetWebpScript(){
+  input ="";
+  output = "";
+  cwebpShellScript = "";
+  quality = "";
+  alphaQuality = "";
+  cMethod = "";
+  segments = "";
+  sns = "";
+  mt = " -mt ";
+  af = " -af ";
+  targetSize = "";
+  alphaFilter = " -alpha_filter best ";
+  lossless = "";
+  console.log("Webp Shell Script Reset.");
+}
+
+ipcMain.on('clear',function(e,type){
+  if(type == "webp"){
+    resetWebpScript();
   }
-  */
 });

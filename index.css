@@ -391,6 +391,38 @@ input[type=range]::-webkit-slider-thumb {
 }
 
 
+/************************
+// inactive Sliders
+*************************/
+
+.inactive input[type=range] {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 5px;  
+  background: var(--accent-inactive);
+  outline: none;
+  opacity: 1;
+  -webkit-transition: .2s;
+  transition: opacity .2s;
+  margin-top:12.5px;
+}
+.inactive input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 0%; 
+  background: var(--accent-inactive);
+  cursor: pointer;
+}
+
+.inactive .toggleAdvanced{
+  cursor: pointer;
+  display: block !important;
+  padding:10px;
+}
+
+
 
 input[type=number]
 {

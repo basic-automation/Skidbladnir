@@ -42,13 +42,13 @@
               </div>
               <div class="subcontainer-5">
                 <label class="radioContainer">Lossy
-                  <input type="radio" checked="checked" name="mode" value="lossy">
+                  <input type="radio" checked="checked" name="mode" value="lossy" id="modeLossy">
                   <span class="radioCheckmark"></span>
                 </label>
               </div>
-              <div class="subcontainer-5 inactive">
+              <div class="subcontainer-5">
                 <label class="radioContainer">Lossless
-                  <input type="radio" name="mode" value="lossless" disabled="true">
+                  <input type="radio" name="mode" value="lossless" id="modeLossless">
                   <span class="radioCheckmark"></span>
                 </label>
               </div>
@@ -76,7 +76,7 @@
                 </div>
                 <input type="range" id="quality" min="0" max="100" value="75">
               </div>
-              <div class="container-2 options">
+              <div id="alphaQuality-container" class="container-2 options">
                 <div class="advanced-container">
                   <button class="alphaQuality-btn">
                     Transparency Quality:
@@ -95,7 +95,7 @@
                 <input type="range" id="cMethod" min="0" max="6" value="4">
               </div>
             </div>
-            <div class="group-1 options">
+            <div id="lossyOptions" class="group-1 options">
               <h2>Lossy Options</h2>
               <div class="container-2 options">
                 <div class="advanced-container">
@@ -159,10 +159,14 @@
     const segments = document.getElementById('segments');
     const targetSize = document.getElementById('targetSize');
     const sns = document.getElementById('sns');
+    const modeLossless = document.getElementById('modeLossless');
+    const lossyOptions = document.getElementById('lossyOptions');
+    const modeLossy = document.getElementById('modeLossy');
 
     var inputPath = "";
     var outputPath = "";
     var advanced = false;
+    var appMode = "lossy";
 
     /**********************/
     // event listeners 
@@ -198,9 +202,49 @@
       realOutput.click();
     });
 
+    modeLossless.addEventListener('change', () => {
+      document.getElementById('alphaQuality-info').innerHTML = "100";
+      alphaQuality.value = 100;
+      document.getElementById('alphaQuality-container').className = "container-2 options inactive";
+      disableLossy();
+      hideLossy();
+      appMode = "lossless";
+    });
+
+    modeLossy.addEventListener('change', () => {
+      document.getElementById('alphaQuality-container').className = "container-2 options";
+      enableLossy();
+      unHideLossy();
+      appMode = "lossy";
+    });
+
+    function disableLossy(){
+      alphaQuality.setAttribute('disabled', 'true');
+      segments.setAttribute('disabled', 'true');
+      targetSize.setAttribute('disabled', 'true');
+      sns.setAttribute('disabled', 'true');
+    }
+
+    function enableLossy(){
+      alphaQuality.removeAttribute('disabled');
+      segments.removeAttribute('disabled');
+      targetSize.removeAttribute('disabled')
+      sns.removeAttribute('disabled');
+    }
+
+    function hideLossy(){
+      lossyOptions.style.display = "none";
+    }
+
+    function unHideLossy(){
+      lossyOptions.style.display = "inline-block";
+    }
+
+
 
     // Listen for a change in the value of the output file box.
     // Then change the vanity output box value to match.
+
     realOutput.addEventListener('change', () => {
       const name = realOutput.value.split(/\\|\//).pop();
       const truncated = name.length > 20 
@@ -270,25 +314,44 @@
         ipcRenderer.send('inputPath', inputPath); 
         console.log('Advanced:'+advanced.toString());
         if(advanced){
-          console.log('Quality: '+quality.value.toString());
-          console.log('Alpha Quality: '+alphaQuality.value.toString());
-          ipcRenderer.send('quality', quality.value.toString());
-          ipcRenderer.send('alphaQuality', alphaQuality.value.toString());
-          ipcRenderer.send('cMethod', cMethod.value.toString());
-          ipcRenderer.send('segments', segments.value.toString());
-          ipcRenderer.send('targetSize', targetSize.value.toString());
-          ipcRenderer.send('sns', sns.value.toString());
+          if(appMode == "lossless"){
+            console.log('Mode: Lossless');
+            ipcRenderer.send('lossless', 'true');
+            ipcRenderer.send('quality', quality.value.toString());
+            ipcRenderer.send('alphaQuality', alphaQuality.value.toString());
+            ipcRenderer.send('cMethod', cMethod.value.toString());
+          }
+          else if(appMode == "lossy"){
+            console.log("Mode: Lossy");
+            ipcRenderer.send('quality', quality.value.toString());
+            ipcRenderer.send('alphaQuality', alphaQuality.value.toString());
+            ipcRenderer.send('cMethod', cMethod.value.toString());
+            ipcRenderer.send('segments', segments.value.toString());
+            ipcRenderer.send('targetSize', targetSize.value.toString());
+            ipcRenderer.send('sns', sns.value.toString());
+          }
         }
         ipcRenderer.send('outputPath', outputPath);
         isconvertComplete();
-        //document.getElementById('convert').reset();
+        formReset(appMode);
+      }
+    }
+
+    function formReset(mode){
+      if(mode == "lossy"){
         document.getElementById('inputPath').value = "";
         document.getElementById('input-file-info').textContent = "Select a file";
-        document.getElementById('outputPath').value = "";
-        document.getElementById('output-file-info').textContent = "Select a directory";
+        //document.getElementById('outputPath').value = "";
+        //document.getElementById('output-file-info').textContent = "Select a directory";
         document.getElementById('fabImg').style.opacity = 0;
       }
-     
+      if(mode == "lossless"){
+        document.getElementById('inputPath').value = "";
+        document.getElementById('input-file-info').textContent = "Select a file";
+        //document.getElementById('outputPath').value = "";
+        //document.getElementById('output-file-info').textContent = "Select a directory";
+        //document.getElementById('fabImg').style.opacity = 0;
+      }
     }
 
     function formCheck(){
@@ -323,32 +386,38 @@
 
     async function isconvertComplete(){
       ipcRenderer.sendSync('isConverted', 'webp');
-      console.log(ipcRenderer.sendSync('isConverted', 'webp'));
+
+      var j = 0;
+      var k = 10;
       var isconverted = ipcRenderer.sendSync('isConverted', 'webp').toString();
-      console.log(isconverted);
+      console.log("Completion Code: "+isconverted);
 
-      if(isconverted == '0'){
-        setTimeout(function(){
-          document.getElementById('fabImg').src = './resources/images/check-mark.svg';
-          document.getElementById('fabImg').style.opacity = "1";
-          document.getElementById('fab').style.backgroundColor = 'rgba(71,171,108)';
-        }, 500);
+        if(isconverted == '0'){
+          setTimeout(function(){
+            console.log("Animation 1");
+            document.getElementById('fabImg').src = './resources/images/check-mark.svg';
+            document.getElementById('fabImg').style.opacity = "1";
+            document.getElementById('fab').style.backgroundColor = 'rgba(71,171,108)';
+          }, 500);
 
-        setTimeout(function(){ 
-          document.getElementById('fabImg').style.opacity = "0";
-        }, 2500);  
+          setTimeout(function(){ 
+            console.log("Animation 2");
+            document.getElementById('fabImg').style.opacity = "0";
+          }, 2500);  
 
-        setTimeout(function(){ 
-          document.getElementById('fabImg').src = './resources/images/thumbs-up.svg';
-          document.getElementById('fabImg').style.opacity = "1";
-          document.getElementById('fab').style.backgroundColor = 'rgba(71,171,108)';
-        }, 3000);
-        
-      }
-      else
-      {
-        document.getElementById('fab').style.backgroundColor = red;
-      }
+          setTimeout(function(){
+            console.log("Animation 3");
+            document.getElementById('fabImg').src = './resources/images/thumbs-up.svg';
+            document.getElementById('fabImg').style.opacity = "1";
+            document.getElementById('fab').style.backgroundColor = 'rgba(71,171,108)';
+          }, 3000);
+        }
+        else
+        {
+          console.log("Animation Else");
+          document.getElementById('fab').style.backgroundColor = red;
+        }
+        ipcRenderer.send('clear', "webp");
     }
 
     function optionsClick(){
