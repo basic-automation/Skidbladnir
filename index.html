@@ -29,7 +29,7 @@
           </div>
           <span class="submition-error" id="outputError"></span>
         </div>
-        <div class="container-1">
+        <div class="container-0">
           <div class="advanced" id="advanced">
             <div class="options visible toggleAdvanced" onclick="optionsClick()">--- Advanced Options ---</div>
             <div class="group-1 options">
@@ -67,7 +67,7 @@
             </div>
             <div class="group-1 options">
               <h2>Quality</h2>
-              <div class="container-2 options">
+              <div class="container-1 options">
                 <div class="advanced-container">
                   <button class="quality-btn">
                     Quality:
@@ -97,6 +97,62 @@
             </div>
             <div id="lossyOptions" class="group-1 options">
               <h2>Lossy Options</h2>
+              <div id="lossyFilterOptions" class="group-1 options">
+                <h2>File Size</h2>
+                <div class="container-1 options">
+                  <div class="advanced-container">
+                    <button class="targetSize-btn">
+                      Target Size:
+                    </button>
+                    <div class="numberContainer"><input type="number" id="targetSize" min="1" step="1" value="1"> bytes </div><br>
+                    <button class="btn" id="originalSize">(original)</button>
+                  </div>
+                </div>
+              </div>
+              <div id="lossyFilterOptions" class="group-1 options">
+                <h2>Deblocking Filter Options</h2>
+                <div class="subcontainer-5">
+                  <label class="radioContainer">Custom Filter
+                    <input id="filterCustom" type="radio" name="filterType" value="custom">
+                    <span class="radioCheckmark"></span>
+                  </label>
+                </div>
+                <div class="subcontainer-5">
+                  <label class="radioContainer">Auto Filter
+                    <input id="filterAuto" type="radio" checked="checked" name="filterType" value="auto">
+                    <span class="radioCheckmark"></span>
+                  </label>
+              </div>
+              <div id="filterStrengthContainer" class="container-2 options inactive">
+                <div class="advanced-container">
+                  <button class="filterStrength-btn">
+                    Strength:
+                  </button>
+                  <span class="filterStrength-info" id="filterStrength-info">20</span>
+                </div>
+                <input type="range" id="filterStrength" min="0" max="100" value="20" disabled="true">
+              </div>
+              <div id="filterSharpContainer" class="container-2 options inactive">
+                <div class="advanced-container">
+                  <button class="filterSharp-btn">
+                    Sharpness:
+                  </button>
+                  <span class="filterSharp-info" id="filterSharp-info">0</span>
+                </div>
+                <input class="reversedInput" type="range" id="filterSharp" min="0" max="7" value="0" disabled="true">
+              </div>
+            </div>
+            <div id="lossyNoiseOptions" class="group-1 options">
+              <h2>Noise Shaping</h2>
+              <div class="container-2 options">
+                <div class="advanced-container">
+                  <button class="sns-btn">
+                    Amplitude:
+                  </button>
+                  <span class="sns-info" id="sns-info">50</span>
+                </div>
+                <input type="range" id="sns" min="0" max="100" value="50">
+              </div>
               <div class="container-2 options">
                 <div class="advanced-container">
                   <button class="segments-btn">
@@ -104,25 +160,7 @@
                   </button>
                   <span class="segments-info" id="segments-info">4</span>
                 </div>
-                <input type="range" id="segments" min="1" max="4" value="4">
-              </div>
-              <div class="container-2 options">
-                <div class="advanced-container">
-                  <button class="targetSize-btn">
-                    Target File Size:
-                  </button>
-                  <div class="numberContainer"><input type="number" id="targetSize" min="1" step="1" value="1"> bytes </div><br>
-                  <button class="btn" id="originalSize">(original)</button>
-                </div>
-              </div>
-              <div class="container-2 options">
-                <div class="advanced-container">
-                  <button class="sns-btn">
-                    Spacial Noise Shaping:
-                  </button>
-                  <span class="sns-info" id="sns-info">50</span>
-                </div>
-                <input type="range" id="sns" min="0" max="100" value="50">
+                <input class="reversedInput" type="range" id="segments" min="1" max="4" value="4">
               </div>
             </div>
           </div>
@@ -162,11 +200,16 @@
     const modeLossless = document.getElementById('modeLossless');
     const lossyOptions = document.getElementById('lossyOptions');
     const modeLossy = document.getElementById('modeLossy');
+    const filterAuto = document.getElementById('filterAuto');
+    const filterCustom = document.getElementById('filterCustom');
+    const filterStrength = document.getElementById('filterStrength');
+    const filterSharp = document.getElementById('filterSharp');
 
     var inputPath = "";
     var outputPath = "";
     var advanced = false;
     var appMode = "lossy";
+    var isAF = "auto";
 
     /**********************/
     // event listeners 
@@ -240,6 +283,39 @@
       lossyOptions.style.display = "inline-block";
     }
 
+    filterAuto.addEventListener('change', () => {
+      disableCustomFilter();
+      isAF = "auto";
+    });
+
+    filterCustom.addEventListener('change', () => {
+      enableCustomFilter();
+      isAF = "custom";
+    });
+
+    function disableCustomFilter(){
+      filterStrength.setAttribute('disabled', 'true');
+      document.getElementById('filterStrengthContainer').className = "container-2 options inactive";
+
+      filterSharp.setAttribute('disabled', 'true');
+      document.getElementById('filterSharpContainer').className = "container-2 options inactive";
+    }
+
+    function enableCustomFilter(){
+      filterStrength.removeAttribute('disabled');
+      document.getElementById('filterStrengthContainer').className = "container-2 options";
+
+      filterSharp.removeAttribute('disabled');
+      document.getElementById('filterSharpContainer').className = "container-2 options";
+    }
+
+    filterStrength.addEventListener('change', () => {
+      document.getElementById('filterStrength-info').textContent = filterStrength.value.toString();
+    });
+
+    filterSharp.addEventListener('change', () => {
+      document.getElementById('filterSharp-info').textContent = filterSharp.value.toString();
+    });
 
 
     // Listen for a change in the value of the output file box.
@@ -329,6 +405,11 @@
             ipcRenderer.send('segments', segments.value.toString());
             ipcRenderer.send('targetSize', targetSize.value.toString());
             ipcRenderer.send('sns', sns.value.toString());
+            ipcRenderer.send('isAF', isAF);
+            if(isAF == "custom"){
+              ipcRenderer.send('filterStrength', filterStrength.value.toString());
+              ipcRenderer.send('filterSharp', filterSharp.value.toString());
+            }
           }
         }
         ipcRenderer.send('outputPath', outputPath);

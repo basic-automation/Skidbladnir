@@ -91,22 +91,38 @@ h1{
     max-height: 500px;
 }
 
-/* Cell where there are two collumns */
-.container-1{
+.container-0{
   display: inline-block;
-  width: calc(100vw - 60px);
-  padding: 20px;
-  margin: 20px;
+  width: calc(100% - 10px);
+  padding: 0px;
+  margin-top: 0px;
+  margin-bottom: 0px;
+  margin-left: 5px;
+  margin-right: 5px;
   align-content: center;
   vertical-align: middle;
   text-align: center;
+  border-width: 0px;
+}
+
+.container-1{
+  display: inline-block;
+  width: calc(100% - 14px);
+  padding: 0px;
+  margin: 5px;
+  align-content: center;
+  vertical-align: middle;
+  text-align: center;
+  border-width: 2px
 }
 
 .container-2{
   display: inline-block;
-  width: calc(50% - 83px);
-  padding: 20px;
-  margin: 20px;
+  width: calc(50% - 12px);
+  padding: 0px;
+  margin-left: 5px;
+  margin-top: 10px;
+  margin-bottom:10px;
   align-content: center;
   vertical-align: middle;
   text-align: center;
@@ -114,9 +130,9 @@ h1{
 
 .group-1{
   display: inline-block;
-  width: calc(100% - 83px);
-  padding: 5px;
-  margin: 20px;
+  width: calc(100% - 24px);
+  padding: 0px;
+  margin: 10px;
   align-content: center;
   vertical-align: middle;
   text-align: center;
@@ -345,6 +361,28 @@ input[type="button" i]:active{
   width:100%;
 }
 
+.filterStrength-btn {
+  background: var(--main-color);
+  color: var(--accent-color);
+  min-height: 35px;
+  padding: 10px;
+  border: none;
+}
+.filterStrength-info {
+  font-size: 0.9em;
+}
+
+.filterSharp-btn {
+  background: var(--main-color);
+  color: var(--accent-color);
+  min-height: 35px;
+  padding: 10px;
+  border: none;
+}
+.filterSharp-info {
+  font-size: 0.9em;
+}
+
 .advanced-container{
   color: var(--main-color);
   background-color: var(--accent-color);
@@ -361,6 +399,10 @@ input[type="button" i]:active{
 /************************
 // Sliders
 *************************/
+
+.reversedInput{
+  direction: rtl;
+}
 
 input[type=range] {
   -webkit-appearance: none;

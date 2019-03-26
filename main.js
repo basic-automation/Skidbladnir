@@ -80,10 +80,13 @@ var cMethod = "";
 var segments = "";
 var sns = "";
 var mt = " -mt ";
-var af = " -af ";
+var af = "";
 var targetSize = "";
 var alphaFilter = " -alpha_filter best ";
 var lossless = "";
+var filterStrength = "";
+var filterSharp = "";
+
 
 
 // Define OS platform in order to load required executables
@@ -136,7 +139,7 @@ ipcMain.on('lossless',function(e,losslessValue){
   }
   else {
     lossless='';
-    console.log('Mode: Lossless');
+    console.log('Mode: Lossy');
   }
 });
 
@@ -152,6 +155,19 @@ ipcMain.on('targetSize',function(e,targetSizeValue){targetSize = ' -size '+targe
 
 ipcMain.on('sns',function(e,snsValue){sns = ' -sns '+snsValue; console.log('Spatial Noise Shaping Recieved: '+sns);});
 
+ipcMain.on('isAF',function(e,filterTypeValue){
+  if(lossless != ' -lossless -exact ' && filterTypeValue != 'custom'){
+    af = " -af ";
+  }
+  else{
+    af = "";
+  }
+});
+
+ipcMain.on('filterStrength',function(e,filterStrengthValue){filterStrength = ' -f '+filterStrengthValue; console.log('Filter Strength Recieved: '+filterStrength);});
+
+ipcMain.on('filterSharp',function(e,filterSharpValue){filterSharp = ' -sharpness '+filterSharpValue; console.log('Filter Strength Recieved: '+filterSharp);});
+
 
 // Detect ipcMain data recived and assign it to a variable
 // Because it is know that this data will be send last we can
@@ -166,7 +182,7 @@ ipcMain.on('outputPath',function(e,outputPath){
   console.log('Output File: '+output);
 
   // Bring all inputs together into a shell script
-  cwebpShellScript = [lossless+af+mt+alphaFilter+quality+alphaQuality+cMethod+segments+targetSize+sns+' "'+input+'"'+' -o "'+output+'"'];
+  cwebpShellScript = [lossless+af+mt+filterStrength+filterSharp+alphaFilter+quality+alphaQuality+cMethod+segments+targetSize+sns+' "'+input+'"'+' -o "'+output+'"'];
 
   // Send the shell script the convert function
   convertToWebp(cwebpShellScript);
@@ -239,10 +255,12 @@ function resetWebpScript(){
   segments = "";
   sns = "";
   mt = " -mt ";
-  af = " -af ";
+  af = "";
   targetSize = "";
   alphaFilter = " -alpha_filter best ";
   lossless = "";
+  filterStrength = "";
+  filterSharp = "";
   console.log("Webp Shell Script Reset.");
 }
 
