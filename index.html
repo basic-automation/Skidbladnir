@@ -129,7 +129,16 @@
                     </button>
                     <span class="targetPSNR-info" id="targetPSNR-info">10000</span>
                   </div>
-                  <input type="range" id="targetPSNR" step="1" min="1" max="10000" value=10000" disabled>
+                  <input type="range" id="targetPSNR" step="1" min="1" max="10000" value="10000" disabled>
+                </div>
+                <div  id="passes-container" class="container-2 options">
+                  <div class="advanced-container">
+                    <button class="passes-btn">
+                      Number of Passes:
+                    </button>
+                    <span class="passes-info" id="passes-info">6</span>
+                  </div>
+                  <input type="range" id="passes" step="1" min="1" max="10" value="6">
                 </div>
               </div>
               <div id="lossyFilterOptions" class="group-1 options">
@@ -239,6 +248,7 @@
     const targetPSNR = document.getElementById('targetPSNR');
     const compressionFS = document.getElementById('compressionFS');
     const compressionPSNR = document.getElementById('compressionPSNR');
+    const passes = document.getElementById('passes');
 
     var inputPath = "";
     var outputPath = "";
@@ -275,6 +285,7 @@
 
       ipcRenderer.sendSync('maxPSNR', document.querySelector('#inputPath').files[0].path);
       var returnPSNR = ipcRenderer.sendSync('maxPSNR', document.querySelector('#inputPath').files[0].path);
+      returnPSNR = parseInt(returnPSNR*1.2);
       console.log("Returned PSNR: "+returnPSNR);
       targetPSNR.setAttribute("max", returnPSNR.toString());
       targetPSNR.value = returnPSNR;
@@ -381,6 +392,10 @@
       document.getElementById('targetPSNR-info').textContent = targetPSNR.value.toString();
     });
 
+    passes.addEventListener('change',()=>{
+      document.getElementById('passes-info').textContent = passes.value.toString();
+    });
+
 
 
     // Listen for a change in the value of the output file box.
@@ -468,6 +483,7 @@
             ipcRenderer.send('alphaQuality', alphaQuality.value.toString());
             ipcRenderer.send('cMethod', cMethod.value.toString());
             ipcRenderer.send('segments', segments.value.toString());
+            ipcRenderer.send('passes', passes.value.toString());
             if(compressionType == "fileSize"){
               ipcRenderer.send('targetSize', targetSize.value.toString());
             } else {

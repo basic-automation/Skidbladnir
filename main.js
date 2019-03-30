@@ -89,6 +89,7 @@ var proc = spawn;
 var isConvertedWebP = "";
 var maxPSNR;
 var PSNR;
+var passes;
 
 
 // Define OS platform in order to load required executables
@@ -193,6 +194,8 @@ ipcMain.on('filterSharp',function(e,filterSharpValue){filterSharp = ' -sharpness
 
 ipcMain.on('PSNR',function(e,PSNRValue){PSNR = ' -print_psnr -psnr '+PSNRValue; console.log('PSNR Recieved: '+PSNR);});
 
+ipcMain.on('passes',function(e,passesValue){passes = ' -pass '+passesValue; console.log('PSNR Recieved: '+passes);});
+
 
 // Detect ipcMain data recived and assign it to a variable
 // Because it is know that this data will be send last we can
@@ -207,7 +210,7 @@ ipcMain.on('outputPath',function(e,outputPath){
   console.log('Output File: '+output);
 
   // Bring all inputs together into a shell script
-  cwebpShellScript = [lossless+af+mt+filterStrength+filterSharp+alphaFilter+quality+alphaQuality+cMethod+segments+targetSize+PSNR+sns+' "'+input+'"'+' -o "'+output+'"'];
+  cwebpShellScript = [lossless+af+mt+filterStrength+filterSharp+alphaFilter+quality+alphaQuality+cMethod+segments+targetSize+PSNR+passes+sns+' "'+input+'"'+' -o "'+output+'"'];
 
   // Send the shell script the convert function
   convertToWebp(cwebpShellScript);

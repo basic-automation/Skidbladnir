@@ -394,6 +394,18 @@ input[type="button" i]:active{
   font-size: 0.9em;
 }
 
+
+.passes-btn {
+  background: var(--main-color);
+  color: var(--accent-color);
+  min-height: 35px;
+  padding: 10px;
+  border: none;
+}
+.passes-info {
+  font-size: 0.9em;
+}
+
 .advanced-container{
   color: var(--main-color);
   background-color: var(--accent-color);
