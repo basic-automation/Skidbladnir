@@ -95,7 +95,7 @@ h1{
   display: inline-block;
   width: calc(100% - 10px);
   padding: 0px;
-  margin-top: 0px;
+  margin-top: 40px;
   margin-bottom: 0px;
   margin-left: 5px;
   margin-right: 5px;
@@ -113,7 +113,7 @@ h1{
   align-content: center;
   vertical-align: middle;
   text-align: center;
-  border-width: 2px
+  border-width: 0px;
 }
 
 .container-2{
@@ -380,6 +380,17 @@ input[type="button" i]:active{
   border: none;
 }
 .filterSharp-info {
+  font-size: 0.9em;
+}
+
+.targetPSNR-btn {
+  background: var(--main-color);
+  color: var(--accent-color);
+  min-height: 35px;
+  padding: 10px;
+  border: none;
+}
+.targetPSNR-info {
   font-size: 0.9em;
 }
 

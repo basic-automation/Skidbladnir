@@ -66,8 +66,7 @@ const spawn = require('child_process').spawn;
 const assert = require('assert');
 const fs = require('fs');
 const {chunksToLinesAsync, chomp} = require('@rauschma/stringio');
-var proc = spawn;
-var isConvertedWebP = "";
+
 
 // Define variables
 var binariesPath = path.join("./resources","./bin");
@@ -86,7 +85,10 @@ var alphaFilter = " -alpha_filter best ";
 var lossless = "";
 var filterStrength = "";
 var filterSharp = "";
-
+var proc = spawn;
+var isConvertedWebP = "";
+var maxPSNR;
+var PSNR;
 
 
 // Define OS platform in order to load required executables
@@ -129,6 +131,24 @@ ipcMain.on('fileSize',(event, filePath) =>{
   event.returnValue = fileStats['size'];
 });
 
+ipcMain.on('maxPSNR',(event, value) =>{
+  var psnrCMD = cwebpPath+" "+value+" -q 100 -m 6 -psnr 10000 -print_psnr -short";
+  proc = spawn(psnrCMD,[],{ 
+    shell: true,
+    stdio:['pipe', 'pipe', 'pipe','pipe','pipe']
+  });
+
+  proc.stderr.on('data', (data) => {
+    var data = data.toString();
+    maxPSNR = data.split(" ");
+    console.log(`stderr: ${data}`);
+    console.log('maxPSNR: '+maxPSNR[2]);
+    maxPSNR[2] = parseInt(maxPSNR[2]);
+    console.log('Sending maxPSNR: '+maxPSNR[2]);
+    event.returnValue = maxPSNR[2];
+  });
+});
+
 // Detect ipcMain data recived and assign data to variable
 ipcMain.on('inputPath',function(e,inputPath){input = inputPath;});
 
@@ -156,17 +176,22 @@ ipcMain.on('targetSize',function(e,targetSizeValue){targetSize = ' -size '+targe
 ipcMain.on('sns',function(e,snsValue){sns = ' -sns '+snsValue; console.log('Spatial Noise Shaping Recieved: '+sns);});
 
 ipcMain.on('isAF',function(e,filterTypeValue){
-  if(lossless != ' -lossless -exact ' && filterTypeValue != 'custom'){
+  if(lossless != ' -lossless -exact ' && filterTypeValue != 'simple' && filterTypeValue != 'strong'){
     af = " -af ";
   }
+  else if(filterTypeValue == 'simple'){
+    af = " -nostrong ";
+  }
   else{
-    af = "";
+    af = " -strong ";
   }
 });
 
 ipcMain.on('filterStrength',function(e,filterStrengthValue){filterStrength = ' -f '+filterStrengthValue; console.log('Filter Strength Recieved: '+filterStrength);});
 
 ipcMain.on('filterSharp',function(e,filterSharpValue){filterSharp = ' -sharpness '+filterSharpValue; console.log('Filter Strength Recieved: '+filterSharp);});
+
+ipcMain.on('PSNR',function(e,PSNRValue){PSNR = ' -print_psnr -psnr '+PSNRValue; console.log('PSNR Recieved: '+PSNR);});
 
 
 // Detect ipcMain data recived and assign it to a variable
@@ -182,7 +207,7 @@ ipcMain.on('outputPath',function(e,outputPath){
   console.log('Output File: '+output);
 
   // Bring all inputs together into a shell script
-  cwebpShellScript = [lossless+af+mt+filterStrength+filterSharp+alphaFilter+quality+alphaQuality+cMethod+segments+targetSize+sns+' "'+input+'"'+' -o "'+output+'"'];
+  cwebpShellScript = [lossless+af+mt+filterStrength+filterSharp+alphaFilter+quality+alphaQuality+cMethod+segments+targetSize+PSNR+sns+' "'+input+'"'+' -o "'+output+'"'];
 
   // Send the shell script the convert function
   convertToWebp(cwebpShellScript);

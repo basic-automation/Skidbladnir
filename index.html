@@ -98,8 +98,22 @@
             <div id="lossyOptions" class="group-1 options">
               <h2>Lossy Options</h2>
               <div id="lossyFilterOptions" class="group-1 options">
-                <h2>File Size</h2>
-                <div class="container-1 options">
+                <h2>Compression</h2>
+                <div class="container-1">
+                  <div class="subcontainer-5">
+                    <label class="radioContainer">File Size
+                      <input id="compressionFS" type="radio" checked="checked" name="compression" value="auto">
+                      <span class="radioCheckmark"></span>
+                    </label>
+                  </div>
+                  <div class="subcontainer-5">
+                    <label class="radioContainer">Peak Signal to Noise Ratio
+                      <input id="compressionPSNR" type="radio" name="compression" value="auto">
+                      <span class="radioCheckmark"></span>
+                    </label>
+                  </div>
+                </div>
+                <div class="container-2 options">
                   <div class="advanced-container">
                     <button class="targetSize-btn">
                       Target Size:
@@ -108,21 +122,38 @@
                     <button class="btn" id="originalSize">(original)</button>
                   </div>
                 </div>
+                <div  id="PSNR-container" class="container-2 options inactive">
+                  <div class="advanced-container">
+                    <button class="targetPSNR-btn">
+                      Target PSNR (dB):
+                    </button>
+                    <span class="targetPSNR-info" id="targetPSNR-info">10000</span>
+                  </div>
+                  <input type="range" id="targetPSNR" step="1" min="1" max="10000" value=10000" disabled>
+                </div>
               </div>
               <div id="lossyFilterOptions" class="group-1 options">
                 <h2>Deblocking Filter Options</h2>
-                <div class="subcontainer-5">
-                  <label class="radioContainer">Custom Filter
-                    <input id="filterCustom" type="radio" name="filterType" value="custom">
-                    <span class="radioCheckmark"></span>
-                  </label>
+                <div class="container-1">
+                  <div class="subcontainer-5">
+                    <label class="radioContainer">Auto Filter
+                      <input id="filterAuto" type="radio" checked="checked" name="filterType" value="auto">
+                      <span class="radioCheckmark"></span>
+                    </label>
+                  </div>
+                  <div class="subcontainer-5">
+                    <label class="radioContainer">Strong Filter
+                      <input id="strongFilterCustom" type="radio" name="filterType" value="strong">
+                      <span class="radioCheckmark"></span>
+                    </label>
+                  </div>
+                  <div class="subcontainer-5">
+                    <label class="radioContainer">Simple Filter
+                      <input id="simpleFilterCustom" type="radio" name="filterType" value="simple">
+                      <span class="radioCheckmark"></span>
+                    </label>
+                  </div>
                 </div>
-                <div class="subcontainer-5">
-                  <label class="radioContainer">Auto Filter
-                    <input id="filterAuto" type="radio" checked="checked" name="filterType" value="auto">
-                    <span class="radioCheckmark"></span>
-                  </label>
-              </div>
               <div id="filterStrengthContainer" class="container-2 options inactive">
                 <div class="advanced-container">
                   <button class="filterStrength-btn">
@@ -201,15 +232,20 @@
     const lossyOptions = document.getElementById('lossyOptions');
     const modeLossy = document.getElementById('modeLossy');
     const filterAuto = document.getElementById('filterAuto');
-    const filterCustom = document.getElementById('filterCustom');
+    const strongFilterCustom = document.getElementById('strongFilterCustom');
+    const simpleFilterCustom = document.getElementById('simpleFilterCustom');
     const filterStrength = document.getElementById('filterStrength');
     const filterSharp = document.getElementById('filterSharp');
+    const targetPSNR = document.getElementById('targetPSNR');
+    const compressionFS = document.getElementById('compressionFS');
+    const compressionPSNR = document.getElementById('compressionPSNR');
 
     var inputPath = "";
     var outputPath = "";
     var advanced = false;
     var appMode = "lossy";
     var isAF = "auto";
+    var compressionType = "fileSize";
 
     /**********************/
     // event listeners 
@@ -236,6 +272,13 @@
       console.log('File Size: '+filesize);
       document.getElementById('originalSize').textContent = filesize+' bytes (original)';
       document.getElementById('targetSize').value = filesize;
+
+      ipcRenderer.sendSync('maxPSNR', document.querySelector('#inputPath').files[0].path);
+      var returnPSNR = ipcRenderer.sendSync('maxPSNR', document.querySelector('#inputPath').files[0].path);
+      console.log("Returned PSNR: "+returnPSNR);
+      targetPSNR.setAttribute("max", returnPSNR.toString());
+      targetPSNR.value = returnPSNR;
+      document.getElementById('targetPSNR-info').textContent = returnPSNR;
     });
 
 
@@ -288,9 +331,26 @@
       isAF = "auto";
     });
 
-    filterCustom.addEventListener('change', () => {
+    strongFilterCustom.addEventListener('change', () => {
       enableCustomFilter();
-      isAF = "custom";
+      isAF = "strong";
+    });
+
+    simpleFilterCustom.addEventListener('change', () => {
+      enableCustomFilter();
+      isAF = "simple";
+    });
+
+    compressionFS.addEventListener('change', () => {
+      document.getElementById('PSNR-container').className = "container-2 options inactive";
+      targetPSNR.setAttribute('disabled', 'true');
+      compressionType = "fileSize";
+    });
+
+    compressionPSNR.addEventListener('change', () => {
+      document.getElementById('PSNR-container').className = "container-2 options";
+      targetPSNR.removeAttribute('disabled');
+      compressionType = "PSNR";
     });
 
     function disableCustomFilter(){
@@ -316,6 +376,11 @@
     filterSharp.addEventListener('change', () => {
       document.getElementById('filterSharp-info').textContent = filterSharp.value.toString();
     });
+
+    targetPSNR.addEventListener('change',()=>{
+      document.getElementById('targetPSNR-info').textContent = targetPSNR.value.toString();
+    });
+
 
 
     // Listen for a change in the value of the output file box.
@@ -403,10 +468,14 @@
             ipcRenderer.send('alphaQuality', alphaQuality.value.toString());
             ipcRenderer.send('cMethod', cMethod.value.toString());
             ipcRenderer.send('segments', segments.value.toString());
-            ipcRenderer.send('targetSize', targetSize.value.toString());
+            if(compressionType == "fileSize"){
+              ipcRenderer.send('targetSize', targetSize.value.toString());
+            } else {
+              ipcRenderer.send('PSNR', targetPSNR.value.toString());
+            }
             ipcRenderer.send('sns', sns.value.toString());
             ipcRenderer.send('isAF', isAF);
-            if(isAF == "custom"){
+            if(isAF == "simple" || isAF == "strong"){
               ipcRenderer.send('filterStrength', filterStrength.value.toString());
               ipcRenderer.send('filterSharp', filterSharp.value.toString());
             }
