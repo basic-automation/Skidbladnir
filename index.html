@@ -34,9 +34,9 @@
             <div class="options visible toggleAdvanced" onclick="optionsClick()">--- Advanced Options ---</div>
             <div class="group-1 options">
               <div><h2>Mode</h2></div>
-              <div class="subcontainer-5 inactive">
+              <div class="subcontainer-5">
                 <label class="radioContainer">JPEG Like
-                  <input type="radio" name="mode" value="jpegLike" disabled="true">
+                  <input type="radio" name="mode" value="jpegLike" id="modeJPEGLike">
                   <span class="radioCheckmark"></span>
                 </label>
               </div>
@@ -249,6 +249,7 @@
     const compressionFS = document.getElementById('compressionFS');
     const compressionPSNR = document.getElementById('compressionPSNR');
     const passes = document.getElementById('passes');
+    const modeJPEGLike = document.getElementById('modeJPEGLike');
 
     var inputPath = "";
     var outputPath = "";
@@ -303,7 +304,7 @@
       document.getElementById('alphaQuality-info').innerHTML = "100";
       alphaQuality.value = 100;
       document.getElementById('alphaQuality-container').className = "container-2 options inactive";
-      disableLossy();
+      enableLossless();
       hideLossy();
       appMode = "lossless";
     });
@@ -315,7 +316,16 @@
       appMode = "lossy";
     });
 
-    function disableLossy(){
+    modeJPEGLike.addEventListener('change', () => {
+      document.getElementById('alphaQuality-info').innerHTML = "0";
+      alphaQuality.value = 0;
+      document.getElementById('alphaQuality-container').className = "container-2 options inactive";
+      enableLossless();
+      hideLossy();
+      appMode = "JPEGLike";
+    });
+
+    function enableLossless(){
       alphaQuality.setAttribute('disabled', 'true');
       segments.setAttribute('disabled', 'true');
       targetSize.setAttribute('disabled', 'true');
@@ -486,7 +496,8 @@
             ipcRenderer.send('passes', passes.value.toString());
             if(compressionType == "fileSize"){
               ipcRenderer.send('targetSize', targetSize.value.toString());
-            } else {
+            } 
+            else {
               ipcRenderer.send('PSNR', targetPSNR.value.toString());
             }
             ipcRenderer.send('sns', sns.value.toString());
@@ -495,6 +506,13 @@
               ipcRenderer.send('filterStrength', filterStrength.value.toString());
               ipcRenderer.send('filterSharp', filterSharp.value.toString());
             }
+          }
+          else if(appMode == "JPEGLike"){
+            console.log('Mode: JPEG Like');
+            ipcRenderer.send('JPEGLike', 'true');
+            ipcRenderer.send('quality', quality.value.toString());
+            ipcRenderer.send('alphaQuality', alphaQuality.value.toString());
+            ipcRenderer.send('cMethod', cMethod.value.toString());
           }
         }
         ipcRenderer.send('outputPath', outputPath);
