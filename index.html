@@ -52,9 +52,9 @@
                   <span class="radioCheckmark"></span>
                 </label>
               </div>
-              <div class="subcontainer-5 inactive">
+              <div class="subcontainer-5">
                 <label class="radioContainer">Near Lossless
-                  <input type="radio" name="mode" value="nearLossless" disabled="true">
+                  <input type="radio" name="mode" value="nearLossless" id="modeNearLossless">
                   <span class="radioCheckmark"></span>
                 </label>
               </div>
@@ -69,7 +69,7 @@
               <h2>Quality</h2>
               <div id="presetType-container" class="container-2 options inactive">
                 <select id="presetType" disabled="true">
-                  <option value="select">Select an Option</option>
+                  <option value="select">Select a Preset</option>
                   <option value="default">Default</option>
                   <option value="photo">Photo</option>
                   <option value="picture">Picture</option>
@@ -125,7 +125,7 @@
                     </label>
                   </div>
                 </div>
-                <div class="container-2 options">
+                <div id="fileSize-container" class="container-2 options">
                   <div class="advanced-container">
                     <button class="targetSize-btn">
                       Target Size:
@@ -264,6 +264,7 @@
     const modeJPEGLike = document.getElementById('modeJPEGLike');
     const modePreset = document.getElementById('modePreset');
     const presetType = document.getElementById('presetType');
+    const modeNearLossless = document.getElementById('modeNearLossless');
 
     var inputPath = "";
     var outputPath = "";
@@ -357,6 +358,17 @@
       appMode = "preset";
     });
 
+    modeNearLossless.addEventListener('change', () => {
+      document.getElementById('presetType-container').className = "container-2 options inactive";
+      presetType.setAttribute('disabled', 'true');
+      quality.value = 100;
+      document.getElementById('quality-info').textContent = "100";
+      enableLossless();
+      hideLossy();
+      qualityOnly(true);
+      appMode = "nearLossless";
+    });
+
     function qualityOnly(state){
       if(state){
         document.getElementById('alphaQuality-container').className = "container-2 options inactive";
@@ -414,10 +426,14 @@
     compressionFS.addEventListener('change', () => {
       document.getElementById('PSNR-container').className = "container-2 options inactive";
       targetPSNR.setAttribute('disabled', 'true');
+      document.getElementById('fileSize-container').className = "container-2 options";
+      targetSize.removeAttribute('disabled');
       compressionType = "fileSize";
     });
 
     compressionPSNR.addEventListener('change', () => {
+      document.getElementById('fileSize-container').className = "container-2 options inactive";
+      targetSize.setAttribute('disabled', 'true');
       document.getElementById('PSNR-container').className = "container-2 options";
       targetPSNR.removeAttribute('disabled');
       compressionType = "PSNR";
@@ -566,6 +582,9 @@
           else if(appMode == "preset"){
             ipcRenderer.send('preset', presetType.value.toString());
             ipcRenderer.send('quality', quality.value.toString());
+          }
+          else if(appMode == "nearLossless"){
+            ipcRenderer.send('nearLossless', quality.value.toString());
           }
         }
         ipcRenderer.send('outputPath', outputPath);

@@ -705,3 +705,7 @@ select:hover{
 .inactive select{
   background-color: var(--accent-inactive);
 }
+
+.inactive .advanced-container{
+  background-color: var(--accent-inactive);
+}
