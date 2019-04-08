@@ -689,3 +689,19 @@ input[type=number]
   border-radius: 0%;
   background: var(--main-color);
 }
+
+select {
+  color: var(--main-color);
+  background-color: var(--accent-color);
+  padding-left: 15px;
+  height: 35px;
+  width: 100%;
+}
+
+select:hover{
+  background-color: var(--accent-positive);
+}
+
+.inactive select{
+  background-color: var(--accent-inactive);
+}

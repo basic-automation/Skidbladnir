@@ -58,16 +58,28 @@
                   <span class="radioCheckmark"></span>
                 </label>
               </div>
-              <div class="subcontainer-5 inactive">
+              <div class="subcontainer-5">
                 <label class="radioContainer">Preset
-                  <input type="radio" name="mode" value="preset" disabled="true">
+                  <input type="radio" name="mode" value="preset" id="modePreset">
                   <span class="radioCheckmark"></span>
                 </label>
               </div>
             </div>
             <div class="group-1 options">
               <h2>Quality</h2>
-              <div class="container-1 options">
+              <div id="presetType-container" class="container-2 options inactive">
+                <select id="presetType" disabled="true">
+                  <option value="select">Select an Option</option>
+                  <option value="default">Default</option>
+                  <option value="photo">Photo</option>
+                  <option value="picture">Picture</option>
+                  <option value="drawing">Drawing</option>
+                  <option value="icon">Icon</option>
+                  <option value="text">Text</option>
+                </select>
+                <span class="submition-error" id="presetError"></span>
+              </div>
+              <div class="container-2 options">
                 <div class="advanced-container">
                   <button class="quality-btn">
                     Quality:
@@ -85,7 +97,7 @@
                 </div>
                 <input type="range" id="alphaQuality" min="0" max="100" value="100">
               </div>
-              <div class="container-2 options">
+              <div id="cMethod-container" class="container-2 options">
                 <div class="advanced-container">
                   <button class="cMethod-btn">
                     Compression Method:
@@ -250,6 +262,8 @@
     const compressionPSNR = document.getElementById('compressionPSNR');
     const passes = document.getElementById('passes');
     const modeJPEGLike = document.getElementById('modeJPEGLike');
+    const modePreset = document.getElementById('modePreset');
+    const presetType = document.getElementById('presetType');
 
     var inputPath = "";
     var outputPath = "";
@@ -301,29 +315,64 @@
     });
 
     modeLossless.addEventListener('change', () => {
+      document.getElementById('presetType-container').className = "container-2 options inactive";
+      presetType.setAttribute('disabled', 'true');
       document.getElementById('alphaQuality-info').innerHTML = "100";
       alphaQuality.value = 100;
       document.getElementById('alphaQuality-container').className = "container-2 options inactive";
       enableLossless();
       hideLossy();
+      qualityOnly(false);
       appMode = "lossless";
     });
 
     modeLossy.addEventListener('change', () => {
+      document.getElementById('presetType-container').className = "container-2 options inactive";
+      presetType.setAttribute('disabled', 'true');
       document.getElementById('alphaQuality-container').className = "container-2 options";
       enableLossy();
       unHideLossy();
+      qualityOnly(false);
       appMode = "lossy";
     });
 
     modeJPEGLike.addEventListener('change', () => {
+      document.getElementById('presetType-container').className = "container-2 options inactive";
+      presetType.setAttribute('disabled', 'true');
       document.getElementById('alphaQuality-info').innerHTML = "0";
       alphaQuality.value = 0;
       document.getElementById('alphaQuality-container').className = "container-2 options inactive";
       enableLossless();
+      qualityOnly(false);
       hideLossy();
       appMode = "JPEGLike";
     });
+
+    modePreset.addEventListener('change', () => {
+      document.getElementById('presetType-container').className = "container-2 options";
+      presetType.removeAttribute('disabled');
+      enableLossless();
+      hideLossy();
+      qualityOnly(true);
+      appMode = "preset";
+    });
+
+    function qualityOnly(state){
+      if(state){
+        document.getElementById('alphaQuality-container').className = "container-2 options inactive";
+        alphaQuality.setAttribute('disabled', 'true');
+
+        document.getElementById('cMethod-container').className = "container-2 options inactive"
+        cMethod.setAttribute('disabled', 'true');
+      }
+      else{
+        document.getElementById('alphaQuality-container').className = "container-2 options";
+        alphaQuality.removeAttribute('disabled');
+
+        document.getElementById('cMethod-container').className = "container-2 options";
+        cMethod.removeAttribute('disabled');
+      }
+    }
 
     function enableLossless(){
       alphaQuality.setAttribute('disabled', 'true');
@@ -514,6 +563,10 @@
             ipcRenderer.send('alphaQuality', alphaQuality.value.toString());
             ipcRenderer.send('cMethod', cMethod.value.toString());
           }
+          else if(appMode == "preset"){
+            ipcRenderer.send('preset', presetType.value.toString());
+            ipcRenderer.send('quality', quality.value.toString());
+          }
         }
         ipcRenderer.send('outputPath', outputPath);
         isconvertComplete();
@@ -541,6 +594,7 @@
     function formCheck(){
       document.getElementById('inputError').textContent = "";
       document.getElementById('outputError').textContent = "";
+      document.getElementById('presetError').textContent ="";
       try{
         inputPath = document.querySelector('#inputPath').files[0].path;
       }catch{
@@ -558,7 +612,15 @@
           document.getElementById('outputError').textContent = "Error: Missing output selection.";
           return false;
         }
-          return true;
+        if(appMode == "preset"){
+          if(presetType.value != "select"){}
+          else{
+            document.getElementById('presetError').textContent = "Error: Missing preset selection.";
+            console.log("Error: No preset selected.");
+            return false;
+          }
+        }
+        return true;
       }
       else{
         document.getElementById('inputError').textContent = "Error: Invalid input file type (JPEG, PNG, TIFF, WebP).";
