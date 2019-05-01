@@ -4,7 +4,7 @@ A Graphical User Interface (GUI) for the conversion tools of most popular next-g
 This project is an electron app that simply generates a shell command and passes that command to the binaries provided by the open-source projects (for example cwebp.exe).
 
 # Screenshot
-![screenshot](https://basicautonomy.com/ba-nextGenIMG/images/screenshots/nextgenimg-v0-1-1.webp)
+![screenshot](https://basicautomation.io/ba-nextGenIMG/images/screenshots/nextgenimg-v0-1-1.webp)
 
 
 ## Minimum Path to Awesome
