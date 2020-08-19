@@ -109,6 +109,12 @@
             </div>
             <div id="lossyOptions" class="group-1 options">
               <h2>Lossy Options</h2>
+              <div class="container-2">
+                <div class="inputGroup">
+                  <input id="lowMem" name="loewMem" type="checkbox"/>
+                  <label for="lowMem">Enable Low Memory Mode</label>
+                </div>
+              </div>
               <div id="lossyFilterOptions" class="group-1 options">
                 <h2>Compression</h2>
                 <div class="container-1">
@@ -265,6 +271,7 @@
     const modePreset = document.getElementById('modePreset');
     const presetType = document.getElementById('presetType');
     const modeNearLossless = document.getElementById('modeNearLossless');
+    const lowMem = document.getElementById('lowMem');
 
     var inputPath = "";
     var outputPath = "";
@@ -272,6 +279,7 @@
     var appMode = "lossy";
     var isAF = "auto";
     var compressionType = "fileSize";
+    var isLowMem = "false";
 
     /**********************/
     // event listeners 
@@ -470,6 +478,10 @@
     passes.addEventListener('change',()=>{
       document.getElementById('passes-info').textContent = passes.value.toString();
     });
+
+    lowMem.addEventListener('change',()=>{
+
+    })
 
 
 
