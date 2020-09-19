@@ -58,14 +58,14 @@
         }
 
         .ba-glass {
-                backdrop-filter: brightness(calc(21.5% * 3)) saturate(calc(160%)) blur(calc(.5rem / 3));
+                backdrop-filter: brightness(calc(24.25% * 3)) saturate(calc(130%)) blur(calc(.5rem / 3));
                 background: repeating-radial-gradient(circle closest-corner at 50%, transparent .5vmin, rgba(160, 174, 192, .1) 1vmin);
                 /* background: repeating-radial-gradient(closest-side at 40px 40px, transparent 9%, rgba(160, 174, 192, .18) 15%); */
                 background-size: 100vw 100%;
         }
 
         .ba-glass-button {
-                backdrop-filter: brightness(calc(21.5% * 3)) saturate(calc(160%)) blur(calc(.5rem / 3));
+                backdrop-filter: brightness(calc(24.5% * 3)) saturate(calc(130%)) blur(calc(.5rem / 3));
                 background: repeating-radial-gradient(circle closest-corner at 2.5rem, transparent .5vmin, rgba(160, 174, 192, .1) 1vmin);
                 /* background: repeating-radial-gradient(closest-side at 40px 40px, transparent 9%, rgba(160, 174, 192, .18) 15%); */
                 background-size: 5rem 5rem;
