@@ -1,45 +1,42 @@
 {
-  "name": "ba-nextgenimg",
-  "version": "0.4.3",
-  "description": "Convert images to next generation open-source formats.",
-  "main": "main.js",
+  "name": "skidblad",
+  "version": "0.1.0",
+  "private": true,
   "scripts": {
-    "start": "electron .",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder",
+    "serve": "vue-cli-service serve",
+    "build": "vue-cli-service build",
+    "lint": "vue-cli-service lint",
+    "electron:build": "vue-cli-service electron:build --win portable",
+    "electron:serve": "vue-cli-service electron:serve",
     "postinstall": "electron-builder install-app-deps",
-    "nodeGypRebuild": "true"
-
+    "postuninstall": "electron-builder install-app-deps"
   },
-  "author": "Basic Autonomy: Justin Icenhour",
-  "license": "ISC",
-  "nodeGypRebuild": "true",
-  "devDependencies": {
-    "electron": "^9.2.1",
-    "electron-builder": "^20.38.5",
-    "fs": "^0.0.1-security"
-  },
+  "main": "background.js",
   "dependencies": {
-    "@rauschma/stringio": "^1.4.0",
-    "app-root-dir": "^1.0.2",
-    "electron-is-dev": "^1.0.1",
-    "file-bytes": "^2.0.3"
+    "core-js": "^3.6.5",
+    "electron-devtools-installer": "^3.1.0",
+    "tailwindcss": "^1.6.2",
+    "vue": "^v3.0.0-rc.11",
+    "vue-cli-plugin-electron-builder": "~2.0.0-rc.4",
+    "vuex": "^4.0.0-beta.4"
   },
-  "build": {
-    "appId": "ba.nextgenimg",
-    "win": {
-      "target": "portable",
-      "icon": "build/icon.png"
-    },
-    "extraFiles": [
-      {
-        "from": "resources/win/bin",
-        "to": "Resources/bin",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ],
-    "files": ["**/*", "build/icon.*"]
+  "devDependencies": {
+    "@types/electron-devtools-installer": "^2.2.0",
+    "@typescript-eslint/eslint-plugin": "^2.33.0",
+    "@typescript-eslint/parser": "^2.33.0",
+    "@vue/cli-plugin-babel": "~4.5.0",
+    "@vue/cli-plugin-eslint": "~4.5.0",
+    "@vue/cli-plugin-typescript": "~4.5.0",
+    "@vue/cli-service": "~4.5.0",
+    "@vue/compiler-sfc": "^3.0.0-0",
+    "@vue/devtools": "^5.3.3",
+    "@vue/eslint-config-airbnb": "^5.0.2",
+    "@vue/eslint-config-typescript": "^5.1.0",
+    "electron": "^10.1.1",
+    "eslint": "^6.7.2",
+    "eslint-plugin-import": "^2.20.2",
+    "eslint-plugin-vue": "^7.0.0-0",
+    "postcss": "^7.0.32",
+    "typescript": "~3.9.3"
   }
 }
