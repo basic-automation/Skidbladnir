@@ -3,10 +3,18 @@ import App from './App.vue';
 import './main.css';
 import { store } from './store';
 import FileUpload from './components/FileUpload.vue';
-import AdvancedOptionsToggle from './components/AdvancedOptionsToggle.vue'
+import AdvancedOptionsToggle from './components/AdvancedOptionsToggle.vue';
+import Mode from './components/Mode.vue';
+import Radio from './components/Radio.vue';
+import random from 'lodash/random';
+import map from 'lodash/map';
+import _ from 'lodash';
 
 const app = createApp(App);
 app.component('FileUpload', FileUpload);
 app.component('AdvancedOptionsToggle', AdvancedOptionsToggle);
+app.component('Mode', Mode);
+app.component('Radio', Radio);
+app.use(_, { name: 'lodash', lodash: { map, random } });
 app.use(store);
 app.mount('#app');

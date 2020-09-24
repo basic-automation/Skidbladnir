@@ -1,3 +1,4 @@
+/* eslint-disable prefer-const */
 import { createStore } from 'vuex';
 
 export const store = createStore({
@@ -8,8 +9,24 @@ export const store = createStore({
                         isDragEnter: false,
                         canDragEnter: true,
                 },
+                components: {
+                        radio: [
+                                {
+                                        group: '',
+                                        id: [''],
+                                        checked: [false],
+                                }
+                        ],
+                },
                 advancedOptions: {
                         isShown: false,
+                        mode: {
+                                jpegLike: false,
+                                lossy: false,
+                                lossless: false,
+                                nearLossless: false,
+                                presets: false,
+                        }
                 },
         },
 
@@ -18,7 +35,15 @@ export const store = createStore({
                 outputFiles: state => { return state.outputFiles },
                 appIsDragEnter: state => { return state.app.isDragEnter },
                 appCanDragEnter: state => { return state.app.canDragEnter },
+                componentsRadio: state => { return state.components.radio },
+                advancedOptions: state => { return state.advancedOptions },
                 advancedOptionsIsShown: state => { return state.advancedOptions.isShown },
+                advancedOptionsMode: state => { return state.advancedOptions.mode },
+                advancedOptionsModeJPEGLike: state => { return state.advancedOptions.mode.jpegLike },
+                advancedOptionsModeLossy: state => { return state.advancedOptions.mode.lossy },
+                advancedOptionsModeLossless: state => { return state.advancedOptions.mode.lossless },
+                advancedOptionsModeNearLossless: state => { return state.advancedOptions.mode.nearLossless },
+                advancedOptionsModeNearPresets: state => { return state.advancedOptions.mode.presets },
         },
 
         mutations: {
@@ -27,6 +52,67 @@ export const store = createStore({
                 setAppIsDragEnter: (state, payload: boolean) => state.app.isDragEnter = payload,
                 setAppCanDragEnter: (state, payload: boolean) => state.app.canDragEnter = payload,
                 setAdvancedOptionsIsShown: (state, payload: boolean) => state.advancedOptions.isShown = payload,
+                setAdvancedOptionsMode: (state, payload: string) => {
+                        if(payload === 'jpegLike') state.advancedOptions.mode = { jpegLike: true, lossy: false, lossless: false, nearLossless: false, presets: false }
+                        else if(payload === 'lossy') state.advancedOptions.mode = { jpegLike: false, lossy: true, lossless: false, nearLossless: false, presets: false }
+                        else if(payload === 'lossless') state.advancedOptions.mode = { jpegLike: false, lossy: false, lossless: true, nearLossless: false, presets: false }
+                        else if(payload === 'nearLossless') state.advancedOptions.mode = { jpegLike: false, lossy: false, lossless: false, nearLossless: true, presets: false }
+                        else if(payload === 'presets') state.advancedOptions.mode = { jpegLike: false, lossy: false, lossless: false, nearLossless: false, presets: true }
+                },
+                registerComponentRadioGroup: (state, payload: { group: string; id: string[]; checked: boolean[] }) => {
+                        let radio = state.components.radio;
+                        let mygroup = payload;
+
+                        // set existing buttons clicked to false
+                        for(let i = 0; i < radio.length; i++) {
+                                for(let j = 0; j < (radio[i].checked.length); j++) {
+                                        radio[i].checked[j] = false;
+                                }
+                        }
+
+                        for(let i = 0; i < radio.length; i++) {
+                                // merge any prevous groups with the same name
+                                if(radio[i].group === mygroup.group) {
+                                        // delete matching IDs and corresponding checked
+                                        for(let j = 0; j < radio[i].id.length; j++) {
+                                                if(radio[i].id[j] === mygroup.id[0]) {
+                                                        // delete
+                                                        delete radio[i].id[j];
+                                                        delete radio[i].checked[j];
+
+                                                        // purge undefined
+                                                        radio[i].id = radio[i].id.filter((a) => { return typeof a !== 'undefined'});
+                                                        radio[i].checked = radio[i].checked.filter((a) => { return typeof a !== 'undefined'});
+
+                                                }
+                                        }
+                                        
+                                        // merge group ids
+                                        radio[i].id.push(mygroup.id[0]);
+                                        mygroup.id = radio[i].id;
+
+                                        // merge group checked
+                                        radio[i].checked.push(mygroup.checked[0]);
+                                        mygroup.checked = radio[i].checked;
+
+                                        // delete matching group from radio
+                                        delete radio[i]; radio = radio.filter((a) => { return typeof a !== 'undefined'});
+                                }
+                        }
+
+                        // delete any groups that are undefined
+                        let i = 0;
+                        state.components.radio.forEach((group) => {
+                                if(group.group === '') {
+                                        delete radio[i]; radio = radio.filter((a) => { return typeof a !== 'undefined'});
+                                        console.log('Register Component Radio Group: splice(' + i +', 1)');
+                                }
+                                i++;
+                        });
+
+                        radio.push(mygroup);
+                        state.components.radio = radio;
+                },
         },
 
         actions: {

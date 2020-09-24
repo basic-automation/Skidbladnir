@@ -11,12 +11,17 @@
                 <section class="grid grid-cols-1 items-center justify-center w-full">
                         <AdvancedOptionsToggle />
                 </section>
-                <section class="w-full min-h-40 flex-shrink-0"></section>
+                <section :class="{'grid grid-cols-1 items-center justify-center w-full': advancedOptionsIsShown, 'hidden': !advancedOptionsIsShown}">
+                        <Mode />
+                </section>
+                <section class="w-full min-h-48 flex-shrink-0"></section>
         </div>
         <div class="w-full h-40 absolute bottom-0 opacity-100 border-t border-gray-500 ba-glass antialiased"></div>
         <div class="w-full h-40 absolute bottom-0 opacity-100 border-t border-gray-500 ba-glass antialiased"></div>
-        <div class="w-full h-40 absolute bottom-0 opacity-100 border-t border-gray-500 ba-glass antialiased"></div>
-        <button class="flex items-center justify-center h-20 w-20 rounded-full absolute bg-gray-500 ba-submit-position border border-gray-500 ba-glass-button ba-submit-inner-shaddow-xl text-gray-100 focus:outline-none transition-all focus:ba-glass-glow focus:glow-xl ease-in-out duration-1000 ba-backdrop-transition" @focus="submitFocused=true" @blur="submitFocused=false">
+        <div class="w-full h-40 absolute bottom-0 opacity-100 border-t border-gray-500 ba-glass antialiased" :class="{'glow-xl': submitFocused}"></div>
+        <div class="flex items-center justify-center h-20 w-20 rounded-full absolute bg-gray-500 ba-submit-position border border-gray-500 ba-glass-button ba-submit-inner-shaddow-xl text-gray-100 focus:outline-none transition-all focus:ba-glass-glow focus:glow-xl ease-in-out duration-1000 ba-backdrop-transition"></div>
+        <div class="flex items-center justify-center h-20 w-20 rounded-full absolute bg-gray-500 ba-submit-position border border-gray-500 ba-glass-button ba-submit-inner-shaddow-xl text-gray-100 focus:outline-none transition-all focus:ba-glass-glow focus:glow-xl ease-in-out duration-1000 ba-backdrop-transition"></div>
+        <button class="flex items-center justify-center h-20 w-20 rounded-full absolute bg-gray-500 ba-submit-position border border-gray-500 ba-glass-button ba-submit-inner-shaddow-xl text-gray-100 focus:outline-none focus:ba-glass-glow focus:glow-xl transition-all ease-in-out duration-300 ba-backdrop-transition" @focus="submitFocused=true" @blur="submitFocused=false">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 39" class="h-10"><path class="fill-current opacity-50" d="M42 0L19 23 8 13l-8 7 19 19L50 8z" data-name="Icon metro-checkmark"/></svg>
         </button>
 </template>
@@ -36,6 +41,10 @@
                         return {
                                 submitFocused: false,
                         }
+                },
+
+                computed: {
+                        advancedOptionsIsShown: () => { return store.getters.advancedOptionsIsShown },
                 },
 
                 methods: {
@@ -66,7 +75,7 @@
 
         .ba-glass-button {
                 backdrop-filter: brightness(calc(24.5% * 3)) saturate(calc(130%)) blur(calc(.5rem / 3));
-                background: repeating-radial-gradient(circle closest-corner at 2.5rem, transparent .5vmin, rgba(160, 174, 192, .1) 1vmin);
+                background: repeating-radial-gradient(circle closest-corner at 2.5rem, transparent .65vmin, rgba(160, 174, 192, .1) 1vmin);
                 /* background: repeating-radial-gradient(closest-side at 40px 40px, transparent 9%, rgba(160, 174, 192, .18) 15%); */
                 background-size: 5rem 5rem;
         }
@@ -78,12 +87,17 @@
 
         .focus\:ba-glass-glow:focus {
                 backdrop-filter: brightness(calc(17% * 3)) saturate(calc(160%)) blur(calc(.5rem / 3));
-                background: repeating-radial-gradient(closest-side at 40px 40px, transparent 9%, rgba(247, 250, 252, .175) 15%);
+                background: repeating-radial-gradient(circle closest-corner at 2.5rem, transparent .636vmin, rgba(247, 250, 252, .1) 1vmin);
+                /* background: repeating-radial-gradient(closest-side at 40px 40px, transparent 9%, rgba(247, 250, 252, .175) 15%); */
                 background-size: 80px 80px;                
         }
 
         .focus\:glow-xl:focus {
-                box-shadow: 0 0px 5px rgba(247, 250, 252, 0.7), 0 0px 10px -5px rgba(247, 250, 252, 1);
+                box-shadow: 0 0px 5px rgba(247, 250, 252, 0.3), 0 0px 10px -5px rgba(247, 250, 252, 1);
+        }
+
+        .glow-xl {
+                box-shadow: 0 0px 5px rgba(247, 250, 252, 0.3), 0 0px 10px -5px rgba(247, 250, 252, 1);
         }
 
         .ba-submit-position {
@@ -97,8 +111,8 @@
                 box-shadow: inset 0 0px 15px rgba(26, 32, 44, 1), 0 00px 10px -5px rgba(26, 32, 44, 1);
         }
 
-        .min-h-40 {
-                min-height: 10rem;
+        .min-h-48 {
+                min-height: 12rem;
         }
 
         .ba-rotate-15-cw {
