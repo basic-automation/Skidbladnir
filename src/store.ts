@@ -21,11 +21,26 @@ export const store = createStore({
                 advancedOptions: {
                         isShown: false,
                         mode: {
-                                jpegLike: false,
-                                lossy: false,
-                                lossless: false,
-                                nearLossless: false,
-                                presets: false,
+                                jpegLike: {
+                                        checked: false,
+                                        label: 'Change the internal parameter mapping to better match the expected size of JPEG compression. This flag will generally produce an output file of similar size to its JPEG equivalent (for the same quality setting), but with less visual distortion.',
+                                },
+                                lossy: {
+                                        checked: false,
+                                        label: 'These options are only effective when doing lossy encoding (the default, with or without alpha).',
+                                },
+                                lossless: {
+                                        checked: false,
+                                        label: 'Display options that are available when doing lossless encoding.',
+                                },
+                                nearLossless: {
+                                        checked: false,
+                                        label: 'Specify the level of near-lossless image preprocessing. This option adjusts pixel values to help compressibility, but has minimal impact on the visual quality. It triggers lossless compression mode automatically. The range is 0 (maximum preprocessing) to 100 (no preprocessing, the default). The typical value is around 60. Note that lossy with quality 100 can at times yield better results.',
+                                },
+                                presets: {
+                                        checked: false,
+                                        label: 'Specify a set of pre-defined parameters to suit a particular type of source material. Possible values are: default, photo, picture, drawing, icon, text. Since preset overwrites the other parameters values (except the quality one), this option should preferably appear first in the order of the arguments.',
+                                },
                         }
                 },
         },
@@ -53,11 +68,14 @@ export const store = createStore({
                 setAppCanDragEnter: (state, payload: boolean) => state.app.canDragEnter = payload,
                 setAdvancedOptionsIsShown: (state, payload: boolean) => state.advancedOptions.isShown = payload,
                 setAdvancedOptionsMode: (state, payload: string) => {
-                        if(payload === 'jpegLike') state.advancedOptions.mode = { jpegLike: true, lossy: false, lossless: false, nearLossless: false, presets: false }
-                        else if(payload === 'lossy') state.advancedOptions.mode = { jpegLike: false, lossy: true, lossless: false, nearLossless: false, presets: false }
-                        else if(payload === 'lossless') state.advancedOptions.mode = { jpegLike: false, lossy: false, lossless: true, nearLossless: false, presets: false }
-                        else if(payload === 'nearLossless') state.advancedOptions.mode = { jpegLike: false, lossy: false, lossless: false, nearLossless: true, presets: false }
-                        else if(payload === 'presets') state.advancedOptions.mode = { jpegLike: false, lossy: false, lossless: false, nearLossless: false, presets: true }
+                        let mode = state.advancedOptions.mode;
+                        // if key matches payload the mark it true else mark it false
+                        for(const [key, value] of Object.entries(mode)) {
+                                if(typeof value === 'object') {
+                                        if(key === payload) value.checked = true;
+                                        else value.checked = false;
+                                }
+                        }
                 },
                 registerComponentRadioGroup: (state, payload: { group: string; id: string[]; checked: boolean[] }) => {
                         let radio = state.components.radio;
@@ -166,6 +184,19 @@ export const store = createStore({
 
                         if(promise){
                                 console.log('Store :: setAdvancedOptionsIsShown: ', payload);
+                        }
+                },
+
+                syncModeWithRadioGroup({ getters, commit }, payload: {group: string; id: string}) {
+                        const radios = getters.componentsRadio;
+                        for(let i = 0; i < radios.length; i++) {
+                                if(radios[i].group === payload.group) {
+                                        for(let j = 0; j < radios[i].id.length; j++) {
+                                                if(radios[i].id[j] === payload.id && radios[i].checked[j] === true) {
+                                                        commit('setAdvancedOptionsMode', payload.id);
+                                                }
+                                        }
+                                }
                         }
                 },
         }

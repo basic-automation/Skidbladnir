@@ -1,6 +1,15 @@
 /* eslint-disable global-require */
 module.exports = {
-        theme: {},
+        theme: {
+                extend: {
+                        transitionProperty: {
+                                'height': 'height',
+                                'width': 'width',
+                                'size': 'width, height',
+                                'spacing': 'margin, padding',
+                        },
+                },
+        },
         variants: {},
         plugins: [],
         purge: [

@@ -35,9 +35,9 @@ export default defineComponent({
                         input: "",
                         isDropZone: false,
                         isFileUploadDragEnter: false,
+                        isFileUploadDropFile: false,
                         isDropZoneDragEnter: false,
                         isDropZoneDragLeave: false,
-                        isFileUploadDropFile: false,
                         isError: false,
                 };
         },
@@ -92,9 +92,9 @@ export default defineComponent({
                 },
 
                 fileUploadDragEnter() { if(!this.isFileUploadDragEnter) this.isFileUploadDragEnter = true; },
+                fileUploadDropFile() { if (!this.isFileUploadDropFile) this.isFileUploadDropFile = true; },
                 dropZoneDragEnter() { if (!this.isDropZoneDragEnter) this.isDropZoneDragEnter = true; },
                 dropZoneDragLeave() { if (!this.isDropZoneDragEnter) this.isDropZoneDragLeave = true; },
-                fileUploadDropFile() { if (!this.isFileUploadDropFile) this.isFileUploadDropFile = true; },
         },
 
         watch: {
