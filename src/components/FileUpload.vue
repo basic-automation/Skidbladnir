@@ -1,11 +1,11 @@
 <!-- eslint-disable max-len -->
 <template>
-	<div class="flex flex-1 h-full min-h-20 md:min-h-full md:h-10 flex-col md:flex-row justify-center items-center transition-all ease-in-out duration-500" @dragenter.prevent="fileUploadDragEnter()" :class="{ 'bg-gray-500 pointer-events-none': isDropZone }">
-		<div :class="{ 'hidden pointer-events-none': isDropZone, 'flex w-full flex-row justify-center items-center h-10 rounded-full bg-gray-500 transition-all ease-in-out duration-500': !isDropZone, 'ba-error': isError }" @dragover.prevent @dragleave.prevent>
-			<div :class="{ 'hidden pointer-events-none': isDropZone, 'ml-6 uppercase text-xs my-auto align-middle antialiased': !isDropZone }" @dragover.prevent @dragleave.prevent>{{ label }}</div>
-			<input v-model="input" disabled type="text" :class="{ 'hidden pointer-events-none': isDropZone, 'flex-1 h-10 ml-4 rounded-full rounded-l-none mr-2 focus:outline-none bg-transparent text-gray-900 text-xs transition-all ease-in-out duration-500': !isDropZone }" @dragover.prevent @dragleave.prevent @dragenter.prevent />
+	<div class="flex flex-1 h-full min-h-20 md:min-h-10 md:h-10 flex-col md:flex-row justify-center items-center transition-all ease-in-out duration-500" @dragenter.prevent="fileUploadDragEnter()" :class="{ 'bg-gray-500 pointer-events-none': isDropZone }">
+		<div :class="{ 'hidden pointer-events-none': isDropZone, 'flex w-full flex-row justify-center items-center h-10 rounded-full bg-gray-500 transition-all ease-in-out duration-500 flex-shrink': !isDropZone, 'ba-error': isError }" @dragover.prevent @dragleave.prevent>
+			<label :class="{ 'hidden pointer-events-none': isDropZone, 'ml-6 uppercase text-xs my-auto align-middle antialiased pointer-events-none': !isDropZone }" @dragover.prevent @dragleave.prevent>{{ label }}</label>
+			<input v-model="input" disabled type="text" :class="{ 'hidden pointer-events-none': isDropZone, 'flex-1 h-10 ml-4 rounded-full rounded-l-none mr-2 focus:outline-none bg-transparent text-gray-900 text-xs transition-all ease-in-out duration-500 flex-shrink w-full': !isDropZone }" @dragover.prevent @dragleave.prevent @dragenter.prevent />
 		</div>
-		<button :class="{ 'hidden pointer-events-none': isDropZone, 'flex md:ml-4 mt-4 md:mt-0 h-10 uppercase rounded-full glow-xl w-full md:w-32 md:min-w-32 text-gray-500 text-xs justify-center items-center focus:outline-none focus:ba-inner-shaddow-sm hover:glow-sm transition-all ease-in-out duration-1000 antialiased': !isDropZone }" @click="$refs.file.click()" @dragover.prevent @dragleave.prevent>Browse</button>
+		<button :class="{ 'hidden pointer-events-none': isDropZone, 'flex md:ml-4 mt-4 md:mt-0 h-10 uppercase rounded-full glow-xl w-full md:w-32 md:min-w-32 text-gray-500 text-xs justify-center items-center focus:outline-none focus:ba-inner-shaddow-sm hover:glow-sm transition-all ease-in-out duration-1000 antialiased flex-shrink-0': !isDropZone }" @click="$refs.file.click()" @dragover.prevent @dragleave.prevent>Browse</button>
 		<div :class="{ 'hidden': !isDropZone, 'flex md:h-full min-h-10 justify-center items-center flex-1 text-gray-900 uppercase font-bold text-xs pointer-events-auto z-50': isDropZone }" @dragover.prevent @dragleave="dropZoneDragLeave()" @drop.prevent="fileChangeHandler($event, type, true), fileUploadDropFile()">
 			<p :class="{ 'pointer-events-none': isDropZone }">{{ dropZoneLabel }}</p>
 		</div>
@@ -133,20 +133,6 @@ export default defineComponent({
 		.sm\:min-w-32 {
 			min-width: 8rem;
 		}
-	}
-
-	@media (min-width: 768px) {
-		.md\:min-h-20 {
-			min-height: 5rem;
-		}
-	}
-
-	.min-h-20 {
-		min-height: 5rem;
-	}
-
-	.min-h-10 {
-		min-height: 2.5rem;
 	}
 
 	.focus\:glow-none:focus {

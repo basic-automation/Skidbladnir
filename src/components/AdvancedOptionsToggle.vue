@@ -1,5 +1,5 @@
 <template>
-        <button class="w-full h-10 mt-20 cursor-pointer focus:outline-none" @focus="focused=true" @blur="focused=false" @click.prevent="advancedOptionsClick()">
+        <button class="w-full h-10 cursor-pointer focus:outline-none" @focus="focused=true" @blur="focused=false" @click.prevent="advancedOptionsClick()">
                 <div class="flex flex-row items-center">
                         <hr class=" border-t border-gray-500 flex-1" :class="{ 'glow-xl': focused }" />
                         <div class="text-xs text-gray-500 flex justify-center items-center whitespace-no-wrap flex-shrink-0 mx-5 uppercase antialiased">{{ label }}</div>

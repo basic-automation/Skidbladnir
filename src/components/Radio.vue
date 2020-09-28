@@ -1,12 +1,12 @@
 <template>
-        <button ref="button" class="flex bg-gray-500 flex-col w-330px md:w-auto items-center cursor-pointer flex-shrink-0 focus:outline-none m-4 transition-all duration-300 ease-in-out" @click="clicked(); isFocused = false" @focus="isFocused = true" @blur="isFocused = false" @mouseover="isHover = true" @mouseout="isHover = false" :class="{ 'rounded-top-20px': isHover, 'rounded-20px': !isHover }">
-                <div class="flex h-10 flex-row items-center justify-center w-full cursor-pointer">
+        <button ref="button" class="flex bg-gray-500 flex-col w-full md:w-auto min-w-20 items-center cursor-pointer flex-shrink-0 focus:outline-none transition-all duration-300 ease-in-out" @click="clicked(); isFocused = false" @focus="isFocused = true" @blur="isFocused = false" @mouseover="isHover = true" @mouseout="isHover = false" :class="{ 'rounded-top-20px': isHover, 'rounded-20px': !isHover }">
+                <div class="flex h-10 flex-row items-center justify-center w-full cursor-pointer flex-shrink-0">
                         <label class="flex ml-4 justify-start items-center h-full text-xs cursor-pointer antialiased flex-shrink-0">{{ label }}</label>
                         <div class="flex-1"></div>
                         <div class="ba-radio ml-4 mr-2 border-gray-900 cursor-pointer antialiased flex-shrink-0" :class="{ 'ba-radio-checked': isSelected, 'ba-radio-focused': isFocused }"></div>
                 </div>
-                <div :class="{ 'hidden': !isHover, 'w-330px': isHover }"><hr class="flex border-gray-900 mx-4 mt-4 h-1" /></div>
-                <div ref="info" class="transition-size duration-500" :class="[ {'h-0px': !isHover, 'w-330px py-4': isHover }, isHover ? infoHeightClass : '' ]"><p class="text-xs text-justify" :class="[ { 'mx-2': isHover } ]">{{ infoLabel }}</p></div>
+                <div :class="{ 'hidden': !isHover, 'w-full': isHover }"><hr class="flex border-gray-900 mx-4 mt-4 h-1" /></div>
+                <div ref="info" class="transition-size duration-500" :class="[ {'h-0px': !isHover, 'w-full py-4': isHover }, isHover ? infoHeightClass : '' ]"><p class="text-xs text-justify" :class="[ { 'mx-2': isHover } ]">{{ infoLabel }}</p></div>
         </button>
         <input class="hidden" type="radio" :id="id" :name="group" :checked="isSelected" :value="value">
 </template>
