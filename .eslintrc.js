@@ -1,7 +1,7 @@
 module.exports = {
         root: true,
         env: {
-          node: true,
+                node: true,
         },
         extends: [
                 'plugin:vue/vue3-essential',
@@ -9,13 +9,13 @@ module.exports = {
                 'eslint:recommended',
         ],
         parserOptions: {
-          ecmaVersion: 2020,
+                ecmaVersion: 2020,
         },
         rules: {
-          'no-console': process.env.NODE_ENV === 'production' ? 'warn' : 'off',
-          'no-debugger': process.env.NODE_ENV === 'production' ? 'warn' : 'off',
-          'indent': 'off',
-          'indent-legacy': ['error', 8]
+                'no-console': process.env.NODE_ENV === 'production' ? 'warn' : 'off',
+                'no-debugger': process.env.NODE_ENV === 'production' ? 'warn' : 'off',
+                'indent': 'off',
+                'indent-legacy': ['error', 8]
         },
-      };
+};
       

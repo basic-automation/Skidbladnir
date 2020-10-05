@@ -222,7 +222,7 @@ export const store = createStore({
                         state.components.select = select;
                 },
                 deployAssociation: (state, payload: string) => {
-                        const assoc = state.advancedOptions.associations[payload as keyof object] as { components: string[]; visible: boolean[] }
+                        const assoc = state.advancedOptions.associations[payload as keyof {}] as { components: string[]; visible: boolean[] }
                         if(assoc) {
                                 const associations = assoc.components;
                                 const visible = state.advancedOptions.associations[payload as keyof {}]['visible'] as boolean[];
