@@ -9,12 +9,16 @@ import Radio from './components/Radio.vue';
 import random from 'lodash/random';
 import map from 'lodash/map';
 import _ from 'lodash';
+import Quality from './components/Quality.vue';
+import Select from './components/Select.vue';
 
 const app = createApp(App);
 app.component('FileUpload', FileUpload);
 app.component('AdvancedOptionsToggle', AdvancedOptionsToggle);
 app.component('Mode', Mode);
 app.component('Radio', Radio);
+app.component('Quality', Quality);
+app.component('Select', Select);
 app.use(_, { name: 'lodash', lodash: { map, random } });
 app.use(store);
 app.mount('#app');

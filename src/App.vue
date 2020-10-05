@@ -4,15 +4,18 @@
                 <header class="flex flex-col justify-center items-center w-full">
                         <img src="./assets/logo.svg" class=" w-40">
                 </header>
-                <section class="flex flex-col md:flex-row item-center justify-center mt-12 gap-10 w-full">
+                <section class="flex flex-col md:flex-row item-center justify-center mt-12 gap-10 w-full max-w-4xl">
                         <FileUpload label="Input" type="input" dropZoneLabel="Drop Files Here" />
                         <FileUpload label="Output" type="output" dropZoneLabel="Drop Folders Here" />
                 </section>
                 <section class="flex flex-col items-center justify-center w-full mt-8">
                         <AdvancedOptionsToggle />
                 </section>
-                <section :class="{'grid grid-cols-1 items-center justify-center w-full mt-8': advancedOptionsIsShown, 'hidden': !advancedOptionsIsShown}">
+                <section :class="{'grid grid-cols-1 items-center justify-center w-full mt-12': advancedOptionsIsShown, 'hidden': !advancedOptionsIsShown}">
                         <Mode />
+                </section>
+                <section :class="{'grid grid-cols-1 items-center justify-center w-full mt-12': advancedOptionsIsShown, 'hidden': !advancedOptionsIsShown}">
+                        <Quality />
                 </section>
                 <section class="w-full min-h-48 flex-shrink-0"></section>
         </div>

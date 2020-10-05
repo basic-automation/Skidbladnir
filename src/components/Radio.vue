@@ -1,182 +1,283 @@
 <template>
-        <button ref="button" class="flex bg-gray-500 flex-col w-full md:w-auto min-w-20 items-center cursor-pointer flex-shrink-0 focus:outline-none transition-all duration-300 ease-in-out" @click="clicked(); isFocused = false" @focus="isFocused = true" @blur="isFocused = false" @mouseover="isHover = true" @mouseout="isHover = false" :class="{ 'rounded-top-20px': isHover, 'rounded-20px': !isHover }">
-                <div class="flex h-10 flex-row items-center justify-center w-full cursor-pointer flex-shrink-0">
-                        <label class="flex ml-4 justify-start items-center h-full text-xs cursor-pointer antialiased flex-shrink-0">{{ label }}</label>
-                        <div class="flex-1"></div>
-                        <div class="ba-radio ml-4 mr-2 border-gray-900 cursor-pointer antialiased flex-shrink-0" :class="{ 'ba-radio-checked': isSelected, 'ba-radio-focused': isFocused }"></div>
+        <button ref="button" :class="['flex bg-gray-500 flex-col w-full md:w-auto items-center justify-center cursor-pointer flex-shrink-0 focus:outline-none transition-size duration-300 ease-in-out', { 'rounded-top-20px': isHover, 'rounded-20px': !isHover }]" @click="clicked(); isFocused = false" @focus="isFocused = true" @blur="isFocused = false" @mouseover="setIsHoverTrue()" @mouseout="setIsHoverFalse()">
+                <div :class="['flex h-10 flex-row items-center justify-center w-full cursor-pointer flex-shrink-0 pointer-events-none']">
+                        <label :class="['flex ml-4 justify-start items-center h-full text-xs cursor-pointer antialiased flex-shrink-0 pointer-events-none']">{{ label }}</label>
+                        <div :class="['flex-1']" />
+                        <div :class="['ba-radio ml-4 mr-2 border-gray-900 cursor-pointer antialiased flex-shrink-0 pointer-events-none', { 'ba-radio-checked': isSelected, 'ba-radio-focused': isFocused }]" />
                 </div>
-                <div :class="{ 'hidden': !isHover, 'w-full': isHover }"><hr class="flex border-gray-900 mx-4 mt-4 h-1" /></div>
-                <div ref="info" class="transition-size duration-500" :class="[ {'h-0px': !isHover, 'w-full py-4': isHover }, isHover ? infoHeightClass : '' ]"><p class="text-xs text-justify" :class="[ { 'mx-2': isHover } ]">{{ infoLabel }}</p></div>
+                <div :class="[{ 'w-0px h-0px': !isHover }, {'h-1': isHover}, isHover ? infoWidthClass : '', 'transition-size duration-1000 ease-in-out pointer-events-none']">
+                        <hr :class="['flex border-gray-900 mx-4 mt-4 h-1 pointer-events-none']" />
+                </div>
+                <div ref="info" :class="['transition-size duration-300 ease-in-out overflow-y-scroll scrollbar-hidden pointer-events-none', {'h-0px w-0px': !isHover },{'p-4': isHover}, isHover ? infoHeightClass : '', isHover ? infoWidthClass : '' ]">
+                        <p class="text-xs text-left pointer-events-none" :class="[ { 'm-2': isHover } ]">{{ infoLabel }}</p>
+                </div>
         </button>
         <input class="hidden" type="radio" :id="id" :name="group" :checked="isSelected" :value="value">
 </template>
 
 <script lang="ts">
-/* eslint-disable no-unused-vars */
-/* eslint-disable prefer-const */
-//import _ from 'lodash';
-import { defineComponent } from 'vue';
-import store from '../store';
+        /* eslint-disable no-unused-vars */
+        /* eslint-disable prefer-const */
+        //import _ from 'lodash';
+        import { defineComponent } from 'vue';
+        import store from '../store';
 
-export default defineComponent({
-        name: 'Radio',
+        export default defineComponent({
+                name: 'Radio',
 
-        props: {
-                group: {
-                        type: String,
-                        required: true,
+                props: {
+                        group: {
+                                type: String,
+                                required: true,
+                        },
+                        label: {
+                                type: String,
+                                required: true,
+                        },
+                        id: {
+                                type: String,
+                                required: true,
+                        },
                 },
-                label: {
-                        type: String,
-                        required: true,
+
+                data() {
+                        return {
+                                value: this.id,
+                                isSelected: false,
+                                isFocused: false,
+                                isHover: true,
+                                buttonWidth: 'auto',
+                                infoLabel: '',
+                                info: null as HTMLDivElement | null,
+                                infoHeight: 0,
+                                infoWidth: 0,
+                                infoHeightClass: this.id + '-height',
+                                infoWidthClass: this.id + '-width',
+                                infoHeightVarName: '--' + this.id + '-height',
+                                infoWidthVarName: '--' + this.id + '-width',
+                                infoCSSID: 'ba-' + this.id,
+                                infoAnimationDuration: 300,
+                                windowWidth: 0,
+                                isAnimatingWidth: false,
+                                isAnimatingHeight: false,
+                                loggingInfoWidth: false,
+                                loggingInfoHeight: false,
+                        };
                 },
-                id: {
-                        type: String,
-                        required: true,
+
+                computed: {
+                        advancedOptions: () => store.getters.advancedOptions,
+                        advancedOptionsIsShown: () => store.getters.advancedOptionsIsShown,
+                        radioGroup: () => store.getters.componentsRadio,
                 },
-        },
 
-        data() {
-                return {
-                        value: this.id,
-                        isSelected: false,
-                        isFocused: false,
-                        isHover: true,
-                        buttonWidth: 'auto',
-                        infoLabel: '',
-                        info: null as HTMLDivElement | null,
-                        infoHeightClass: this.id + '-height',
-                        infoHeightVarName: '--' + this.id + '-height',
-                        infoCSSID: 'ba-' + this.id
-                };
-        },
+                created() {
+                        // define current group
+                        let mygroup: { group: string; id: string[]; checked: boolean[] } = { group: this.group, id: [this.id], checked: [this.isSelected] };
 
-        computed: {
-                advancedOptions: () => store.getters.advancedOptions,
-                radioGroup: () => store.getters.componentsRadio,
-        },
-
-        created() {
-                // define current group
-                let mygroup: { group: string; id: string[]; checked: boolean[] } = { group: this.group, id: [this.id], checked: [this.isSelected] };
-
-                // register component with store
-                store.commit('registerComponentRadioGroup', mygroup);
-
-                // set infor label from store
-                const mode = this.advancedOptions.mode;
-                for(const [key, value] of Object.entries(mode)) {
-                        if(typeof value === 'object') {
-                                let newVal = value as { checked: boolean; label: string };
-                                if(key === this.id) {
-                                        this.infoLabel = newVal.label;
-                                }
-                        }
-                }
-
-                // set custom css height
-                const heightVar = ':root { --' + this.id + '-height: auto; }';
-                this.addCss(this.infoCSSID,heightVar);
-                const setClass = '.' + this.infoHeightClass + ' { height: var(' + this.infoHeightVarName + '); }';
-                this.addCss(this.infoCSSID, setClass);
-
-        },
-
-        mounted() {
-                this.info = this.$refs.info as HTMLDivElement;
-                this.logInfoHeight();
-        },
-
-        methods: {
-                clicked: function() {
-                        let mygroup: { group: string; id: string[]; checked: boolean[] } = { group: this.group, id: [this.id], checked: [true] };
+                        // register component with store
                         store.commit('registerComponentRadioGroup', mygroup);
-                        store.dispatch('syncModeWithRadioGroup', { group: this.group, id: this.id });
-                },
 
-                logInfoHeight: function() {
-
-                        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                        let inter = setInterval(() => {
-                                if(this.info !== null) {
-                                        console.log(this.info.clientHeight);
-                                        if(this.info.clientHeight > 50){
-                                                const root = document.documentElement;
-                                                root.style.setProperty(this.infoHeightVarName, this.info.clientHeight + "px");
-                                                this.isHover = false;
-                                                clearInterval(inter);
-                                        }
-                                }
-                        }, 1000);
-                },
-
-                addCss: function(nodeID: string, cssCode: string) {
-                        if(!document.getElementById(nodeID)){
-                                const styleElement = document.createElement('style') as HTMLStyleElement;
-                                styleElement.type = 'text/css';
-                                styleElement.id = nodeID;
-                                styleElement.appendChild(document.createTextNode(cssCode));
-                                document.getElementsByTagName('head')[0].appendChild(styleElement);
-                        } else {
-                                const styleElement = document.getElementById(nodeID) as HTMLStyleElement;
-                                styleElement.type = 'text/css';
-                                styleElement.id = nodeID;
-                                let children = styleElement.childNodes;
-                                for(let i = 0; i < children.length; i++) {
-                                        console.log('Node: ' + children[i].nodeValue + '  value: ' + children[i].nodeValue)
-                                        children[i].remove
-                                }
-                                styleElement.appendChild(document.createTextNode(cssCode));
-                                document.getElementsByTagName('head')[0].appendChild(styleElement);
-                        }
-                }
-        },
-
-        watch: {
-                radioGroup: function() {
-                        // find corresponding group and id and set checked value
-                        for(let i = 0; i < this.radioGroup.length; i++) {
-                                if(this.radioGroup[i].group === this.group) {
-                                        for(let j = 0; j < this.radioGroup[i].id.length; j++) {
-                                                if(this.radioGroup[i].id[j] === this.id) this.isSelected = this.radioGroup[i].checked[j];
-                                        }
-                                }
-                        }
-                },
-                advancedOptions: function() {
-                        console.log('advancedOptions running.');
+                        // set infor label from store
                         const mode = this.advancedOptions.mode;
                         for(const [key, value] of Object.entries(mode)) {
                                 if(typeof value === 'object') {
-                                        let newVal = value as { checked: boolean; label: string }
+                                        let newVal = value as { checked: boolean; label: string };
                                         if(key === this.id) {
-                                                this.infoLabel = newVal.label
+                                                this.infoLabel = newVal.label;
                                         }
                                 }
                         }
+
+                        // set custom css height
+                        const heightVar = ':root { --' + this.id + '-height: auto; }';
+                        this.addCss(this.infoCSSID,heightVar);
+                        const heightClass = '.' + this.infoHeightClass + ' { height: var(' + this.infoHeightVarName + '); }';
+                        this.addCss(this.infoCSSID, heightClass);
+
+                        // set custom css width
+                        const widthVar = ':root { --' + this.id + '-width: full; }';
+                        this.addCss(this.infoCSSID, widthVar);
+                        const widthClass = '.' + this.infoWidthClass + ' { width: var(' + this.infoWidthVarName + '); }';
+                        this.addCss(this.infoCSSID, widthClass);
+
                 },
 
-                ['info.clientHeight']: function(newVal, oldVal) {
-                        console.log(this.id + 'oldVal: ', oldVal, ' newVal: ', newVal);
-                        if(newVal > 50) {
-                                const heightVar = ':root { --' + this.id + '-height: ' + newVal + 'px; }';
-                                this.addCss(this.infoCSSID,heightVar);
-                                const setClass = '.' + this.infoHeightClass + ' { height: var(' + this.infoHeightVarName + '); }';
-                                this.addCss(this.infoCSSID, setClass);
+                mounted() {
+                        this.info = this.$refs.info as HTMLDivElement;
+
+                        window.addEventListener('resize', () => { this.windowWidth = window.innerWidth });
+                },
+
+                methods: {
+                        clicked: function() {
+                                let mygroup: { group: string; id: string[]; checked: boolean[] } = { group: this.group, id: [this.id], checked: [true] };
+                                store.commit('registerComponentRadioGroup', mygroup);
+                                store.dispatch('syncModeWithRadioGroup', { group: this.group, id: this.id });
+                                store.commit('deployAssociation', this.value);
+                        },
+
+                        logInfoHeight: function() {
+                                if(!this.loggingInfoHeight) {
+                                        this.loggingInfoHeight = true;
+                                        const root = document.documentElement;
+                                        return new Promise((resolve, reject) => {
+                                                let inter = setInterval(() => {
+                                                        root.style.setProperty(this.infoHeightVarName, "auto");
+                                                        if(this.info !== null && !this.isAnimatingHeight && this.info.clientHeight > 50) {
+                                                                root.style.setProperty(this.infoHeightVarName, this.info.clientHeight + "px");
+                                                                this.infoHeight = this.info.clientHeight;
+                                                                if(this.infoHeight > 50) {
+                                                                        this.loggingInfoHeight = false;
+                                                                        resolve(resolve);
+                                                                        clearInterval(inter);
+                                                                } else {
+                                                                        reject(reject);
+                                                                        clearInterval(inter);
+                                                                }
+                                                                
+                                                        }
+                                                }, this.infoAnimationDuration);
+                                        });
+                                }
+                        },
+
+                        logInfoWidth: function() {
+                                if(!this.loggingInfoWidth) {
+                                        this.loggingInfoWidth = true;
+                                        const root = document.documentElement;
+                                        return new Promise((resolve, reject) => {
+                                                let inter = setInterval(() => {
+                                                        root.style.setProperty(this.infoWidthVarName, "100%");
+                                                        if(this.info !== null && !this.isAnimatingWidth && this.info.clientWidth > 100 && this.info.clientWidth < 10000) {
+                                                                root.style.setProperty(this.infoWidthVarName, this.info.clientWidth + "px");
+                                                                this.infoWidth = this.info.clientWidth;
+                                                                if(this.infoWidth > 100 && this.infoWidth < 10000) {
+                                                                        this.loggingInfoWidth = false;
+                                                                        resolve(resolve);
+                                                                        clearInterval(inter);
+                                                                } else {
+                                                                        this.loggingInfoWidth = false;
+                                                                        reject(reject);
+                                                                        clearInterval(inter);
+                                                                }
+                                                        }
+                                                }, this.infoAnimationDuration);
+                                        });
+                                }
+                        },
+
+                        addCss: function(nodeID: string, cssCode: string) {
+                                if(!document.getElementById(nodeID)){
+                                        const styleElement = document.createElement('style') as HTMLStyleElement;
+                                        styleElement.type = 'text/css';
+                                        styleElement.id = nodeID;
+                                        styleElement.appendChild(document.createTextNode(cssCode));
+                                        document.getElementsByTagName('head')[0].appendChild(styleElement);
+                                } else {
+                                        const styleElement = document.getElementById(nodeID) as HTMLStyleElement;
+                                        styleElement.type = 'text/css';
+                                        styleElement.id = nodeID;
+                                        let children = styleElement.childNodes;
+                                        for(let i = 0; i < children.length; i++) {
+                                                children[i].remove
+                                        }
+                                        styleElement.appendChild(document.createTextNode(cssCode));
+                                        document.getElementsByTagName('head')[0].appendChild(styleElement);
+                                }
+                        },
+
+                        setIsHoverFalse: function() {
+                                return new Promise((resolve) => {
+                                        let inter = setInterval(() => {
+                                                if(!this.isAnimatingWidth && !this.isAnimatingHeight && !this.loggingInfoWidth && !this.loggingInfoHeight) {
+                                                        this.isHover = false;
+                                                        if(!this.isHover) {
+                                                                resolve(resolve);
+                                                                clearInterval(inter);
+                                                        }
+                                                }
+                                        }, 100);
+                                });
+                        },
+
+                        setIsHoverTrue: function() {
+                                return new Promise((resolve) => {
+                                        let inter = setInterval(() => {
+                                                this.isHover = true;
+                                                if(this.isHover) {
+                                                        resolve(resolve);
+                                                        clearInterval(inter);
+                                                }
+                                        }, 10);
+                                });
                         }
+                },
+
+                watch: {
+                        windowWidth: function() {
+                                if(store.getters.advancedOptionsIsShown) this.setIsHoverTrue().then(() => { this.logInfoHeight(); }).then(() => { this.logInfoWidth(); }).then(() => { this.setIsHoverFalse(); });
+                        },
+                        radioGroup: function() {
+                                // find corresponding group and id and set checked value
+                                for(let i = 0; i < this.radioGroup.length; i++) {
+                                        if(this.radioGroup[i].group === this.group) {
+                                                for(let j = 0; j < this.radioGroup[i].id.length; j++) {
+                                                        if(this.radioGroup[i].id[j] === this.id) this.isSelected = this.radioGroup[i].checked[j];
+                                                }
+                                        }
+                                }
+                        },
+                        advancedOptions: {
+                                deep: true,
+                                handler() {
+                                        const mode = this.advancedOptions[this.group.toLowerCase()];
+                                        for(const [key, value] of Object.entries(mode)) {
+                                                if(typeof value === 'object') {
+                                                        let newVal = value as { checked: boolean; label: string }
+                                                        if(key === this.id) {
+                                                                this.infoLabel = newVal.label
+                                                        }
+                                                }
+                                        }
+                                }
+                        },
+                        isHover: function() {
+                                if(this.isHover) {
+                                        this.isAnimatingWidth = true;
+                                        this.isAnimatingHeight = true;
+                                }
+                        },
+                        isAnimatingWidth: function() {
+                                setTimeout(() => {
+                                        this.isAnimatingWidth = false; 
+                                }, this.infoAnimationDuration * 3);
+                        },
+                        isAnimatingHeight: function() {
+                                setTimeout(() => {
+                                        this.isAnimatingHeight = false;
+                                }, this.infoAnimationDuration * 3);
+                        },
+                        advancedOptionsIsShown: function() {
+                                if(this.advancedOptionsIsShown) this.setIsHoverTrue().then(() => { this.logInfoHeight(); }).then(() => { this.logInfoWidth(); }).then(() => { this.setIsHoverFalse(); });
+                        },
                 }
-        }
-});
+        });
 </script>
 
 <style scoped>
 
         :root {
                 --info-height: auto;
+                --info-width: 100%;
         }
 
         .info-height {
                 height: var(--info-height);
+        }
+
+        .info-width {
+                width: var(--info-width);
         }
 
         .ba-radio {

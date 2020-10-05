@@ -73,8 +73,6 @@ export default defineComponent({
                                         try {
                                                 let checksOut = false;
                                                 for (let i = 0; i <= selection.length - 1; i++) {
-                                                        console.log(fs.existsSync(selection[i].path));
-                                                        console.log(fs.lstatSync(selection[i].path).isDirectory());
                                                         if(fs.existsSync(selection[i].path) && fs.lstatSync(selection[i].path).isDirectory()) checksOut = true; 
                                                 }
                                                 if(checksOut){

@@ -20,7 +20,10 @@ module.exports = {
                         },
                 },
         },
-        variants: {},
+        variants: {
+                backgroundColor: ['responsive', 'hover', 'focus', 'disabled'],
+                textColor: ['responsive', 'hover', 'focus', 'disabled'],
+        },
         plugins: [],
         purge: [
                 './src/**/*.html',
