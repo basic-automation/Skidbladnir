@@ -1,7 +1,7 @@
 <template>
         <button :class="['flex flex-col bg-gray-500 cursor-pointer transition-all duration-300 ease-in-out focus:outline-none', {'rounded-top-20px': isOpen}, {'rounded-20px': !isOpen}, {'hidden': !visible}]" @click="isOpen = !isOpen" @focus="focused = true" @blur="focused = false">
-                <div class="flex flex-row h-10 items-center justify-center pointer-events-none">
-                        <label class="text-xs mx-4 uppercase w-full flex-1">{{ label }}</label>
+                <div class="flex flex-row w-full h-10 items-center justify-center pointer-events-none">
+                        <label class="text-xs mx-4 uppercase flex-1 text-left">{{ label }}</label>
                         <div class="flex justify-center items-center text-gray-900 mr-4">
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12" :class="['fill-current h-3', {'transform-rotate-180': isOpen}, {'animate-bounce': focused }]">
                                         <path fill="#1a202c" d="M6 12L0 0h12z"/>

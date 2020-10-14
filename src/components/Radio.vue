@@ -69,6 +69,7 @@
                         advancedOptions: () => store.getters.advancedOptions,
                         advancedOptionsIsShown: () => store.getters.advancedOptionsIsShown,
                         radioGroup: () => store.getters.componentsRadio,
+                        componentCategory: () => store.getters.componentCategory as [{ category: string; group: string; visible: boolean }],
                 },
 
                 created() {
@@ -78,8 +79,8 @@
                         // register component with store
                         store.commit('registerComponentRadioGroup', mygroup);
 
-                        // set infor label from store
-                        const mode = this.advancedOptions.mode;
+                        // set info label from store
+                        const mode = this.advancedOptions[this.group.toLowerCase()];
                         for(const [key, value] of Object.entries(mode)) {
                                 if(typeof value === 'object') {
                                         let newVal = value as { checked: boolean; label: string };
@@ -88,6 +89,8 @@
                                         }
                                 }
                         }
+
+                        console.log('radio group: ', mode);
 
                         // set custom css height
                         const heightVar = ':root { --' + this.id + '-height: auto; }';
@@ -105,7 +108,6 @@
 
                 mounted() {
                         this.info = this.$refs.info as HTMLDivElement;
-
                         window.addEventListener('resize', () => { this.windowWidth = window.innerWidth });
                 },
 
@@ -259,8 +261,32 @@
                                 }, this.infoAnimationDuration * 3);
                         },
                         advancedOptionsIsShown: function() {
-                                if(this.advancedOptionsIsShown) this.setIsHoverTrue().then(() => { this.logInfoHeight(); }).then(() => { this.logInfoWidth(); }).then(() => { this.setIsHoverFalse(); });
+                                if(this.advancedOptionsIsShown) {
+                                        this.setIsHoverTrue().then(() => {
+                                                this.logInfoHeight();
+                                        }).then(() => { 
+                                                this.logInfoWidth();
+                                        }).then(() => {
+                                                this.setIsHoverFalse();
+                                        });
+                                }
                         },
+                        componentCategory: {
+                                deep: true,
+                                handler() {
+                                        for(let i = 0; i < this.componentCategory.length; i++) {
+                                                if(this.componentCategory[i].group === 'CATcompression' && this.componentCategory[i].visible === true) {
+                                                        this.setIsHoverTrue().then(() => {
+                                                                this.logInfoHeight();
+                                                        }).then(() => { 
+                                                                this.logInfoWidth();
+                                                        }).then(() => {
+                                                                this.setIsHoverFalse();
+                                                        });
+                                                }
+                                        }
+                                }
+                        }
                 }
         });
 </script>

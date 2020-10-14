@@ -1,11 +1,12 @@
 <template>
         <div :class="['flex flex-col flex-1 justify-center items-center transition-all ease-in-out duration-500 w-full', { 'hidden': !visible }]">
-                <h1 class="flex items-center text-gray-500 uppercase text-lg antialiased">Quality</h1>
+                <h1 class="flex items-center text-gray-500 uppercase text-lg antialiased">Compression</h1>
                 <div class="grid grid-cols-1 sm:grid-cols-2 items-start justify-center gap-4 mt-4 max-w-4xl">
-                        <Select group="preset" category="quality" dependency="mode" />
-                        <Slider group="quality" category="quality"  dependency="mode" />
-                        <Slider group="alphaQuality" category="quality" dependency="mode" />
-                        <Slider group="compressionMethod" category="quality" dependency="mode" />
+                        <Radio group="compression" id="fileSize" label="File Size" />
+                        <Radio group="compression" id="PSNR" label="Peak Signal to Noise Ratio (PSNR)" />
+                        <Slider group="targetSize" category="compression" dependency="compression" />
+                        <Slider group="targetPSNR" category="compression" dependency="compression" />
+                        <Slider group="numberOfPasses" category="compression" dependency="compression" />
                 </div>
         </div>
 </template>
@@ -15,12 +16,12 @@
         import store from '../store';
 
         export default defineComponent({
-                name: 'Quality',
+                name: 'Compression',
 
                 data() {
                         return {
                                 category: 'category',
-                                group: 'CATquality',
+                                group: 'CATcompression',
                                 visible: false,
                         }
                 },
@@ -36,7 +37,7 @@
                                 handler() {
                                         if(this.group && this.category) {
                                                 for(let i= 0; i < this.categories.length; i++) {
-                                                        if(this.categories[i].group === this.group){
+                                                        if(this.categories[i].group === this.group) {
                                                                 this.visible = this.categories[i].visible;
                                                         }
                                                 }

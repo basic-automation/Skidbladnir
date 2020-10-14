@@ -32,31 +32,66 @@ export const store = createStore({
                                         visible: false,
                                 }
                         ],
+                        slider:
+                        [
+                                {
+                                        category: '',
+                                        group: '',
+                                        dependency: '',
+                                        value: 1,
+                                        label: '',
+                                        min: 1,
+                                        max: 1,
+                                        visible: false,
+                                }
+
+                        ],
+                        category: 
+                        [
+                                {
+                                        category: 'category',
+                                        group: 'CATquality',
+                                        visible: false,
+                                },
+                                {
+                                        category: 'category',
+                                        group: 'CATcompression',
+                                        visible: false,
+                                }
+                        ]
                 },
                 advancedOptions: {
                         isShown: false,
                         associations: 
                         {
                                 jpegLike: {
-                                        components: ['preset'],
-                                        visible: [false]
+                                        components: ['CATquality', 'CATcompression', 'preset', 'quality', 'alphaQuality', 'compressionMethod'],
+                                        visible: [true, false, false, true, true, true],
                                 },
                                 lossy: {
-                                        components: ['preset'],
-                                        visible: [false]
+                                        components: ['CATquality', 'CATcompression', 'preset', 'quality', 'alphaQuality', 'compressionMethod', 'numberOfPasses'],
+                                        visible: [true, true, false, true, true, true, true],
                                 },
                                 lossless: {
-                                        components: ['preset'],
-                                        visible: [false]
+                                        components: ['CATquality', 'CATcompression', 'preset', 'quality', 'alphaQuality', 'compressionMethod'],
+                                        visible: [true, false, false, true, true, true],
                                 },
                                 nearLossless: {
-                                        components: ['preset'],
-                                        visible: [false]
+                                        components: ['CATquality', 'CATcompression', 'preset', 'quality', 'alphaQuality', 'compressionMethod'],
+                                        visible: [true, false, false, true, false, false],
                                 },
                                 preset: {
-                                        components: ['preset'],
-                                        visible: [true]
+                                        components: ['CATquality', 'CATcompression', 'preset', 'quality', 'alphaQuality', 'compressionMethod'],
+                                        visible: [true, false, true, true, false, false],
                                 },
+                                fileSize: {
+                                        components: ['targetSize', 'targetPSNR'],
+                                        visible: [true, false],
+                                },
+                                PSNR: {
+                                        components: ['targetSize', 'targetPSNR'],
+                                        visible: [false, true],
+                                }
                         },
                         mode: {
                                 jpegLike: {
@@ -120,8 +155,59 @@ export const store = createStore({
                                         },
         
                                 ],
-                                
-                        }
+                                quality: {
+                                        group: 'quality',
+                                        label: 'Quality',
+                                        value: 100,
+                                        min: 1,
+                                        max: 100,
+                                },
+                                alphaquality: {
+                                        group: 'alphaQuality',
+                                        label: 'Alpha Quality',
+                                        value: 100,
+                                        min: 1,
+                                        max: 100,
+                                },
+                                compressionmethod: {
+                                        group: 'compressionMethod',
+                                        label: 'Compression Method',
+                                        value: 4,
+                                        min: 0,
+                                        max: 6,
+                                }
+                        },
+                        compression: {
+                                fileSize: {
+                                        checked: true,
+                                        label: 'Specify a target size (in bytes) to try and reach for the compressed output. The compressor will make several passes of partial encoding in order to get as close as possible to this target. If both -size and -psnr are used, -size value will prevail.',
+                                },
+                                PSNR: {
+                                        checked: false,
+                                        label: 'Specify a target PSNR (in dB) to try and reach for the compressed output. The compressor will make several passes of partial encoding in order to get as close as possible to this target. If both -size and -psnr are used, -size value will prevail.',
+                                },
+                                targetsize: {
+                                        group: 'targetSize',
+                                        label: 'Target Size',
+                                        value: 4,
+                                        min: 1,
+                                        max: 10000,
+                                },
+                                targetpsnr: {
+                                        group: 'targetPSNR',
+                                        label: 'Target PSNR (dB)',
+                                        value: 4,
+                                        min: 1,
+                                        max: 10000,
+                                },
+                                numberofpasses: {
+                                        group: 'numberOfPasses',
+                                        label: 'Number of Passes',
+                                        value: 6,
+                                        min: 1,
+                                        max: 10,
+                                }
+                        },
                 },
         },
 
@@ -132,6 +218,8 @@ export const store = createStore({
                 appCanDragEnter: state => { return state.app.canDragEnter },
                 componentsRadio: state => { return state.components.radio },
                 componentsSelect: state => { return state.components.select },
+                componentSlider: state => { return state.components.slider },
+                componentCategory: state => { return state.components.category },
                 advancedOptions: state => { return state.advancedOptions },
                 advancedOptionsIsShown: state => { return state.advancedOptions.isShown },
         },
@@ -221,6 +309,24 @@ export const store = createStore({
                         select.push(payload);
                         state.components.select = select;
                 },
+                registerCompnentSliderGroup: (state, payload: { category: string; group: string; dependency: string; value: number; label: string; min: number; max: number; visible: boolean }) => {
+                        let slider = state.components.slider;
+
+                        // delete any existing items with the same name or where name is empty
+                        for(let i = 0; i < slider.length; i++){
+                                if(slider[i].group === payload.group) {
+                                        delete slider[i];
+                                        slider = slider.filter((a) => { return typeof a !== 'undefined' });
+                                } else if (slider[i].group === '') {
+                                        delete slider[i]; slider = slider.filter((a) => { return typeof a !== 'undefined' });
+                                }
+                        }
+
+                        slider.push(payload);
+                        state.components.slider = slider;
+
+                        console.log('slider: ', slider);
+                },
                 deployAssociation: (state, payload: string) => {
                         const assoc = state.advancedOptions.associations[payload as keyof {}] as { components: string[]; visible: boolean[] }
                         if(assoc) {
@@ -239,6 +345,7 @@ export const store = createStore({
                                                                 if('visible' in componentValue[j]) {
                                                                         if(componentValue[j].group == associations[i]) {
                                                                                 componentValue[j].visible = visible[i];
+                                                                                console.log(componentValue[j].group, ' Visibility: ', componentValue[j].visible);
                                                                         }
                                                                 }
                                                         }
