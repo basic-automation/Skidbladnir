@@ -57,7 +57,17 @@ export const store = createStore({
                                         category: 'category',
                                         group: 'CATcompression',
                                         visible: false,
-                                }
+                                },
+                                {
+                                        category: 'category',
+                                        group: 'CATdeblocking',
+                                        visible: false,
+                                },
+                                {
+                                        category: 'category',
+                                        group: 'CATnoiseShaping',
+                                        visible: false,
+                                },
                         ]
                 },
                 advancedOptions: {
@@ -69,8 +79,8 @@ export const store = createStore({
                                         visible: [true, false, false, true, true, true],
                                 },
                                 lossy: {
-                                        components: ['CATquality', 'CATcompression', 'preset', 'quality', 'alphaQuality', 'compressionMethod', 'numberOfPasses'],
-                                        visible: [true, true, false, true, true, true, true],
+                                        components: ['numberOfSegments', 'amplitude', 'CATnoiseShaping', 'CATquality', 'CATcompression', 'CATdeblocking', 'preset', 'quality', 'alphaQuality', 'compressionMethod', 'numberOfPasses'],
+                                        visible: [true, true, true, true, true, true, false, true, true, true, true],
                                 },
                                 lossless: {
                                         components: ['CATquality', 'CATcompression', 'preset', 'quality', 'alphaQuality', 'compressionMethod'],
@@ -91,6 +101,18 @@ export const store = createStore({
                                 PSNR: {
                                         components: ['targetSize', 'targetPSNR'],
                                         visible: [false, true],
+                                },
+                                autoFilter: {
+                                        components: ['strength', 'sharpness'],
+                                        visible: [false, false],
+                                },
+                                strongFilter: {
+                                        components: ['strength', 'sharpness'],
+                                        visible: [true, true],
+                                },
+                                simpleFilter: {
+                                        components: ['strength', 'sharpness'],
+                                        visible: [true, true],
                                 }
                         },
                         mode: {
@@ -188,14 +210,14 @@ export const store = createStore({
                                 },
                                 targetsize: {
                                         group: 'targetSize',
-                                        label: 'Target Size',
+                                        label: 'Target Size (bytes)',
                                         value: 4,
                                         min: 1,
                                         max: 10000,
                                 },
                                 targetpsnr: {
                                         group: 'targetPSNR',
-                                        label: 'Target PSNR (dB)',
+                                        label: 'Target PSNR (decibels)',
                                         value: 4,
                                         min: 1,
                                         max: 10000,
@@ -207,6 +229,50 @@ export const store = createStore({
                                         min: 1,
                                         max: 10,
                                 }
+                        },
+                        deblocking: {
+                                autoFilter: {
+                                        checked: true,
+                                        label: 'Turns auto-filter on. This algorithm will spend additional time optimizing the filtering strength to reach a well-balanced quality.',
+                                },
+                                strongFilter: {
+                                        checked: true,
+                                        label: 'Use strong filtering (if filtering is being used thanks to the -f option). Strong filtering is on by default.',
+                                },
+                                simpleFilter: {
+                                        checked: true,
+                                        label: 'Disable strong filtering (if filtering is being used thanks to the -f option) and use simple filtering instead.',
+                                },
+                                strength: {
+                                        group: 'strength',
+                                        label: 'Strength',
+                                        value: 20,
+                                        min: 0,
+                                        max: 100,
+                                },
+                                sharpness: {
+                                        group: 'sharpness',
+                                        label: 'Sharpness',
+                                        value: 20,
+                                        min: 0,
+                                        max: 7,
+                                },
+                        },
+                        noiseshaping: {
+                                amplitude: {
+                                        group: 'amplitude',
+                                        label: 'amplitude',
+                                        value: 50,
+                                        min: 0,
+                                        max: 100,
+                                },
+                                numberofsegments: {
+                                        group: 'numberOfSegments',
+                                        label: 'Number of Segments',
+                                        value: 4,
+                                        min: 1,
+                                        max: 4,
+                                },
                         },
                 },
         },

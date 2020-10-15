@@ -1,7 +1,7 @@
 <template>
         <div :class="['flex bg-gray-500 rounded-full h-10 flow-row w-full justify-center items-center', { 'hidden': !visible }]">
                 <label :class="['flex text-xs uppercase mx-4 whitespace-no-wrap']">{{ label }}</label>
-                <input :class="['flex flex-1 focus:outline-none min-w-0']" type="range" :min="min" :max="max" v-model.number="inputValue"/>
+                <input :class="['flex flex-1 focus:outline-none min-w-0', {'reversed-range': rtl}]" type="range" :min="min" :max="max" v-model.number="inputValue"/>
                 <label :class="['flex text-xs uppercase mx-4']"> {{ inputValue }} </label>
         </div>
 </template>
@@ -17,6 +17,11 @@
                         group: String,
                         category: String,
                         dependency: String,
+                        rtl: {
+                                type: Boolean,
+                                required: false,
+                                default: false,
+                        },
                 },
 
                 data() {
@@ -110,5 +115,9 @@
                 border-color: #a0aec0;
                 border-radius: 100%;
                 margin-top: -.4rem;
+        }
+
+        .reversed-range {
+                direction: rtl
         }
 </style>

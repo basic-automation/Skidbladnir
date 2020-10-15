@@ -20,6 +20,12 @@
                 <section :class="{'grid grid-cols-1 items-center justify-center w-full mt-12': advancedOptionsIsShown, 'hidden': !advancedOptionsIsShown}">
                         <Compression />
                 </section>
+                <section :class="{'grid grid-cols-1 items-center justify-center w-full mt-12': advancedOptionsIsShown, 'hidden': !advancedOptionsIsShown}">
+                        <Deblocking />
+                </section>
+                <section :class="{'grid grid-cols-1 items-center justify-center w-full mt-12': advancedOptionsIsShown, 'hidden': !advancedOptionsIsShown}">
+                        <NoiseShaping />
+                </section>
                 <section class="w-full min-h-48 flex-shrink-0"></section>
         </div>
         <div class="w-full h-32 absolute bottom-0 opacity-100 border-t border-gray-500 ba-glass antialiased"></div>
