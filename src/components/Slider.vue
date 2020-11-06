@@ -63,6 +63,7 @@
                                         this.label = this.advancedOptions[this.category.toLowerCase()][this.group.toLowerCase()].label;
                                         this.min = this.advancedOptions[this.category.toLowerCase()][this.group.toLowerCase()].min;
                                         this.max = this.advancedOptions[this.category.toLowerCase()][this.group.toLowerCase()].max;
+                                        this.inputValue = this.advancedOptions[this.category.toLowerCase()][this.group.toLowerCase()].value;
                                 }
                         }
 

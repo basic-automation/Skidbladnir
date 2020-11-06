@@ -1,5 +1,5 @@
 <template>
-        <button ref="button" :class="['flex bg-gray-500 flex-col w-full md:w-auto items-center justify-center cursor-pointer flex-shrink-0 focus:outline-none transition-size duration-300 ease-in-out', { 'rounded-top-20px': isHover, 'rounded-20px': !isHover }]" @click="clicked(); isFocused = false" @focus="isFocused = true" @blur="isFocused = false" @mouseover="setIsHoverTrue()" @mouseout="setIsHoverFalse()">
+        <button ref="button" :class="['flex bg-gray-500 flex-col w-full md:w-auto items-center justify-center cursor-pointer flex-shrink-0 focus:outline-none transition-size duration-300 ease-in-out', { 'rounded-top-20px': isHover, 'rounded-20px': !isHover }]" @click="clicked(); isFocused = false" @focus="isFocused = true" @blur="isFocused = false" @mouseover="setMouseOverTrue()" @mouseout="setIsHoverFalse(); isMouseOver = false;">
                 <div :class="['flex h-10 flex-row items-center justify-center w-full cursor-pointer flex-shrink-0 pointer-events-none']">
                         <label :class="['flex ml-4 justify-start items-center h-full text-xs cursor-pointer antialiased flex-shrink-0 pointer-events-none']">{{ label }}</label>
                         <div :class="['flex-1']" />
@@ -46,6 +46,8 @@
                                 isSelected: false,
                                 isFocused: false,
                                 isHover: true,
+                                isMouseOver: false,
+                                hoverTimerDefault: 1000,
                                 buttonWidth: 'auto',
                                 infoLabel: '',
                                 info: null as HTMLDivElement | null,
@@ -213,7 +215,23 @@
                                                 }
                                         }, 10);
                                 });
-                        }
+                        },
+
+                        setMouseOverTrue: function() {
+                                this.isMouseOver = true;
+                        },
+
+                        continueHover: function() {
+                                return new Promise((resolve, reject) => {
+                                        setTimeout(() => {
+                                                if(this.isMouseOver == true) {
+                                                        resolve(resolve);
+                                                        console.log('continueHover Resolved.')
+                                                } else reject(reject);
+                                        }, this.hoverTimerDefault);
+                                });
+                        },
+                
                 },
 
                 watch: {
@@ -286,6 +304,9 @@
                                                 }
                                         }
                                 }
+                        },
+                        isMouseOver: function() {
+                                if(this.isMouseOver == true) Promise.all([this.continueHover()]).then(() => { this.setIsHoverTrue() });
                         }
                 }
         });

@@ -4,6 +4,8 @@
                 <div class="grid grid-cols-1 sm:grid-cols-2 items-start justify-center gap-4 mt-4 max-w-4xl">
                         <Radio group="compression" id="fileSize" label="File Size" />
                         <Radio group="compression" id="PSNR" label="Peak Signal to Noise Ratio (PSNR)" />
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 items-start justify-center gap-4 mt-4 max-w-4xl">
                         <Slider group="targetSize" category="compression" dependency="compression" />
                         <Slider group="targetPSNR" category="compression" dependency="compression" />
                         <Slider group="numberOfPasses" category="compression" dependency="compression" />
