@@ -92,8 +92,6 @@
                                 }
                         }
 
-                        console.log('radio group: ', mode);
-
                         // set custom css height
                         const heightVar = ':root { --' + this.id + '-height: auto; }';
                         this.addCss(this.infoCSSID,heightVar);
@@ -226,7 +224,6 @@
                                         setTimeout(() => {
                                                 if(this.isMouseOver == true) {
                                                         resolve(resolve);
-                                                        console.log('continueHover Resolved.')
                                                 } else reject(reject);
                                         }, this.hoverTimerDefault);
                                 });

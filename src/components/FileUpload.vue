@@ -5,19 +5,19 @@
 			<label :class="{ 'hidden pointer-events-none': isDropZone, 'ml-6 uppercase text-xs my-auto align-middle antialiased pointer-events-none': !isDropZone }" @dragover.prevent @dragleave.prevent>{{ label }}</label>
 			<input v-model="input" disabled type="text" :class="{ 'hidden pointer-events-none': isDropZone, 'flex-1 h-10 ml-4 rounded-full rounded-l-none mr-2 focus:outline-none bg-transparent text-gray-900 text-xs transition-all ease-in-out duration-500 flex-shrink w-full': !isDropZone }" @dragover.prevent @dragleave.prevent @dragenter.prevent />
 		</div>
-		<button :class="{ 'hidden pointer-events-none': isDropZone, 'flex md:ml-4 mt-4 md:mt-0 h-10 uppercase rounded-full glow-xl w-full md:w-32 md:min-w-32 text-gray-500 text-xs justify-center items-center focus:outline-none focus:ba-inner-shaddow-sm hover:glow-sm transition-all ease-in-out duration-1000 antialiased flex-shrink-0': !isDropZone }" @click="$refs.file.click()" @dragover.prevent @dragleave.prevent>Browse</button>
-		<div :class="{ 'hidden': !isDropZone, 'flex md:h-full min-h-10 justify-center items-center flex-1 text-gray-900 uppercase font-bold text-xs pointer-events-auto z-50': isDropZone }" @dragover.prevent @dragleave="dropZoneDragLeave()" @drop.prevent="fileChangeHandler($event, type, true), fileUploadDropFile()">
+		<button :class="{ 'hidden pointer-events-none': isDropZone, 'flex md:ml-4 mt-4 md:mt-0 h-10 uppercase rounded-full glow-xl w-full md:w-32 md:min-w-32 text-gray-500 text-xs justify-center items-center focus:outline-none focus:ba-inner-shaddow-sm hover:glow-sm transition-all ease-in-out duration-1000 antialiased flex-shrink-0': !isDropZone }" @click="browseClick()" @dragover.prevent @dragleave.prevent>Browse</button>
+		<div :class="{ 'hidden': !isDropZone, 'flex md:h-full min-h-10 justify-center items-center flex-1 text-gray-900 uppercase font-bold text-xs pointer-events-auto z-50': isDropZone }" @dragover.prevent @dragleave="dropZoneDragLeave()" @drop.prevent="fileChangeHandler(true, $event), fileUploadDropFile()">
 			<p :class="{ 'pointer-events-none': isDropZone }">{{ dropZoneLabel }}</p>
 		</div>
 	</div>
-	<input type="file" ref="file" class="hidden pointer-events-none" @change="fileChangeHandler($event, type, false)" :multiple="isInput" :directory="isOutput" />
+	<input type="file" ref="file" class="hidden pointer-events-none" @change="fileChangeHandler(false, $event)" :multiple="isInput()" :webkitdirectory="isOutput()" />
 </template>
 
 <script lang="ts">
 /* eslint-disable max-len */
 import { defineComponent } from "vue";
 import store from "../store";
-import fs from "fs";
+const { dialog } = require('electron').remote
 
 export default defineComponent({
         name: "FileUpload",
@@ -25,13 +25,16 @@ export default defineComponent({
         props: {
                 label: String,
                 dropZoneLabel: String,
-                type: String,
+                type: {
+                        type: String,
+                        required: true,
+                },
         },
 
         data() {
                 return {
-                        isInput: () => { if(this.type === "input") return true; else return false; },
-                        isOutput: () => { if(this.type === "output") return true; else return false; },
+                        isInput: (): boolean => { if(this.type === "input") return true; else return false; },
+                        isOutput: (): boolean => { if(this.type === "output") return true; else return false; },
                         input: "",
                         isDropZone: false,
                         isFileUploadDragEnter: false,
@@ -45,50 +48,50 @@ export default defineComponent({
         computed: {
                 appIsDragEnter: () => { return store.getters.appIsDragEnter; },
                 appCanDragEnter: () => { return store.getters.appCanDragEnter; },
+                inputFiles: () => { return store.getters.inputFiles; },
+                outputFiles: () => { return store.getters.outputFiles; },
         },
 
         setup() { return { store }; },
 
         methods: {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                fileChangeHandler(event: any, type: string, fromDropZone: boolean) {
-                        let selection: FileList;
-                        if(!fromDropZone) selection = event.target.files; else selection = event.dataTransfer.files;
-                        if(selection.length > 0) {
-                                this.input = "";
-                                for (let i = 0; i <= selection.length - 1; i++) {
-                                        if (selection[i].path) this.input += selection[i].path; else this.input += selection[i].name;
-                                        if (i != selection.length - 1) this.input += ", ";
-                                }
-                                const payload = { type, selection };
-                                if(this.type === "input") {
-                                        try {
-                                                this.store.dispatch("addFiles", payload);
-                                                this.isError = false;
-                                        } catch (error) {
-                                                this.input = error;
-                                                this.isError = true;
-                                        }
-                                } else if (this.type === "output") {
-                                        try {
-                                                let checksOut = false;
-                                                for (let i = 0; i <= selection.length - 1; i++) {
-                                                        if(fs.existsSync(selection[i].path) && fs.lstatSync(selection[i].path).isDirectory()) checksOut = true; 
-                                                }
-                                                if(checksOut){
-                                                        this.store.dispatch("addFiles",payload);
-                                                        this.isError = false;
-                                                } else {
-                                                        throw "Must select one or more folders."
-                                                }
-                                        } catch (error) {
-                                                this.input = error;
-                                                this.isError = true;
-                                        }
-                                }
+                browseClick() {
+                        if(this.type === 'input') {
+                                const fileInput = this.$refs.file as HTMLInputElement;
+                                fileInput.click();
+                        } else {
+                                dialog.showOpenDialog({
+                                        properties: ['openDirectory', 'multiSelections']
+                                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                }).then((result: any) => {
+                                        this.fileChangeHandler(false, undefined, result.filePaths);
+                                });
+                                
                         }
-                },
 
+                },
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                fileChangeHandler(fromDropZone: boolean, event?: any, path?: string[]) {
+                        // if neither path nor event are passed return false
+                        if(typeof path !== 'undefined' && typeof event !== 'undefined') return false;
+
+                        //define vars
+                        let selection: string[] = [];
+
+                        //if this is an input selector
+                        if(this.isInput()) {
+                                //if the file was selected via drap and drop use datatransfer api else use files api
+                                if(fromDropZone) for(let i =0; i < event.dataTransfer.files.length; i++) selection[i] = event.dataTransfer.files[i].path;
+                                else for(let i =0; i < event.target.files.length; i++) selection[i] = event.target.files[i].path;
+                                
+                        } else if(typeof path !== 'undefined') selection = path;
+
+                        //construct payload
+                        const payload = { type: this.type, paths: selection };
+
+                        //update the store
+                        this.store.dispatch("addFiles",payload);
+                }, 
                 fileUploadDragEnter() { if(!this.isFileUploadDragEnter) this.isFileUploadDragEnter = true; },
                 fileUploadDropFile() { if (!this.isFileUploadDropFile) this.isFileUploadDropFile = true; },
                 dropZoneDragEnter() { if (!this.isDropZoneDragEnter) this.isDropZoneDragEnter = true; },
@@ -120,6 +123,31 @@ export default defineComponent({
                         this.isFileUploadDragEnter = false;
                         this.isFileUploadDropFile = false;
                         this.isDropZone = false;
+                },
+                inputFiles: {
+                        deep: true,
+                        handler() {
+                                if(this.type === 'input') {
+                                        this.input = '';
+                                        for(let i = 0; i < this.inputFiles.length; i++) {
+                                                if(i === this.inputFiles.length - 1) this.input += this.inputFiles[i];
+                                                else this.input += this.inputFiles[i] + ', ';
+                                        }
+                                }
+                                
+                        }
+                },
+                outputFiles: {
+                        deep: true,
+                        handler() {
+                                if(this.type === 'output') {
+                                        this.input = '';
+                                        for(let i = 0; i < this.outputFiles.length; i++) {
+                                                if(i === this.outputFiles.length - 1) this.input += this.outputFiles[i];
+                                                else this.input += this.outputFiles[i] + ', ';
+                                        }
+                                }
+                        }
                 },
         },
 });

@@ -80,7 +80,6 @@
                                                                 this.label = this.sliders[i].label;
                                                                 this.inputValue = this.sliders[i].value;
                                                                 this.visible = this.sliders[i].visible;
-                                                                console.log(this.group, ' Visibility Changed To: ', this.visible)
                                                                 this.min = this.sliders[i].min;
                                                                 this.max = this.sliders[i].max;
                                                         }

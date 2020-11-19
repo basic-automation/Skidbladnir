@@ -1,5 +1,7 @@
 /* eslint-disable prefer-const */
 import { createStore } from 'vuex';
+import * as path from 'path';
+import { ipcRenderer } from 'electron';
 
 export const store = createStore({
         state: {
@@ -46,7 +48,7 @@ export const store = createStore({
                                 }
 
                         ],
-                        category: 
+                        category:
                         [
                                 {
                                         category: 'category',
@@ -72,7 +74,7 @@ export const store = createStore({
                 },
                 advancedOptions: {
                         isShown: false,
-                        associations: 
+                        associations:
                         {
                                 jpegLike: {
                                         components: ['CATquality', 'CATcompression', 'preset', 'quality', 'alphaQuality', 'compressionMethod'],
@@ -138,7 +140,7 @@ export const store = createStore({
                                 },
                         },
                         quality: {
-                                preset: 
+                                preset:
                                 [
                                         {
                                                 group: 'preset',
@@ -175,7 +177,7 @@ export const store = createStore({
                                                 label: 'Text',
                                                 value: 'text',
                                         },
-        
+
                                 ],
                                 quality: {
                                         group: 'quality',
@@ -288,6 +290,9 @@ export const store = createStore({
                 componentCategory: state => { return state.components.category },
                 advancedOptions: state => { return state.advancedOptions },
                 advancedOptionsIsShown: state => { return state.advancedOptions.isShown },
+                selectedRadio: (state) => (group: string) => { for (let i = 0; i < state.components.radio.length; i++) if (group === state.components.radio[i].group) for (let j = 0; j < state.components.radio[i].checked.length; j++) if (state.components.radio[i].checked[j] === true) return state.components.radio[i].id[j] },
+                selectedSlider: (state) => (group: string) => { for (let i = 0; i < state.components.slider.length; i++) if (state.components.slider[i].group === group) return state.components.slider[i] },
+                selectedSelect: (state) => (group: string) => { for (let i = 0; i < state.components.select.length; i++) if (state.components.select[i].group === group) return state.components.select[i] },
         },
 
         mutations: {
@@ -299,9 +304,9 @@ export const store = createStore({
                 setAdvancedOptionsMode: (state, payload: string) => {
                         let mode = state.advancedOptions.mode;
                         // if key matches payload the mark it true else mark it false
-                        for(const [key, value] of Object.entries(mode)) {
-                                if(typeof value === 'object') {
-                                        if(key === payload) value.checked = true;
+                        for (const [key, value] of Object.entries(mode)) {
+                                if (typeof value === 'object') {
+                                        if (key === payload) value.checked = true;
                                         else value.checked = false;
                                 }
                         }
@@ -311,29 +316,29 @@ export const store = createStore({
                         let mygroup = payload;
 
                         // set existing buttons clicked to false
-                        for(let i = 0; i < radio.length; i++) {
-                                for(let j = 0; j < (radio[i].checked.length); j++) {
+                        for (let i = 0; i < radio.length; i++) {
+                                for (let j = 0; j < (radio[i].checked.length); j++) {
                                         radio[i].checked[j] = false;
                                 }
                         }
 
-                        for(let i = 0; i < radio.length; i++) {
+                        for (let i = 0; i < radio.length; i++) {
                                 // merge any prevous groups with the same name
-                                if(radio[i].group === mygroup.group) {
+                                if (radio[i].group === mygroup.group) {
                                         // delete matching IDs and corresponding checked
-                                        for(let j = 0; j < radio[i].id.length; j++) {
-                                                if(radio[i].id[j] === mygroup.id[0]) {
+                                        for (let j = 0; j < radio[i].id.length; j++) {
+                                                if (radio[i].id[j] === mygroup.id[0]) {
                                                         // delete
                                                         delete radio[i].id[j];
                                                         delete radio[i].checked[j];
 
                                                         // purge undefined
-                                                        radio[i].id = radio[i].id.filter((a) => { return typeof a !== 'undefined'});
-                                                        radio[i].checked = radio[i].checked.filter((a) => { return typeof a !== 'undefined'});
+                                                        radio[i].id = radio[i].id.filter((a) => { return typeof a !== 'undefined' });
+                                                        radio[i].checked = radio[i].checked.filter((a) => { return typeof a !== 'undefined' });
 
                                                 }
                                         }
-                                        
+
                                         // merge group ids
                                         radio[i].id.push(mygroup.id[0]);
                                         mygroup.id = radio[i].id;
@@ -343,15 +348,15 @@ export const store = createStore({
                                         mygroup.checked = radio[i].checked;
 
                                         // delete matching group from radio
-                                        delete radio[i]; radio = radio.filter((a) => { return typeof a !== 'undefined'});
+                                        delete radio[i]; radio = radio.filter((a) => { return typeof a !== 'undefined' });
                                 }
                         }
 
                         // delete any groups that are undefined
                         let i = 0;
                         state.components.radio.forEach((group) => {
-                                if(group.group === '') {
-                                        delete radio[i]; radio = radio.filter((a) => { return typeof a !== 'undefined'});
+                                if (group.group === '') {
+                                        delete radio[i]; radio = radio.filter((a) => { return typeof a !== 'undefined' });
                                 }
                                 i++;
                         });
@@ -363,11 +368,11 @@ export const store = createStore({
                         let select = state.components.select;
 
                         // delete any existing items with the same group or where group is empty
-                        for(let i = 0; i < select.length; i++) {
-                                if(select[i].group === payload.group) {
+                        for (let i = 0; i < select.length; i++) {
+                                if (select[i].group === payload.group) {
                                         delete select[i];
                                         select = select.filter((a) => { return typeof a !== 'undefined' });
-                                } else if(select[i].group === '') {
+                                } else if (select[i].group === '') {
                                         delete select[i]; select = select.filter((a) => { return typeof a !== 'undefined' });
                                 }
                         }
@@ -379,8 +384,8 @@ export const store = createStore({
                         let slider = state.components.slider;
 
                         // delete any existing items with the same name or where name is empty
-                        for(let i = 0; i < slider.length; i++){
-                                if(slider[i].group === payload.group) {
+                        for (let i = 0; i < slider.length; i++) {
+                                if (slider[i].group === payload.group) {
                                         delete slider[i];
                                         slider = slider.filter((a) => { return typeof a !== 'undefined' });
                                 } else if (slider[i].group === '') {
@@ -391,27 +396,27 @@ export const store = createStore({
                         slider.push(payload);
                         state.components.slider = slider;
 
-                        console.log('slider: ', slider);
+                        //console.log('slider: ', slider);
                 },
                 deployAssociation: (state, payload: string) => {
                         const assoc = state.advancedOptions.associations[payload as keyof {}] as { components: string[]; visible: boolean[] }
-                        if(assoc) {
+                        if (assoc) {
                                 const associations = assoc.components;
                                 const visible = state.advancedOptions.associations[payload as keyof {}]['visible'] as boolean[];
                                 const components = state.components;
                                 // if preset associations for payload group are found
-                                if(associations) {
+                                if (associations) {
                                         // loop through all associations
-                                        for(let i = 0; i < associations.length; i++){
+                                        for (let i = 0; i < associations.length; i++) {
                                                 // loop through all components
-                                                for(const [, componentValue] of Object.entries(components)) {
+                                                for (const [, componentValue] of Object.entries(components)) {
                                                         // loop through each item in each component
-                                                        for(let j = 0; j < componentValue.length; j++) {
+                                                        for (let j = 0; j < componentValue.length; j++) {
                                                                 // if group matches association then set visible to true
-                                                                if('visible' in componentValue[j]) {
-                                                                        if(componentValue[j].group == associations[i]) {
+                                                                if ('visible' in componentValue[j]) {
+                                                                        if (componentValue[j].group == associations[i]) {
                                                                                 componentValue[j].visible = visible[i];
-                                                                                console.log(componentValue[j].group, ' Visibility: ', componentValue[j].visible);
+                                                                                //console.log(componentValue[j].group, ' Visibility: ', componentValue[j].visible);
                                                                         }
                                                                 }
                                                         }
@@ -423,54 +428,185 @@ export const store = createStore({
         },
 
         actions: {
-                addFiles({ commit, state }, payload: { type: string; selection: FileList }) {
-                        if (payload.type === 'input') {
-                                const promise = new Promise(() => { commit('setInputFiles', payload.selection) });
-                                
-                                promise.then(
-                                        function(result) { console.log('addFiles', result, ' :: files:', state.inputFiles) }, 
-                                        function(err) { console.log('addFiles', err, ' :: files: ', state.inputFiles) }
-                                );
-                        } else if (payload.type === 'output') {
-                                const promise = new Promise(() => { commit('setOutputFiles', payload.selection) });
-                                
-                                promise.then(
-                                        function(result) { console.log('addFiles', result, ' :: files:', state.outputFiles) }, 
-                                        function(err) { console.log('addFiles', err, ' :: files: ', state.outputFiles) }
-                                );
+
+                addFiles({ commit }, payload: { type: string; paths: string[] }) {
+                        switch(payload.type) {
+                        case "output":
+                                return new Promise(() => commit('setOutputFiles', payload.paths));
+                        default:
+                                return new Promise(() => commit('setInputFiles', payload.paths));
                         }
                 },
-
                 setAppIsDragEnter({ getters, commit }, payload: boolean) {
                         const promise = new Promise((resolve, reject) => {
                                 commit('setAppIsDragEnter', payload);
-                                if(getters.appIsDragEnter === payload) resolve(true)
+                                if (getters.appIsDragEnter === payload) resolve(true)
                                 else resolve(reject);
                         });
-                        if(promise) console.log('Store :: setAppIsDragEnter: ', payload);
+                        if (promise) return promise; //console.log('Store :: setAppIsDragEnter: ', payload);
                 },
-
                 setAdvancedOptionsIsShown({ getters, commit }, payload: boolean) {
                         const promise = new Promise((resolve, reject) => {
                                 commit('setAdvancedOptionsIsShown', payload);
-                                if(getters.advancedOptionsIsShown === payload) resolve(true);
+                                if (getters.advancedOptionsIsShown === payload) resolve(true);
                                 else resolve(reject);
                         });
 
-                        if(promise) console.log('Store :: setAdvancedOptionsIsShown: ', payload);
+                        if (promise) return promise; //console.log('Store :: setAdvancedOptionsIsShown: ', payload);
                 },
-
-                syncModeWithRadioGroup({ getters, commit }, payload: {group: string; id: string}) {
+                syncModeWithRadioGroup({ getters, commit }, payload: { group: string; id: string }) {
                         const radios = getters.componentsRadio;
-                        for(let i = 0; i < radios.length; i++) {
-                                if(radios[i].group === payload.group) {
-                                        for(let j = 0; j < radios[i].id.length; j++) {
-                                                if(radios[i].id[j] === payload.id && radios[i].checked[j] === true) {
+                        for (let i = 0; i < radios.length; i++) {
+                                if (radios[i].group === payload.group) {
+                                        for (let j = 0; j < radios[i].id.length; j++) {
+                                                if (radios[i].id[j] === payload.id && radios[i].checked[j] === true) {
                                                         commit('setAdvancedOptionsMode', payload.id);
                                                 }
                                         }
                                 }
                         }
+                },
+                constructCMD({ getters }) {
+                        const inputFiles = (): string => {
+                                if (getters.inputFiles[0]) return getters.inputFiles[0];
+                                else return 'undefined'
+                        };
+                        //console.log('Input File: ', inputFiles());
+
+                        const ouputFiles = (): string => {
+                                if (getters.outputFiles[0]) return getters.outputFiles[0];
+                                else return 'undefined';
+                        };
+                        //console.log('Output File: ', ouputFiles());
+
+                        const mode = (): string => {
+                                if (getters.selectedRadio('Mode')) return getters.selectedRadio('Mode');
+                                else return 'undefined';
+                        };
+                        //console.log('Mode: ', mode());
+
+                        const preset = (): string => {
+                                if (getters.selectedSelect('preset').value === '') return 'undefined';
+                                else return getters.selectedSelect('preset').value;
+                        }
+                        //console.log('Preset: ', preset());
+
+                        const quality = (): string => {
+                                if (getters.selectedSlider('quality').value) return getters.selectedSlider('quality').value;
+                                else return 'undefined';
+                        };
+                        //console.log('Quality: ', quality());
+
+                        const alphaQuality = (): string => {
+                                if (getters.selectedSlider('alphaQuality').value) return getters.selectedSlider('alphaQuality').value;
+                                else return 'undefined';
+                        };
+                        //console.log('Alpha Quality: ', alphaQuality());
+
+                        const compressionMethod = (): string => {
+                                if (getters.selectedSlider('compressionMethod').value) return getters.selectedSlider('compressionMethod').value;
+                                else return 'undefined';
+                        };
+                        //console.log('Compression Method: ', compressionMethod());
+
+                        const compression = (): string => {
+                                if (getters.selectedRadio('compression')) return getters.selectedRadio('compression');
+                                else return 'undefined';
+                        };
+                        //console.log('Compression: ', compression());
+
+                        const compressionTarget = (): string => {
+                                if (compression() === 'fileSize') return getters.selectedSlider('targetSize').value;
+                                else if (compression() == 'PSNR') return getters.selectedSlider('targetPSNR').value;
+                                else return 'undefined';
+                        };
+                        //console.log('Compression Taget: ', compressionTarget());
+
+                        const numberOfPasses = (): string => {
+                                if (getters.selectedSlider('numberOfPasses').value) return getters.selectedSlider('numberOfPasses').value;
+                                else return 'undefined';
+                        };
+                        //console.log('Number of Passes: ', numberOfPasses());
+
+                        const deblockingFilter = (): string => {
+                                if (getters.selectedRadio('deblocking')) return getters.selectedRadio('deblocking');
+                                else return 'undefined';
+                        };
+                        //console.log('Deblocking Filter: ', deblockingFilter());
+
+                        const deblockingStrength = (): string => {
+                                if (deblockingFilter() === 'undefined' || deblockingFilter() === 'autoFilter') return 'undefined';
+                                else return getters.selectedSlider('strength').value;
+                        };
+                        //console.log('Deblocking Filter Strength: ', deblockingStrength());
+
+                        const deblockingSharpness = (): string => {
+                                if (deblockingFilter() === 'undefined' || deblockingFilter() === 'autoFilter') return 'undefined';
+                                else return getters.selectedSlider('sharpness').value;
+                        };
+                        //console.log('Deblocking Filter Sharpness: ', deblockingSharpness());
+
+                        const noiseShapingAmplitude = (): string => {
+                                if (getters.selectedSlider('amplitude').value) return getters.selectedSlider('amplitude').value;
+                                else return 'undefined';
+                        };
+                        //console.log('Noise Shaping Amplitude: ', noiseShapingAmplitude());
+
+                        const noiseShapingSegments = (): string => {
+                                if (getters.selectedSlider('numberOfSegments').value) return getters.selectedSlider('numberOfSegments').value;
+                                else return 'undefined';
+                        };
+                        //console.log('Number of Noise Shaping Segments: ', noiseShapingSegments());
+
+                        const binariesPath = (): string => {
+                                let outputPath = path.join("./resources", "./cwebp");
+                                const isDev = ipcRenderer.sendSync('isDev');
+                                //console.log('isDev: ', isDev);
+                                const rootPath = process.cwd();
+                                const platform = (): string => {
+                                        let plat = 'undefined';
+                                        switch (process.platform) {
+                                        case 'aix': case 'freebsd': case 'linux': case 'openbsd': case 'android': plat = 'linux'; break;
+                                        case 'darwin': case 'sunos': plat = 'mac'; break;
+                                        case 'win32': plat = 'win'; break;
+                                        }
+                                        return plat;
+                                }
+
+                                if (platform() && isDev) {
+                                        //console.log('Running in Development Mode');
+                                        outputPath = path.join(rootPath, "./resources", platform(), "./cwebp");
+                                } else {
+                                        //console.log('Running in development Production Mode');
+                                }
+
+                                return outputPath;
+                        }
+
+                        const CMDObject =
+                                {
+                                        binariesPath: binariesPath(),
+                                        inputFiles: inputFiles(),
+                                        ouputFiles: ouputFiles(),
+                                        mode: mode(),
+                                        preset: preset(),
+                                        quality: quality(),
+                                        alphaQuality: alphaQuality(),
+                                        compressionMethod: compressionMethod(),
+                                        compression: compression(),
+                                        compressionTarget: compressionTarget(),
+                                        numberOfPasses: numberOfPasses(),
+                                        deblockingFilter: deblockingFilter(),
+                                        deblockingStrength: deblockingStrength(),
+                                        deblockingSharpness: deblockingSharpness(),
+                                        noiseShapingAmplitude: noiseShapingAmplitude(),
+                                        noiseShapingSegments: noiseShapingSegments()
+                                }
+                        return CMDObject;
+                        //console.log(JSON.stringify(CMDObject, null, '\t'));
+
+
+
                 },
         }
 });

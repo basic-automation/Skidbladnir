@@ -33,7 +33,7 @@
         <div class="w-full h-32 absolute bottom-0 opacity-100 border-t border-gray-500 ba-glass antialiased" :class="{'glow-xl': submitFocused}"></div>
         <div class="flex items-center justify-center h-20 w-20 rounded-full absolute bg-gray-500 ba-submit-position border border-gray-500 ba-glass-button ba-submit-inner-shaddow-xl text-gray-100 focus:outline-none transition-all focus:ba-glass-glow focus:glow-xl ease-in-out duration-1000 ba-backdrop-transition"></div>
         <div class="flex items-center justify-center h-20 w-20 rounded-full absolute bg-gray-500 ba-submit-position border border-gray-500 ba-glass-button ba-submit-inner-shaddow-xl text-gray-100 focus:outline-none transition-all focus:ba-glass-glow focus:glow-xl ease-in-out duration-1000 ba-backdrop-transition"></div>
-        <button class="flex items-center justify-center h-20 w-20 rounded-full absolute bg-gray-500 ba-submit-position border border-gray-500 ba-glass-button ba-submit-inner-shaddow-xl text-gray-100 focus:outline-none focus:ba-glass-glow focus:glow-xl transition-all ease-in-out duration-300 ba-backdrop-transition" @focus="submitFocused=true" @blur="submitFocused=false">
+        <button class="flex items-center justify-center h-20 w-20 rounded-full absolute bg-gray-500 ba-submit-position border border-gray-500 ba-glass-button ba-submit-inner-shaddow-xl text-gray-100 focus:outline-none focus:ba-glass-glow focus:glow-xl transition-all ease-in-out duration-300 ba-backdrop-transition" @focus="submitFocused=true" @blur="submitFocused=false" @click="imageSubmitted()">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 39" class="h-10"><path class="fill-current opacity-50" d="M42 0L19 23 8 13l-8 7 19 19L50 8z" data-name="Icon metro-checkmark"/></svg>
         </button>
 </template>
@@ -63,6 +63,9 @@
                         appDragEnter: () => {
                                 if(store.getters.appCanDragEnter) store.dispatch('setAppIsDragEnter', true);
                         },
+                        imageSubmitted: () => {
+                                store.dispatch('constructCMD');
+                        }
                 },
         });
 </script>

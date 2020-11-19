@@ -1,4 +1,4 @@
-import { app, protocol, BrowserWindow } from 'electron';
+import { app, protocol, BrowserWindow, ipcMain } from 'electron';
 import { createProtocol } from 'vue-cli-plugin-electron-builder/lib';
 import installExtension, { VUEJS_DEVTOOLS } from 'electron-devtools-installer';
 
@@ -33,6 +33,7 @@ function createWindow() {
                         // Use pluginOptions.nodeIntegration, leave this alone
                         // See nklayman.github.io/vue-cli-plugin-electron-builder/guide/security.html#node-integration for more info
                         nodeIntegration: (process.env.ELECTRON_NODE_INTEGRATION as unknown) as boolean,
+                        enableRemoteModule: true,
                 },
         });
 
@@ -93,3 +94,9 @@ if (isDevelopment) {
                 });
         }
 }
+
+
+// returns true if app is in development mode
+ipcMain.on('isDev', (event) => {
+        event.returnValue = require('electron-is-dev');
+});
