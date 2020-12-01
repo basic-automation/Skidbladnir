@@ -1,12 +1,12 @@
 <template>
-        <button ref="button" :class="['flex bg-gray-500 flex-col w-full md:w-auto items-center justify-center cursor-pointer flex-shrink-0 focus:outline-none transition-size duration-300 ease-in-out', { 'rounded-top-20px': isHover, 'rounded-20px': !isHover }]" @click="clicked(); isFocused = false" @focus="isFocused = true" @blur="isFocused = false" @mouseover="setMouseOverTrue()" @mouseout="setIsHoverFalse(); isMouseOver = false;">
+        <button ref="button" :class="['flex bg-gray-400 flex-col w-full md:w-auto items-center justify-center cursor-pointer flex-shrink-0 focus:outline-none transition-size duration-300 ease-in-out', { 'rounded-top-20px': isHover, 'rounded-20px': !isHover }]" @click="clicked(); isFocused = false" @focus="isFocused = true" @blur="isFocused = false" @mouseover="setMouseOverTrue()" @mouseout="setIsHoverFalse(); isMouseOver = false;">
                 <div :class="['flex h-10 flex-row items-center justify-center w-full cursor-pointer flex-shrink-0 pointer-events-none']">
                         <label :class="['flex ml-4 justify-start items-center h-full text-xs cursor-pointer antialiased flex-shrink-0 pointer-events-none']">{{ label }}</label>
                         <div :class="['flex-1']" />
-                        <div :class="['ba-radio ml-4 mr-2 border-gray-900 cursor-pointer antialiased flex-shrink-0 pointer-events-none', { 'ba-radio-checked': isSelected, 'ba-radio-focused': isFocused }]" />
+                        <div :class="['ba-radio ml-4 mr-2 border-gray-800 cursor-pointer antialiased flex-shrink-0 pointer-events-none', { 'ba-radio-checked': isSelected, 'ba-radio-focused': isFocused }]" />
                 </div>
                 <div :class="[{ 'w-0px h-0px': !isHover }, {'h-1': isHover}, isHover ? infoWidthClass : '', 'transition-size duration-1000 ease-in-out pointer-events-none']">
-                        <hr :class="['flex border-gray-900 mx-4 mt-4 h-1 pointer-events-none']" />
+                        <hr :class="['flex border-gray-800 mx-4 mt-4 h-1 pointer-events-none']" />
                 </div>
                 <div ref="info" :class="['transition-size duration-300 ease-in-out overflow-y-scroll scrollbar-hidden pointer-events-none', {'h-0px w-0px': !isHover },{'p-4': isHover}, isHover ? infoHeightClass : '', isHover ? infoWidthClass : '' ]">
                         <p class="text-xs text-left pointer-events-none" :class="[ { 'm-2': isHover } ]">{{ infoLabel }}</p>

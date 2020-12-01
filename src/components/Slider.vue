@@ -1,5 +1,5 @@
 <template>
-        <div :class="['flex bg-gray-500 rounded-full h-10 flow-row w-full justify-center items-center', { 'hidden': !visible }]">
+        <div :class="['flex bg-gray-400 rounded-full h-10 flow-row w-full justify-center items-center', { 'hidden': !visible }]">
                 <label :class="['flex text-xs uppercase mx-4 whitespace-no-wrap']">{{ label }}</label>
                 <input :class="['flex flex-1 focus:outline-none min-w-0', {'reversed-range': rtl}]" type="range" :min="min" :max="max" v-model.number="inputValue"/>
                 <label :class="['flex text-xs uppercase mx-4']"> {{ inputValue }} </label>
@@ -103,16 +103,16 @@
         input[type='range']::-webkit-slider-runnable-track {
                 height: 0.05rem;
                 cursor: pointer;
-                background: #1a202c;
+                background: rgba(30, 41, 59, 1);
         }
 
         input[type='range']::-webkit-slider-thumb {
                 -webkit-appearance: none;
                 height: 1rem;
                 width: 1rem;
-                background: #1a202c;
+                background: rgba(30, 41, 59, 1);
                 border: 1px solid;
-                border-color: #a0aec0;
+                border-color: rgba(148, 163, 184, 1);
                 border-radius: 100%;
                 margin-top: -.4rem;
         }

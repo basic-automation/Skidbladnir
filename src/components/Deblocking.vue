@@ -1,6 +1,6 @@
 <template>
         <div :class="['flex flex-col flex-1 justify-center items-center transition-all ease-in-out duration-500 w-full', { 'hidden': !visible }]">
-                <h1 class="flex items-center text-gray-500 uppercase text-lg antialiased">Deblocking Filter</h1>
+                <h1 class="flex items-center text-gray-400 uppercase text-lg antialiased">Deblocking Filter</h1>
                 <div class="grid grid-cols-1 sm:grid-cols-3 items-start justify-center gap-4 mt-4 max-w-4xl">
                         <Radio group="deblocking" id="autoFilter" label="Auto Filter" />
                         <Radio group="deblocking" id="strongFilter" label="Strong Filter" />

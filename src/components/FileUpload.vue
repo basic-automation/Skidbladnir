@@ -1,12 +1,12 @@
 <!-- eslint-disable max-len -->
 <template>
-	<div class="flex flex-1 h-full min-h-20 md:min-h-10 md:h-10 flex-col md:flex-row justify-center items-center transition-all ease-in-out duration-500" @dragenter.prevent="fileUploadDragEnter()" :class="{ 'bg-gray-500 pointer-events-none': isDropZone }">
-		<div :class="{ 'hidden pointer-events-none': isDropZone, 'flex w-full flex-row justify-center items-center h-10 rounded-full bg-gray-500 transition-all ease-in-out duration-500 flex-shrink': !isDropZone, 'ba-error': isError }" @dragover.prevent @dragleave.prevent>
+	<div :class="[{ 'bg-gray-100 pointer-events-none': isDropZone }, 'flex flex-1 h-full min-h-20 md:min-h-10 md:h-10 flex-col md:flex-row justify-center items-center transition-all ease-in-out duration-500']" @dragenter.prevent="fileUploadDragEnter()">
+		<div :class="{ 'hidden pointer-events-none': isDropZone, 'flex w-full flex-row justify-center items-center h-10 rounded-full bg-gray-400 transition-all ease-in-out duration-500 flex-shrink': !isDropZone, 'ba-error': isError }" @dragover.prevent @dragleave.prevent>
 			<label :class="{ 'hidden pointer-events-none': isDropZone, 'ml-6 uppercase text-xs my-auto align-middle antialiased pointer-events-none': !isDropZone }" @dragover.prevent @dragleave.prevent>{{ label }}</label>
-			<input v-model="input" disabled type="text" :class="{ 'hidden pointer-events-none': isDropZone, 'flex-1 h-10 ml-4 rounded-full rounded-l-none mr-2 focus:outline-none bg-transparent text-gray-900 text-xs transition-all ease-in-out duration-500 flex-shrink w-full': !isDropZone }" @dragover.prevent @dragleave.prevent @dragenter.prevent />
+			<input v-model="input" disabled type="text" :class="{ 'hidden pointer-events-none': isDropZone, 'bg-gray-400 flex-1 h-10 ml-4 rounded-full rounded-l-none mr-2 focus:outline-none bg-transparent text-gray-800 text-xs transition-all ease-in-out duration-500 flex-shrink w-full': !isDropZone }" @dragover.prevent @dragleave.prevent @dragenter.prevent />
 		</div>
-		<button :class="{ 'hidden pointer-events-none': isDropZone, 'flex md:ml-4 mt-4 md:mt-0 h-10 uppercase rounded-full glow-xl w-full md:w-32 md:min-w-32 text-gray-500 text-xs justify-center items-center focus:outline-none focus:ba-inner-shaddow-sm hover:glow-sm transition-all ease-in-out duration-1000 antialiased flex-shrink-0': !isDropZone }" @click="browseClick()" @dragover.prevent @dragleave.prevent>Browse</button>
-		<div :class="{ 'hidden': !isDropZone, 'flex md:h-full min-h-10 justify-center items-center flex-1 text-gray-900 uppercase font-bold text-xs pointer-events-auto z-50': isDropZone }" @dragover.prevent @dragleave="dropZoneDragLeave()" @drop.prevent="fileChangeHandler(true, $event), fileUploadDropFile()">
+		<button :class="{ 'hidden pointer-events-none': isDropZone, 'flex md:ml-4 mt-4 md:mt-0 h-10 uppercase rounded-full glow-xl w-full md:w-32 md:min-w-32 text-gray-400 text-xs justify-center items-center focus:outline-none focus:ba-inner-shaddow-sm hover:glow-sm transition-all ease-in-out duration-1000 antialiased flex-shrink-0': !isDropZone }" @click="browseClick()" @dragover.prevent @dragleave.prevent>Browse</button>
+		<div :class="{ 'hidden': !isDropZone, 'flex md:h-full min-h-10 justify-center items-center flex-1 text-gray-800 uppercase font-bold text-xs pointer-events-auto z-50': isDropZone }" @dragover.prevent @dragleave="dropZoneDragLeave()" @drop.prevent="fileChangeHandler(true, $event), fileUploadDropFile()">
 			<p :class="{ 'pointer-events-none': isDropZone }">{{ dropZoneLabel }}</p>
 		</div>
 	</div>
@@ -162,17 +162,21 @@ export default defineComponent({
 	}
 
 	.focus\:glow-none:focus {
-		box-shadow: 0 0px 5px rgba(160, 174, 192, 0), 0 0px 10px -5px rgba(160, 174, 192, 0);
-	}
+		box-shadow: 0 0px 5px rgba(148, 163, 184, 0), 0 0px 10px -5px  rgba(148, 163, 184, 0);
+        }
+        
 	.focus\:ba-inner-shaddow-sm:focus {
 		box-shadow: inset 0 0px 5px rgba(0, 0, 0, 0.35), 0 0px 10px -5px rgba(0, 0, 0, 0.5), 0 0px 5px rgba(160, 174, 192, 0.35), 0 00px 10px -5px rgba(160, 174, 192, 0.5);
-	}
+        }
+        
 	.hover\:glow-sm:hover {
-		box-shadow: 0 0px 5px rgba(160, 174, 192, 0.35), 0 0px 10px -5px rgba(160, 174, 192, 0.5);
-	}
+		box-shadow: 0 0px 5px  rgba(148, 163, 184, .35), 0 0px 10px -5px rgba(148, 163, 184, .5);
+        }
+        
 	.glow-xl {
-		box-shadow: 0 0px 5px rgba(160, 174, 192, 0.7), 0 0px 10px -5px rgba(160, 174, 192, 1);
-	}
+		box-shadow: 0 0px 5px rgba(148, 163, 184, .7), 0 0px 10px -5px rgba(148, 163, 184, 1);
+        }
+        
 	.ba-error {
 		box-shadow: 0 0px 10px rgba(245, 101, 101, 0.7), 0 0px 20px -5px rgba(245, 101, 101, 1);
 	}

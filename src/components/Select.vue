@@ -1,14 +1,14 @@
 <template>
-        <button :class="['flex flex-col bg-gray-500 cursor-pointer transition-all duration-300 ease-in-out focus:outline-none', {'rounded-top-20px': isOpen}, {'rounded-20px': !isOpen}, {'hidden': !visible}]" @click="isOpen = !isOpen" @focus="focused = true" @blur="focused = false">
+        <button :class="['flex flex-col bg-gray-400 cursor-pointer transition-all duration-300 ease-in-out focus:outline-none', {'rounded-top-20px': isOpen}, {'rounded-20px': !isOpen}, {'hidden': !visible}]" @click="isOpen = !isOpen" @focus="focused = true" @blur="focused = false">
                 <div class="flex flex-row w-full h-10 items-center justify-center pointer-events-none">
                         <label class="text-xs mx-4 uppercase flex-1 text-left">{{ label }}</label>
-                        <div class="flex justify-center items-center text-gray-900 mr-4">
+                        <div class="flex justify-center items-center text-gray-800 mr-4">
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12" :class="['fill-current h-3', {'transform-rotate-180': isOpen}, {'animate-bounce': focused }]">
                                         <path fill="#1a202c" d="M6 12L0 0h12z"/>
                                 </svg>
                         </div>
                 </div>
-                <div v-for="item in options" :key="item.value" :class="['flex justify-center items-center transition-size duration-300 ease-in-out overflow-hidden w-full',{'flex h-10 border-gray-600 border-t justify-center items-center uppercase hover:bg-gray-600': isOpen}, {'h-0px w-0px': !isOpen}, {'bg-gray-400': item.value == ''}]" @click="optionClick(item)">
+        <div v-for="item in options" :key="item.value" :class="['flex justify-center items-center transition-size duration-300 ease-in-out overflow-hidden w-full',{'flex h-10 border-gray-800 border-t justify-center items-center uppercase hover:bg-gray-8           00': isOpen}, {'h-0px w-0px': !isOpen}, {'bg-gray-400': item.value == ''}]" @click="optionClick(item)">
                         <p :class="['flex items-center justify-center text-left mx-2 text-xs transition-size duration-300, ease-in-out', {'w-0px h-0px': !isOpen}, {'h-10': isOpen}]">
                                 {{ item.label }}
                         </p>

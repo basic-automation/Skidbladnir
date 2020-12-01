@@ -1,11 +1,11 @@
 <template>
         <button class="w-full h-10 cursor-pointer focus:outline-none" @focus="focused=true" @blur="focused=false" @click.prevent="advancedOptionsClick()">
                 <div class="flex flex-row items-center">
-                        <hr class=" border-t border-gray-500 flex-1" :class="{ 'glow-xl': focused }" />
-                        <div class="text-xs text-gray-500 flex justify-center items-center whitespace-no-wrap flex-shrink-0 mx-5 uppercase antialiased">{{ label }}</div>
-                        <hr class=" border-t border-gray-500 flex-1" :class="{ 'glow-xl': focused }" />
+                        <hr class=" border-t border-gray-400 flex-1" :class="{ 'glow-xl': focused }" />
+                        <div class="text-xs text-gray-400 flex justify-center items-center whitespace-no-wrap flex-shrink-0 mx-5 uppercase antialiased">{{ label }}</div>
+                        <hr class=" border-t border-gray-400 flex-1" :class="{ 'glow-xl': focused }" />
                 </div>
-                <div class="flex h-3 text-gray-500 justify-center items-center mt-2" :class="{'animate-bounce': focused}">
+                <div class="flex h-3 text-gray-400 justify-center items-center mt-2" :class="{'animate-bounce': focused}">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12" :class="{ 'transform-rotate-180': !advancedOptionsIsShown }" class="h-3 transition-all ease-in-out duration-300">
                                 <path class="fill-current" d="M6 0l6 12H0z" data-name="Polygon 1"/>
                         </svg>

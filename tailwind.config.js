@@ -1,4 +1,6 @@
+/* eslint-disable @typescript-eslint/no-var-requires */
 /* eslint-disable global-require */
+const colors = require('tailwindcss/colors')
 module.exports = {
         theme: {
                 extend: {
@@ -18,6 +20,9 @@ module.exports = {
                                 '20': '10rem',
                                 '40': '20rem',
                         },
+                },
+                colors: {
+                        gray: colors.blueGray,
                 },
         },
         variants: {
