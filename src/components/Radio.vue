@@ -1,18 +1,23 @@
 <template>
         <button ref="button" :class="['flex bg-gray-400 flex-col w-full md:w-auto items-center justify-center cursor-pointer flex-shrink-0 focus:outline-none transition-size duration-300 ease-in-out', { 'rounded-top-20px': isHover, 'rounded-20px': !isHover }]" @click="clicked(); isFocused = false" @focus="isFocused = true" @blur="isFocused = false" @mouseover="setMouseOverTrue()" @mouseout="setIsHoverFalse(); isMouseOver = false;">
+
                 <div :class="['flex h-10 flex-row items-center justify-center w-full cursor-pointer flex-shrink-0 pointer-events-none']">
                         <label :class="['flex ml-4 justify-start items-center h-full text-xs cursor-pointer antialiased flex-shrink-0 pointer-events-none']">{{ label }}</label>
-                        <div :class="['flex-1']" />
-                        <div :class="['ba-radio ml-4 mr-2 border-gray-800 cursor-pointer antialiased flex-shrink-0 pointer-events-none', { 'ba-radio-checked': isSelected, 'ba-radio-focused': isFocused }]" />
+                        <div :class="['flex-1']"></div>
+                        <div :class="['ba-radio ml-4 mr-2 border-gray-800 cursor-pointer antialiased flex-shrink-0 pointer-events-none', { 'ba-radio-checked': isSelected, 'ba-radio-focused': isFocused }]"></div>
                 </div>
+
                 <div :class="[{ 'w-0px h-0px': !isHover }, {'h-1': isHover}, isHover ? infoWidthClass : '', 'transition-size duration-1000 ease-in-out pointer-events-none']">
                         <hr :class="['flex border-gray-800 mx-4 mt-4 h-1 pointer-events-none']" />
                 </div>
+
                 <div ref="info" :class="['transition-size duration-300 ease-in-out overflow-y-scroll scrollbar-hidden pointer-events-none', {'h-0px w-0px': !isHover },{'p-4': isHover}, isHover ? infoHeightClass : '', isHover ? infoWidthClass : '' ]">
-                        <p class="text-xs text-left pointer-events-none" :class="[ { 'm-2': isHover } ]">{{ infoLabel }}</p>
+                        <p :class="['text-xs text-left pointer-events-none', { 'm-2': isHover }]">{{ infoLabel }}</p>
                 </div>
+
         </button>
-        <input class="hidden" type="radio" :id="id" :name="group" :checked="isSelected" :value="value">
+
+        <input :class="['hidden']" type="radio" :id="id" :name="group" :checked="isSelected" :value="value"/>
 </template>
 
 <script lang="ts">
@@ -140,7 +145,7 @@
                                                                 
                                                         }
                                                 }, this.infoAnimationDuration);
-                                        });
+                                        }).catch((err) => { console.error('logInfoHeight Error: ', err) });
                                 }
                         },
 
@@ -165,7 +170,7 @@
                                                                 }
                                                         }
                                                 }, this.infoAnimationDuration);
-                                        });
+                                        }).catch((err) => { console.error('logInfoWidth Error: ', err) });
                                 }
                         },
 
@@ -200,7 +205,7 @@
                                                         }
                                                 }
                                         }, 100);
-                                });
+                                }).catch((err) => { console.error('setIsHoverFalse Error: ', err) });
                         },
 
                         setIsHoverTrue: function() {
@@ -223,8 +228,8 @@
                                 return new Promise((resolve, reject) => {
                                         setTimeout(() => {
                                                 if(this.isMouseOver == true) {
-                                                        resolve(resolve);
-                                                } else reject(reject);
+                                                        resolve(true);
+                                                } else reject(false);
                                         }, this.hoverTimerDefault);
                                 });
                         },
@@ -235,6 +240,7 @@
                         windowWidth: function() {
                                 if(store.getters.advancedOptionsIsShown) this.setIsHoverTrue().then(() => { this.logInfoHeight(); }).then(() => { this.logInfoWidth(); }).then(() => { this.setIsHoverFalse(); });
                         },
+
                         radioGroup: function() {
                                 // find corresponding group and id and set checked value
                                 for(let i = 0; i < this.radioGroup.length; i++) {
@@ -245,6 +251,7 @@
                                         }
                                 }
                         },
+
                         advancedOptions: {
                                 deep: true,
                                 handler() {
@@ -259,22 +266,26 @@
                                         }
                                 }
                         },
+
                         isHover: function() {
                                 if(this.isHover) {
                                         this.isAnimatingWidth = true;
                                         this.isAnimatingHeight = true;
                                 }
                         },
+
                         isAnimatingWidth: function() {
                                 setTimeout(() => {
                                         this.isAnimatingWidth = false; 
                                 }, this.infoAnimationDuration * 3);
                         },
+
                         isAnimatingHeight: function() {
                                 setTimeout(() => {
                                         this.isAnimatingHeight = false;
                                 }, this.infoAnimationDuration * 3);
                         },
+
                         advancedOptionsIsShown: function() {
                                 if(this.advancedOptionsIsShown) {
                                         this.setIsHoverTrue().then(() => {
@@ -286,6 +297,7 @@
                                         });
                                 }
                         },
+
                         componentCategory: {
                                 deep: true,
                                 handler() {
@@ -297,13 +309,14 @@
                                                                 this.logInfoWidth();
                                                         }).then(() => {
                                                                 this.setIsHoverFalse();
-                                                        });
+                                                        }).catch((err) => { console.error('componentCategory Error: ', err) });
                                                 }
                                         }
                                 }
                         },
+
                         isMouseOver: function() {
-                                if(this.isMouseOver == true) Promise.all([this.continueHover()]).then(() => { this.setIsHoverTrue() });
+                                if(this.isMouseOver === true) Promise.all([this.continueHover()]).then((pass) => { if(pass) this.setIsHoverTrue(); console.log('isMouseOver') }).catch(() => { return });
                         }
                 }
         });

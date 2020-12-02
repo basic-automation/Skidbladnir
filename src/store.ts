@@ -318,7 +318,9 @@ export const store = createStore({
                         // set existing buttons clicked to false
                         for (let i = 0; i < radio.length; i++) {
                                 for (let j = 0; j < (radio[i].checked.length); j++) {
-                                        radio[i].checked[j] = false;
+                                        if(radio[i].group === mygroup.group) {
+                                                radio[i].checked[j] = false;
+                                        }
                                 }
                         }
 
@@ -602,10 +604,8 @@ export const store = createStore({
                                         noiseShapingAmplitude: noiseShapingAmplitude(),
                                         noiseShapingSegments: noiseShapingSegments()
                                 }
+                        console.log(JSON.stringify(CMDObject, null, '\t'));
                         return CMDObject;
-                        //console.log(JSON.stringify(CMDObject, null, '\t'));
-
-
 
                 },
         }
