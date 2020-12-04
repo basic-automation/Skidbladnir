@@ -81,7 +81,7 @@
 
                 created() {
                         // define current group
-                        let mygroup: { group: string; id: string[]; checked: boolean[] } = { group: this.group, id: [this.id], checked: [this.isSelected] };
+                        let mygroup: { group: string; id: string[]; value: boolean[] } = { group: this.group, id: [this.id], value: [this.isSelected] };
 
                         // register component with store
                         store.commit('registerComponentRadioGroup', mygroup);
@@ -90,7 +90,7 @@
                         const mode = this.advancedOptions[this.group.toLowerCase()];
                         for(const [key, value] of Object.entries(mode)) {
                                 if(typeof value === 'object') {
-                                        let newVal = value as { checked: boolean; label: string };
+                                        let newVal = value as { value: boolean; label: string };
                                         if(key === this.id) {
                                                 this.infoLabel = newVal.label;
                                         }
@@ -118,7 +118,7 @@
 
                 methods: {
                         clicked: function() {
-                                let mygroup: { group: string; id: string[]; checked: boolean[] } = { group: this.group, id: [this.id], checked: [true] };
+                                let mygroup: { group: string; id: string[]; value: boolean[] } = { group: this.group, id: [this.id], value: [true] };
                                 store.commit('registerComponentRadioGroup', mygroup);
                                 store.dispatch('syncModeWithRadioGroup', { group: this.group, id: this.id });
                                 store.commit('deployAssociation', this.value);
@@ -246,7 +246,7 @@
                                 for(let i = 0; i < this.radioGroup.length; i++) {
                                         if(this.radioGroup[i].group === this.group) {
                                                 for(let j = 0; j < this.radioGroup[i].id.length; j++) {
-                                                        if(this.radioGroup[i].id[j] === this.id) this.isSelected = this.radioGroup[i].checked[j];
+                                                        if(this.radioGroup[i].id[j] === this.id) this.isSelected = this.radioGroup[i].value[j];
                                                 }
                                         }
                                 }
@@ -258,7 +258,7 @@
                                         const mode = this.advancedOptions[this.group.toLowerCase()];
                                         for(const [key, value] of Object.entries(mode)) {
                                                 if(typeof value === 'object') {
-                                                        let newVal = value as { checked: boolean; label: string }
+                                                        let newVal = value as { value: boolean; label: string }
                                                         if(key === this.id) {
                                                                 this.infoLabel = newVal.label
                                                         }

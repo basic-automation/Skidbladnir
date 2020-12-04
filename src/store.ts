@@ -2,6 +2,8 @@
 import { createStore } from 'vuex';
 import * as path from 'path';
 import { ipcRenderer } from 'electron';
+import { State } from './interface/store/State'
+import { CWEBPCommandParameters } from './interface/CWEBPCommandParameters'
 
 export const store = createStore({
         state: {
@@ -12,44 +14,41 @@ export const store = createStore({
                         canDragEnter: true,
                 },
                 components: {
-                        radio:
-                        [
+                        radio: [
                                 {
+                                        category: '',
                                         group: '',
                                         id: [''],
-                                        checked: [false],
                                         association: [''],
+                                        value: [false],
                                         visible: false,
                                 }
                         ],
-                        select:
-                        [
+                        select: [
                                 {
                                         category: '',
                                         group: '',
                                         dependency: '',
-                                        isOpen: false,
                                         label: '',
                                         value: '',
+                                        isOpen: false,
                                         visible: false,
                                 }
                         ],
-                        slider:
-                        [
+                        slider: [
                                 {
+
                                         category: '',
                                         group: '',
                                         dependency: '',
-                                        value: 1,
                                         label: '',
-                                        min: 1,
-                                        max: 1,
+                                        value: 1,
+                                        valueMin: 1,
+                                        valueMax: 1,
                                         visible: false,
                                 }
-
                         ],
-                        category:
-                        [
+                        category: [
                                 {
                                         category: 'category',
                                         group: 'CATquality',
@@ -74,27 +73,26 @@ export const store = createStore({
                 },
                 advancedOptions: {
                         isShown: false,
-                        associations:
-                        {
+                        associations: {
                                 jpegLike: {
-                                        components: ['CATquality', 'CATcompression', 'preset', 'quality', 'alphaQuality', 'compressionMethod'],
-                                        visible: [true, false, false, true, true, true],
+                                        components: ['numberOfSegments', 'amplitude', 'CATnoiseShaping', 'CATquality', 'CATcompression', 'CATdeblocking', 'preset', 'quality', 'alphaQuality', 'compressionMethod', 'numberOfPasses'],
+                                        visible: [false, false, false, true, false, false, false, true, true, true, false],
                                 },
                                 lossy: {
                                         components: ['numberOfSegments', 'amplitude', 'CATnoiseShaping', 'CATquality', 'CATcompression', 'CATdeblocking', 'preset', 'quality', 'alphaQuality', 'compressionMethod', 'numberOfPasses'],
                                         visible: [true, true, true, true, true, true, false, true, true, true, true],
                                 },
                                 lossless: {
-                                        components: ['CATquality', 'CATcompression', 'preset', 'quality', 'alphaQuality', 'compressionMethod'],
-                                        visible: [true, false, false, true, true, true],
+                                        components: ['numberOfSegments', 'amplitude', 'CATnoiseShaping', 'CATquality', 'CATcompression', 'CATdeblocking', 'preset', 'quality', 'alphaQuality', 'compressionMethod', 'numberOfPasses'],
+                                        visible: [false, false, false, true, false, false, false, true, true, true, false],
                                 },
                                 nearLossless: {
-                                        components: ['CATquality', 'CATcompression', 'preset', 'quality', 'alphaQuality', 'compressionMethod'],
-                                        visible: [true, false, false, true, false, false],
+                                        components: ['numberOfSegments', 'amplitude', 'CATnoiseShaping', 'CATquality', 'CATcompression', 'CATdeblocking', 'preset', 'quality', 'alphaQuality', 'compressionMethod', 'numberOfPasses'],
+                                        visible: [false, false, false, true, false, false, false, true, false, false, false],
                                 },
                                 preset: {
-                                        components: ['CATquality', 'CATcompression', 'preset', 'quality', 'alphaQuality', 'compressionMethod'],
-                                        visible: [true, false, true, true, false, false],
+                                        components: ['numberOfSegments', 'amplitude', 'CATnoiseShaping', 'CATquality', 'CATcompression', 'CATdeblocking', 'preset', 'quality', 'alphaQuality', 'compressionMethod', 'numberOfPasses'],
+                                        visible: [false, false, false, true, false, false, true, true, false, false, false],
                                 },
                                 fileSize: {
                                         components: ['targetSize', 'targetPSNR'],
@@ -140,8 +138,7 @@ export const store = createStore({
                                 },
                         },
                         quality: {
-                                preset:
-                                [
+                                preset: [
                                         {
                                                 group: 'preset',
                                                 label: 'Select a Preset',
@@ -177,7 +174,6 @@ export const store = createStore({
                                                 label: 'Text',
                                                 value: 'text',
                                         },
-
                                 ],
                                 quality: {
                                         group: 'quality',
@@ -277,7 +273,7 @@ export const store = createStore({
                                 },
                         },
                 },
-        },
+        } as State,
 
         getters: {
                 inputFiles: state => { return state.inputFiles },
@@ -290,7 +286,18 @@ export const store = createStore({
                 componentCategory: state => { return state.components.category },
                 advancedOptions: state => { return state.advancedOptions },
                 advancedOptionsIsShown: state => { return state.advancedOptions.isShown },
-                selectedRadio: (state) => (group: string) => { for (let i = 0; i < state.components.radio.length; i++) if (group === state.components.radio[i].group) for (let j = 0; j < state.components.radio[i].checked.length; j++) if (state.components.radio[i].checked[j] === true) return state.components.radio[i].id[j] },
+                selectedRadio: (state) => (group: string) => { 
+                        let radio = state.components.radio as { group: string; category: string;  id: string[]; value: boolean[]; association: string[]; visible: boolean }[];
+                        for (let i = 0; i < radio.length; i++) {
+                                if (group === radio[i].group) {
+                                        for (let j = 0; j < radio[i].value.length; j++) {
+                                                if (radio[i].value[j] === true) {
+                                                        return radio[i].id[j];
+                                                }
+                                        }
+                                }
+                        }
+                },
                 selectedSlider: (state) => (group: string) => { for (let i = 0; i < state.components.slider.length; i++) if (state.components.slider[i].group === group) return state.components.slider[i] },
                 selectedSelect: (state) => (group: string) => { for (let i = 0; i < state.components.select.length; i++) if (state.components.select[i].group === group) return state.components.select[i] },
         },
@@ -311,15 +318,15 @@ export const store = createStore({
                                 }
                         }
                 },
-                registerComponentRadioGroup: (state, payload: { group: string; id: string[]; checked: boolean[]; association: string[]; visible: boolean }) => {
-                        let radio = state.components.radio;
+                registerComponentRadioGroup: (state, payload: { group: string; category: string;  id: string[]; value: boolean[]; association: string[]; visible: boolean }) => {
+                        let radio = state.components.radio as { group: string; category: string;  id: string[]; value: boolean[]; association: string[]; visible: boolean }[];
                         let mygroup = payload;
 
                         // set existing buttons clicked to false
                         for (let i = 0; i < radio.length; i++) {
-                                for (let j = 0; j < (radio[i].checked.length); j++) {
+                                for (let j = 0; j < (radio[i].value.length); j++) {
                                         if(radio[i].group === mygroup.group) {
-                                                radio[i].checked[j] = false;
+                                                radio[i].value[j] = false;
                                         }
                                 }
                         }
@@ -332,11 +339,11 @@ export const store = createStore({
                                                 if (radio[i].id[j] === mygroup.id[0]) {
                                                         // delete
                                                         delete radio[i].id[j];
-                                                        delete radio[i].checked[j];
+                                                        delete radio[i].value[j];
 
                                                         // purge undefined
                                                         radio[i].id = radio[i].id.filter((a) => { return typeof a !== 'undefined' });
-                                                        radio[i].checked = radio[i].checked.filter((a) => { return typeof a !== 'undefined' });
+                                                        radio[i].value = radio[i].value.filter((a) => { return typeof a !== 'undefined' });
 
                                                 }
                                         }
@@ -346,8 +353,8 @@ export const store = createStore({
                                         mygroup.id = radio[i].id;
 
                                         // merge group checked
-                                        radio[i].checked.push(mygroup.checked[0]);
-                                        mygroup.checked = radio[i].checked;
+                                        radio[i].value.push(mygroup.value[0]);
+                                        mygroup.value = radio[i].value;
 
                                         // delete matching group from radio
                                         delete radio[i]; radio = radio.filter((a) => { return typeof a !== 'undefined' });
@@ -461,7 +468,7 @@ export const store = createStore({
                         for (let i = 0; i < radios.length; i++) {
                                 if (radios[i].group === payload.group) {
                                         for (let j = 0; j < radios[i].id.length; j++) {
-                                                if (radios[i].id[j] === payload.id && radios[i].checked[j] === true) {
+                                                if (radios[i].id[j] === payload.id && radios[i].value[j] === true) {
                                                         commit('setAdvancedOptionsMode', payload.id);
                                                 }
                                         }
@@ -486,6 +493,11 @@ export const store = createStore({
                                 else return 'undefined';
                         };
                         //console.log('Mode: ', mode());
+
+                        const isAdvanced = (): boolean => {
+                                if(mode() !== 'undefined') return true;
+                                else return false;
+                        }
 
                         const preset = (): string => {
                                 if (getters.selectedSelect('preset').value === '') return 'undefined';
@@ -561,7 +573,7 @@ export const store = createStore({
                         //console.log('Number of Noise Shaping Segments: ', noiseShapingSegments());
 
                         const binariesPath = (): string => {
-                                let outputPath = path.join("./resources", "./cwebp");
+                                let outputPath = path.join("./resources", "cwebp");
                                 const isDev = ipcRenderer.sendSync('isDev');
                                 //console.log('isDev: ', isDev);
                                 const rootPath = process.cwd();
@@ -577,19 +589,22 @@ export const store = createStore({
 
                                 if (platform() && isDev) {
                                         //console.log('Running in Development Mode');
-                                        outputPath = path.join(rootPath, "./resources", platform(), "./cwebp");
+                                        outputPath = path.join(rootPath, "./resources", platform(), "cwebp");
                                 } else {
-                                        //console.log('Running in development Production Mode');
+                                        //console.log('Running in Production Mode');
                                 }
+
+                                outputPath = path.resolve(path.join(outputPath, "./cwebp"));
 
                                 return outputPath;
                         }
 
-                        const CMDObject =
+                        const CMDObject: CWEBPCommandParameters =
                                 {
                                         binariesPath: binariesPath(),
                                         inputFiles: inputFiles(),
                                         ouputFiles: ouputFiles(),
+                                        isAdvanced: isAdvanced(),
                                         mode: mode(),
                                         preset: preset(),
                                         quality: quality(),
@@ -602,10 +617,131 @@ export const store = createStore({
                                         deblockingStrength: deblockingStrength(),
                                         deblockingSharpness: deblockingSharpness(),
                                         noiseShapingAmplitude: noiseShapingAmplitude(),
-                                        noiseShapingSegments: noiseShapingSegments()
+                                        noiseShapingSegments: noiseShapingSegments(),
                                 }
                         console.log(JSON.stringify(CMDObject, null, '\t'));
-                        return CMDObject;
+
+                        const command = (payload: CWEBPCommandParameters): string => {
+
+                                let CMD = '';
+
+                                if(payload.isAdvanced) {
+
+                                        const modeFlag = (): string => {
+                                                switch (payload.mode) {
+                                                case 'lossless':
+                                                        return ' -lossless -exact';
+        
+                                                case 'jpegLike':
+                                                        return ' -jpeg_like';
+        
+                                                case 'nearLossless':
+                                                        return ' -near_lossless' + payload.quality;
+                                                
+                                                case 'preset':
+                                                        return ' -preset ' + payload.preset;
+                                                
+                                                default:
+                                                        return '';
+                                                }
+                                        }
+                                        console.log('modeFlag: ', modeFlag());
+
+                                        const qualityFlag = (): string => {
+                                                if(payload.quality !== 'undefinded') return ' -q ' + payload.quality;
+                                                else return '';
+                                        }
+                                        console.log('qualityFlag: ', qualityFlag());
+
+                                        const alphaQualityFlag = (): string => {
+                                                if(payload.alphaQuality !== 'undefinded') return ' -alpha_q ' + payload.alphaQuality
+                                                else return '';
+                                        }
+                                        console.log('alphaQualityFlag: ', alphaQualityFlag());
+
+                                        const compressionMethodFlag = (): string => {
+                                                if(payload.alphaQuality !== 'undefined') return ' -m ' + payload.compressionMethod
+                                                else return '';
+                                        }
+                                        console.log('compressionMethodFlag: ', compressionMethodFlag());
+
+                                        const multiThreadingFlag = (): string => {
+                                                return ' -mt';
+                                        }
+                                        console.log('multiThreadingFlag: ', multiThreadingFlag());
+
+                                        const compressionFlag = (): string => {
+                                                switch (payload.compression) {
+                                                case 'fileSize':
+                                                        return  ' -size ' + payload.compressionTarget;
+
+                                                case 'PSNR':
+                                                        return ' -psnr ' + payload.compressionTarget;
+                                        
+                                                default:
+                                                        return '';
+                                                }
+                                        }
+                                        console.log('compressionFlag: ', compressionFlag());
+
+                                        const numberOfPassesFlag = (): string => {
+                                                if(payload.numberOfPasses !== 'undefined') return ' -pass ' + payload.numberOfPasses;
+                                                else return '';
+                                        }
+                                        console.log('numberOfPassesFlag: ', numberOfPassesFlag());
+
+                                        const deblockingStrengthFlag = (): string => {
+                                                if(payload.deblockingStrength !== 'undefined') return ' -f ' + payload.deblockingStrength;
+                                                else return '';
+                                        }
+                                        console.log('deblockingStrengthFlag: ', deblockingStrengthFlag());
+
+                                        const deblockingFilterFlag = (): string => {
+                                                switch (payload.deblockingFilter) {
+                                                case 'strongFilter':
+                                                        return ' -strong';
+                                                case 'simpleFilter':
+                                                        return ' -nostrong';
+                                                case 'autoFilter':
+                                                        return ' -af'
+                                                default:
+                                                        return '';
+                                                }
+                                        }
+                                        console.log('deblockingFilterFlag: ', deblockingFilterFlag());
+
+                                        const deblockingSharpnessFlag = (): string => {
+                                                if(payload.deblockingSharpness !== 'undefined') return ' -sharpness ' + payload.deblockingSharpness;
+                                                else return '';
+                                        }
+                                        console.log('deblockingSharpnessFlag: ', deblockingSharpnessFlag());
+
+                                        const sharpYUVFlag = (): string => {
+                                                return ' -sharp_yuv';
+                                        }
+                                        console.log('sharpYUVFlag: ', sharpYUVFlag());
+
+                                        const noiseShapingAmplitudeFlag = (): string => {
+                                                if(payload.noiseShapingAmplitude !== 'undefined') return ' -sns ' + payload.noiseShapingAmplitude;
+                                                else return '';
+                                        }
+                                        console.log('noiseShapingAmplitudeFlag: ', noiseShapingAmplitudeFlag());
+
+                                        const noiseShapingSegmentsFlag = (): string => {
+                                                if(payload.noiseShapingSegments !== 'undefined') return ' -segments ' + payload.noiseShapingSegments;
+                                                else return '';
+                                        }
+                                        console.log('noiseShapingSegmentsFlag: ', noiseShapingSegmentsFlag());
+
+                                        CMD = payload.binariesPath + modeFlag() + qualityFlag() + alphaQualityFlag() + compressionMethodFlag() + multiThreadingFlag() + compressionFlag() + numberOfPassesFlag() + deblockingStrengthFlag() + deblockingFilterFlag() + deblockingSharpnessFlag() + sharpYUVFlag() + noiseShapingAmplitudeFlag() + noiseShapingSegmentsFlag();
+                                        console.log(CMD);
+
+                                }
+                                
+                                return JSON.stringify(CMD, null, '\t');
+                        }
+
+                        return command(CMDObject);
 
                 },
         }
