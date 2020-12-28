@@ -1,7 +1,7 @@
 <template>
         <div :class="['flex bg-gray-400 rounded-full h-10 flow-row w-full justify-center items-center', { 'hidden': !visible }]">
                 <label :class="['flex text-xs uppercase mx-4 whitespace-no-wrap']">{{ label }}</label>
-                <input :class="['flex flex-1 focus:outline-none min-w-0', {'reversed-range': rtl}]" type="range" :min="min" :max="max" v-model.number="inputValue"/>
+                <input :class="['flex flex-1 focus:outline-none min-w-0', {'reversed-range': rtl}]" type="range" :min="min" :max="max" v-model.number="inputValue" @input="register()"/>
                 <label :class="['flex text-xs uppercase mx-4']"> {{ inputValue }} </label>
         </div>
 </template>
@@ -9,14 +9,24 @@
 <script lang="ts">
         import { defineComponent } from 'vue';
         import store from '../store';
+        import { Component } from '../interface/store/Component';
 
         export default defineComponent({
                 name: 'Slider',
 
                 props: {
-                        group: String,
-                        category: String,
-                        dependency: String,
+                        group: {
+                                type: String,
+                                required: true
+                        },
+                        category: {
+                                type: String,
+                                required: true
+                        },
+                        dependency: {
+                                type: String,
+                                required: true,
+                        },
                         rtl: {
                                 type: Boolean,
                                 required: false,
@@ -36,35 +46,35 @@
 
                 computed: {
                         advancedOptions: () => store.getters.advancedOptions,
-                        sliders: () => store.getters.componentSlider as [{ category: string; group: string; dependency: string; value: number; label: string; min: number; max: number; visible: boolean }],
+                        sliders: () => store.getters.componentSlider as Component[],
+                        value(): Component['value'] { return !this.visible ? "undefined" : this.inputValue }
                 },
 
                 methods: {
                         register: function() {
-                                const payload =
-                                        { 
-                                                category: this.category, 
-                                                group: this.group,
-                                                dependency: this.dependency,
-                                                value: this.inputValue,
-                                                label: this.label,
-                                                min: this.min,
-                                                max: this.max,
-                                                visible: this.visible,
-                                        }
+                                const newComponent: Component = {
+                                        type: 'slider',
+                                        category: this.category,
+                                        group: this.group,
+                                        dependency: this.dependency,
+                                        label: this.label,
+                                        value: this.value,
+                                        valueMin: this.min,
+                                        valueMax: this.max,
+                                        visible: this.visible
+                                }
 
-                                store.commit('registerCompnentSliderGroup', payload);
+                                //console.log('Registering Component: ', JSON.stringify(newComponent, null, '\t'));
+                                store.commit('registerComponent', newComponent);
                         },
                 },
 
                 created() {
-                        if(this.group && this.category) {
-                                if(this.advancedOptions[this.category.toLowerCase()][this.group.toLowerCase()]) {
-                                        this.label = this.advancedOptions[this.category.toLowerCase()][this.group.toLowerCase()].label;
-                                        this.min = this.advancedOptions[this.category.toLowerCase()][this.group.toLowerCase()].min;
-                                        this.max = this.advancedOptions[this.category.toLowerCase()][this.group.toLowerCase()].max;
-                                        this.inputValue = this.advancedOptions[this.category.toLowerCase()][this.group.toLowerCase()].value;
-                                }
+                        if(this.advancedOptions[this.category.toLowerCase()][this.group.toLowerCase()]) {
+                                this.label = this.advancedOptions[this.category.toLowerCase()][this.group.toLowerCase()].label;
+                                this.min = this.advancedOptions[this.category.toLowerCase()][this.group.toLowerCase()].min;
+                                this.max = this.advancedOptions[this.category.toLowerCase()][this.group.toLowerCase()].max;
+                                this.inputValue = this.advancedOptions[this.category.toLowerCase()][this.group.toLowerCase()].value;
                         }
 
                         this.register();
@@ -75,20 +85,26 @@
                                 deep: true,
                                 handler() {
                                         if(this.group && this.category) {
-                                                for(let i= 0; i < this.sliders.length; i++) {
-                                                        if(typeof this.sliders[i] !== 'undefined' && this.sliders[i].group === this.group){
-                                                                this.label = this.sliders[i].label;
-                                                                this.inputValue = this.sliders[i].value;
-                                                                this.visible = this.sliders[i].visible;
-                                                                this.min = this.sliders[i].min;
-                                                                this.max = this.sliders[i].max;
+                                                for(const component of this.sliders) {
+                                                        if(typeof component !== 'undefined' && component.group === this.group) {
+                                                                this.label = component.label as string;
+                                                                component.value === 'undefined' ? this.inputValue = component.valueMax as number : this.inputValue = component.value as number;
+                                                                this.visible = component.visible;
+                                                                this.min = component.valueMin as number;
+                                                                this.max = component.valueMax as number;
                                                         }
                                                 }
                                         }
                                 }
                         },
+
                         inputValue: function() {
                                 this.register();
+                        },
+
+                        visible: function() {
+                                if(!this.visible) this.register();
+                                else for(const component of this.sliders) if(this.group === component.group && this.value !== component.value) this.register;
                         }
                 }
         });

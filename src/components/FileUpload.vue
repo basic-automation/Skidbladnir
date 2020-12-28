@@ -17,7 +17,9 @@
 /* eslint-disable max-len */
 import { defineComponent } from "vue";
 import store from "../store";
-const { dialog } = require('electron').remote
+import { State } from '../interface/store/State'; 
+import { AppComponent } from '../interface/store/AppComponent';
+const { dialog } = require('electron').remote;
 
 export default defineComponent({
         name: "FileUpload",
@@ -33,8 +35,8 @@ export default defineComponent({
 
         data() {
                 return {
-                        isInput: (): boolean => { if(this.type === "input") return true; else return false; },
-                        isOutput: (): boolean => { if(this.type === "output") return true; else return false; },
+                        isInput: (): boolean => { return this.type === "input" ? true : false; },
+                        isOutput: (): boolean => { return this.type === "output" ? true : false; },
                         input: "",
                         isDropZone: false,
                         isFileUploadDragEnter: false,
@@ -46,10 +48,10 @@ export default defineComponent({
         },
 
         computed: {
-                appIsDragEnter: () => { return store.getters.appIsDragEnter; },
-                appCanDragEnter: () => { return store.getters.appCanDragEnter; },
-                inputFiles: () => { return store.getters.inputFiles; },
-                outputFiles: () => { return store.getters.outputFiles; },
+                appIsDragEnter: () => store.getters.appIsDragEnter as AppComponent['isDragEnter'],
+                appCanDragEnter: () => store.getters.appCanDragEnter as AppComponent['canDragEnter'],
+                inputFiles: () => store.getters.inputFiles as State['inputFiles'],
+                outputFiles: () => store.getters.outputFiles as State['outputFiles'],
         },
 
         setup() { return { store }; },
@@ -66,10 +68,9 @@ export default defineComponent({
                                 }).then((result: any) => {
                                         this.fileChangeHandler(false, undefined, result.filePaths);
                                 });
-                                
                         }
-
                 },
+
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 fileChangeHandler(fromDropZone: boolean, event?: any, path?: string[]) {
                         // if neither path nor event are passed return false
@@ -81,8 +82,12 @@ export default defineComponent({
                         //if this is an input selector
                         if(this.isInput()) {
                                 //if the file was selected via drap and drop use datatransfer api else use files api
-                                if(fromDropZone) for(let i =0; i < event.dataTransfer.files.length; i++) selection[i] = event.dataTransfer.files[i].path;
-                                else for(let i =0; i < event.target.files.length; i++) selection[i] = event.target.files[i].path;
+                                if(fromDropZone) {
+                                        for(const file of event.dataTransfer.files) selection.push(file.path);
+                                }
+                                else {
+                                        for(const file of event.target.files) selection.push(file.path);
+                                }
                                 
                         } else if(typeof path !== 'undefined') selection = path;
 
@@ -91,10 +96,14 @@ export default defineComponent({
 
                         //update the store
                         this.store.dispatch("addFiles",payload);
-                }, 
+                },
+
                 fileUploadDragEnter() { if(!this.isFileUploadDragEnter) this.isFileUploadDragEnter = true; },
+
                 fileUploadDropFile() { if (!this.isFileUploadDropFile) this.isFileUploadDropFile = true; },
+
                 dropZoneDragEnter() { if (!this.isDropZoneDragEnter) this.isDropZoneDragEnter = true; },
+                
                 dropZoneDragLeave() { if (!this.isDropZoneDragEnter) this.isDropZoneDragLeave = true; },
         },
 
@@ -106,10 +115,10 @@ export default defineComponent({
                                 this.isDropZone = true;
                         }
                 },
+
                 isDropZoneDragLeave: function () {
-                        if (this.isDropZoneDragLeave) {
-                                store.commit("setAppCanDragEnter", true);
-                        }
+                        if (this.isDropZoneDragLeave) store.commit("setAppCanDragEnter", true);
+
                         if (this.isDropZone && this.appCanDragEnter) {
                                 this.isDropZoneDragEnter = false;
                                 this.isDropZoneDragLeave = false;
@@ -117,6 +126,7 @@ export default defineComponent({
                                 this.isDropZone = false;
                         }
                 },
+
                 isFileUploadDropFile: function () {
                         this.isDropZoneDragEnter = false;
                         this.isDropZoneDragLeave = false;
@@ -124,28 +134,42 @@ export default defineComponent({
                         this.isFileUploadDropFile = false;
                         this.isDropZone = false;
                 },
+
                 inputFiles: {
                         deep: true,
                         handler() {
                                 if(this.type === 'input') {
                                         this.input = '';
-                                        for(let i = 0; i < this.inputFiles.length; i++) {
+                                        const newInput = [];
+                                        for(const [, fileValue] of Object.entries(this.inputFiles)) newInput.push(fileValue);
+                                        this.input = newInput.join(', ');
+
+                                        //old
+                                        /* for(let i = 0; i < this.inputFiles.length; i++) {
                                                 if(i === this.inputFiles.length - 1) this.input += this.inputFiles[i];
                                                 else this.input += this.inputFiles[i] + ', ';
-                                        }
+                                        } */
+                                        //old
                                 }
                                 
                         }
                 },
+
                 outputFiles: {
                         deep: true,
                         handler() {
                                 if(this.type === 'output') {
                                         this.input = '';
-                                        for(let i = 0; i < this.outputFiles.length; i++) {
+                                        const newInput = [];
+                                        for(const [, fileValue] of Object.entries(this.outputFiles)) newInput.push(fileValue);
+                                        this.input = newInput.join(', ');
+
+                                        //old
+                                        /* for(let i = 0; i < this.outputFiles.length; i++) {
                                                 if(i === this.outputFiles.length - 1) this.input += this.outputFiles[i];
                                                 else this.input += this.outputFiles[i] + ', ';
-                                        }
+                                        } */
+                                        //old
                                 }
                         }
                 },

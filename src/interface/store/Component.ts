@@ -1,4 +1,5 @@
 export interface Component {
+        type: string;
         category: string;
         group: string;
         id?: string[];

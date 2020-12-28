@@ -8,7 +8,7 @@
                                 </svg>
                         </div>
                 </div>
-        <div v-for="item in options" :key="item.value" :class="['flex justify-center items-center transition-size duration-300 ease-in-out overflow-hidden w-full',{'flex h-10 border-gray-800 border-t justify-center items-center uppercase hover:bg-gray-8           00': isOpen}, {'h-0px w-0px': !isOpen}, {'bg-gray-400': item.value == ''}]" @click="optionClick(item)">
+        <div v-for="item in options" :key="item.value" :class="['flex justify-center items-center transition-size duration-300 ease-in-out overflow-hidden w-full',{'flex h-10 border-gray-800 border-t justify-center items-center uppercase hover:bg-gray-800': isOpen}, {'h-0px w-0px': !isOpen}, {'bg-gray-400': item.value == ''}]" @click="optionClick(item)">
                         <p :class="['flex items-center justify-center text-left mx-2 text-xs transition-size duration-300, ease-in-out', {'w-0px h-0px': !isOpen}, {'h-10': isOpen}]">
                                 {{ item.label }}
                         </p>
@@ -19,13 +19,20 @@
 <script lang="ts">
 import { defineComponent } from 'vue';
 import store from '../store';
+import { Component } from '../interface/store/Component';
 
 export default defineComponent({ 
         name: 'Select',
 
         props: {
-                category: String,
-                group: String,
+                category: {
+                        type: String,
+                        required: true,
+                },
+                group: {
+                        type: String,
+                        required: true
+                },
                 dependency: String,
         },
 
@@ -38,7 +45,7 @@ export default defineComponent({
                                 label: '',
                                 value: '',
                         }],
-                        value: '',
+                        dataValue: '',
                         visible: false,
                         focused: false,
                 }
@@ -57,28 +64,30 @@ export default defineComponent({
 
         computed: {
                 advancedOptions: () => store.getters.advancedOptions,
-                selects: () => store.getters.componentsSelect as [{ category: string; group: string; dependency: string; isOpen: boolean; label: string; value: string; visible: boolean }],
+                selects: () => store.getters.componentsSelect as Component[],
+                value(): Component['value'] { return !this.visible ? "undefined" : this.dataValue }
         },
 
         methods: {
                 optionClick: function(option: { group: string; label: string; value: string }) {
                         this.label = option.label;
-                        this.value = option.value;
+                        this.dataValue = option.value;
                 },
 
                 register: function() {
-                        const payload =
+                        const payload: Component =
                                 {
+                                        type: 'select',
                                         category: this.category,
                                         group: this.group,
                                         dependency: this.dependency,
-                                        isOpen: this.isOpen,
                                         label: this.label,
                                         value: this.value,
-                                        visible: this.visible,
+                                        isOpen: this.isOpen,
+                                        visible: this.visible
                                 }
 
-                        store.commit('registerComponentSelectGroup', payload);
+                        store.commit('registerComponent', payload);
                 },
         },
 
@@ -88,9 +97,7 @@ export default defineComponent({
                         handler() {
                                 if(this.group && this.category) {
                                         this.options = this.advancedOptions[this.category.toLowerCase()][this.group.toLowerCase()];
-                                        for(let i= 0; i < this.selects.length; i++) {
-                                                if(this.selects[i].group === this.group) this.visible = this.selects[i].visible;
-                                        }
+                                        for(const component of this.selects) component.group === this.group ? this.visible = component.visible : false;
                                 }
                         }
                 },
@@ -99,10 +106,11 @@ export default defineComponent({
                 dependency: function() { this.register() },
                 isOpen: function() { this.register() },
                 label: function() { this.register() },
-                value: function() { this.register() },
+                dataValue: function() { this.register() },
                 visible: function() {
                         this.label = this.options[0].label;
-                        this.value = this.options[0].value;
+                        this.dataValue = this.options[0].value;
+                        if(!this.visible) this.register();
                 },
         }
 

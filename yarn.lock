@@ -1696,7 +1696,7 @@
   optionalDependencies:
     prettier "^1.18.2"
 
-"@vue/devtools@^6.0.0-beta.2":
+"@vue/devtools@6.0.0-beta.2":
   version "6.0.0-beta.2"
   resolved "https://registry.yarnpkg.com/@vue/devtools/-/devtools-6.0.0-beta.2.tgz#eafc8841ebbc0330dd4e8f82e6c525738712825f"
   integrity sha512-stB8NtC3wC3Spz87MxO09CGXQ4wTr86kys4K/YmybSIKJxqpJdcsNAJY/ukaZUy526LQ32ZFZIsOTf4n2os53w==

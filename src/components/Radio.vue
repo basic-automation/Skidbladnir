@@ -1,5 +1,5 @@
 <template>
-        <button ref="button" :class="['flex bg-gray-400 flex-col w-full md:w-auto items-center justify-center cursor-pointer flex-shrink-0 focus:outline-none transition-size duration-300 ease-in-out', { 'rounded-top-20px': isHover, 'rounded-20px': !isHover }]" @click="clicked(); isFocused = false" @focus="isFocused = true" @blur="isFocused = false" @mouseover="setMouseOverTrue()" @mouseout="setIsHoverFalse(); isMouseOver = false;">
+        <button ref="button" :class="['flex bg-gray-400 flex-col w-full md:w-auto items-center justify-center cursor-pointer flex-shrink-0 focus:outline-none transition-size duration-300 ease-in-out', { 'rounded-top-20px': isHover, 'rounded-20px': !isHover, 'hidden': !visible }]" @click="clicked(); isFocused = false" @focus="isFocused = true" @blur="isFocused = false" @mouseover="setMouseOverTrue()" @mouseout="setIsHoverFalse(); isMouseOver = false;">
 
                 <div :class="['flex h-10 flex-row items-center justify-center w-full cursor-pointer flex-shrink-0 pointer-events-none']">
                         <label :class="['flex ml-4 justify-start items-center h-full text-xs cursor-pointer antialiased flex-shrink-0 pointer-events-none']">{{ label }}</label>
@@ -17,7 +17,7 @@
 
         </button>
 
-        <input :class="['hidden']" type="radio" :id="id" :name="group" :checked="isSelected" :value="value"/>
+        <input :class="['hidden']" type="radio" :id="id" :name="group" :checked="isSelected" :value="id"/>
 </template>
 
 <script lang="ts">
@@ -26,11 +26,17 @@
         //import _ from 'lodash';
         import { defineComponent } from 'vue';
         import store from '../store';
+        import { Component } from '../interface/store/Component';
+        import { AdvancedOptions } from '@/interface/store/AdvancedOptions';
 
         export default defineComponent({
                 name: 'Radio',
 
                 props: {
+                        category: {
+                                type: String,
+                                required: true,
+                        },
                         group: {
                                 type: String,
                                 required: true,
@@ -47,7 +53,7 @@
 
                 data() {
                         return {
-                                value: this.id,
+                                dataValue: false,
                                 isSelected: false,
                                 isFocused: false,
                                 isHover: true,
@@ -69,22 +75,19 @@
                                 isAnimatingHeight: false,
                                 loggingInfoWidth: false,
                                 loggingInfoHeight: false,
+                                visible: true,
                         };
                 },
 
                 computed: {
                         advancedOptions: () => store.getters.advancedOptions,
-                        advancedOptionsIsShown: () => store.getters.advancedOptionsIsShown,
-                        radioGroup: () => store.getters.componentsRadio,
-                        componentCategory: () => store.getters.componentCategory as [{ category: string; group: string; visible: boolean }],
+                        advancedOptionsIsShown: () => store.getters.advancedOptionsIsShown as AdvancedOptions['isShown'],
+                        radioType: () => store.getters.componentsRadio as Component[],
+                        componentCategory: () => store.getters.componentCategory as Component[],
+                        value(): Component['value'] { return !this.visible ? "undefined" : [this.dataValue]; },
                 },
 
                 created() {
-                        // define current group
-                        let mygroup: { group: string; id: string[]; value: boolean[] } = { group: this.group, id: [this.id], value: [this.isSelected] };
-
-                        // register component with store
-                        store.commit('registerComponentRadioGroup', mygroup);
 
                         // set info label from store
                         const mode = this.advancedOptions[this.group.toLowerCase()];
@@ -109,6 +112,7 @@
                         const widthClass = '.' + this.infoWidthClass + ' { width: var(' + this.infoWidthVarName + '); }';
                         this.addCss(this.infoCSSID, widthClass);
 
+                        this.register();
                 },
 
                 mounted() {
@@ -118,10 +122,12 @@
 
                 methods: {
                         clicked: function() {
-                                let mygroup: { group: string; id: string[]; value: boolean[] } = { group: this.group, id: [this.id], value: [true] };
-                                store.commit('registerComponentRadioGroup', mygroup);
+                                this.isSelected = true;
+                                this.register();
                                 store.dispatch('syncModeWithRadioGroup', { group: this.group, id: this.id });
-                                store.commit('deployAssociation', this.value);
+                                //console.log('Radio: id: ', this.id);
+                                store.commit('deployAssociation', this.id);
+                                //console.log(this.id, ': Deploying Associations.');
                         },
 
                         logInfoHeight: function() {
@@ -145,7 +151,7 @@
                                                                 
                                                         }
                                                 }, this.infoAnimationDuration);
-                                        }).catch((err) => { console.error('logInfoHeight Error: ', err) });
+                                        }).catch((err) => { return err });
                                 }
                         },
 
@@ -170,7 +176,7 @@
                                                                 }
                                                         }
                                                 }, this.infoAnimationDuration);
-                                        }).catch((err) => { console.error('logInfoWidth Error: ', err) });
+                                        }).catch((err) => { return err } );
                                 }
                         },
 
@@ -205,7 +211,7 @@
                                                         }
                                                 }
                                         }, 100);
-                                }).catch((err) => { console.error('setIsHoverFalse Error: ', err) });
+                                }).catch((err) => { return err });
                         },
 
                         setIsHoverTrue: function() {
@@ -233,6 +239,36 @@
                                         }, this.hoverTimerDefault);
                                 });
                         },
+
+                        register: function() {
+                                let mygroup: Component = { 
+                                        type: 'radio',
+                                        category: this.category,
+                                        group: this.group,
+                                        id: [this.id],
+                                        value: this.value,
+                                        visible: this.visible
+                                };
+
+                                if(this.radioType) {
+                                        for(let i = 0; i < this.radioType.length; i++) {
+                                                if(this.radioType[i].group === this.group && this.radioType[i].category === this.category) {
+                                                        mygroup.id = this.radioType[i].id?.filter(word => word !== this.id) as string[];
+                                                        mygroup.id.push(this.id);
+                                                        if(mygroup.visible === false) {
+                                                                mygroup.value = 'undefined';
+                                                        } else {
+                                                                mygroup.value = [] as boolean[];
+                                                                for(let j = 0; j < mygroup.id?.length - 1; j++) mygroup.value.push(false);
+                                                                mygroup.value.push(this.isSelected);
+                                                        }
+                                                }
+                                        }
+                                }
+
+                                // register component with store
+                                store.commit('registerComponent', mygroup);
+                        },
                 
                 },
 
@@ -241,16 +277,52 @@
                                 if(store.getters.advancedOptionsIsShown) this.setIsHoverTrue().then(() => { this.logInfoHeight(); }).then(() => { this.logInfoWidth(); }).then(() => { this.setIsHoverFalse(); });
                         },
 
-                        radioGroup: function() {
-                                // find corresponding group and id and set checked value
-                                for(let i = 0; i < this.radioGroup.length; i++) {
-                                        if(this.radioGroup[i].group === this.group) {
-                                                for(let j = 0; j < this.radioGroup[i].id.length; j++) {
-                                                        if(this.radioGroup[i].id[j] === this.id) this.isSelected = this.radioGroup[i].value[j];
+                        radioType: {
+                                deep: true,
+                                handler() {
+                                        // // find corresponding group and id and synchronise the component data
+                                        // for(let i = 0; i < this.radioType.length; i++) {
+                                        //         if(this.radioType[i].group === this.group) {
+                                        //                 if(this.radioType[i].id && this.radioType[i].value) {
+                                        //                         let myID = this.radioType[i].id as Component['id'];
+                                        //                         let myValue = this.radioType[i].value as Component['value'];
+                                        //                         if(myID && Array.isArray(myValue)) {
+                                        //                                 for(let j = 0; j < myID.length; j++) if(myID[j] === this.id) this.isSelected = myValue[j];
+                                        //                         }
+                                        //                 }
+                                        //         }
+                                        // }
+
+                                        // find corresponding group and id and synchronise the component data
+                                        // loop through each radio component
+                                        //console.log('Typeof radioType: ', typeof(this.radioType[0]));
+                                        // eslint-disable-next-line no-constant-condition
+
+                                        //console.log('radioType Length: ', this.radioType.length);
+                                        //console.log(JSON.stringify(this.radioType,null,'\t'));
+                                        for(let i = 0; i < this.radioType.length; i++) {
+                                                if(this.radioType[i] !== undefined) {
+                                                        // console.log(JSON.stringify(this.radioType[i],null,'\t'));
+                                                        // if a component is found that matches the current component
+                                                        if(this.radioType[i].category === this.category && this.radioType[i].group === this.group) {
+                                                                // if value is not defined then set visibility
+                                                                // else set isSelected and visibility
+                                                                if(this.radioType[i].value === 'undefined') this.visible = this.radioType[i].visible;
+                                                                else {
+                                                                        let myID = this.radioType[i].id as Component['id'];
+                                                                        let myValue = this.radioType[i].value as Component['value'];
+                                                                        if(myID && Array.isArray(myValue)) {
+                                                                                for(let j = 0; j < myID.length; j++) if(myID[j] === this.id) this.isSelected = myValue[j];
+                                                                                this.visible = this.radioType[i].visible;
+                                                                        }
+                                                                }
+                                                        }
                                                 }
                                         }
+
                                 }
                         },
+                        
 
                         advancedOptions: {
                                 deep: true,
@@ -309,15 +381,19 @@
                                                                 this.logInfoWidth();
                                                         }).then(() => {
                                                                 this.setIsHoverFalse();
-                                                        }).catch((err) => { console.error('componentCategory Error: ', err) });
+                                                        }).catch((err) => { return err });
                                                 }
                                         }
                                 }
                         },
 
                         isMouseOver: function() {
-                                if(this.isMouseOver === true) Promise.all([this.continueHover()]).then((pass) => { if(pass) this.setIsHoverTrue(); console.log('isMouseOver') }).catch(() => { return });
-                        }
+                                if(this.isMouseOver === true) Promise.all([this.continueHover()]).then((pass) => { if(pass) this.setIsHoverTrue(); }).catch(() => { return });
+                        },
+
+                        visible: function() {
+                                if(!this.visible) this.register();
+                        },
                 }
         });
 </script>

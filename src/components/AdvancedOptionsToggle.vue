@@ -24,6 +24,7 @@
                         return {
                                 label: 'Advanced Options',
                                 focused: false,
+                                value: 'advancedOptions'
                         }
                 },
 
@@ -32,16 +33,14 @@
                 },
 
                 methods: {
-                        advancedOptionsClick: function() { store.dispatch('setAdvancedOptionsIsShown', !store.getters.advancedOptionsIsShown) },
+                        advancedOptionsClick: function() {
+                                store.dispatch('setAdvancedOptionsIsShown', !store.getters.advancedOptionsIsShown);
+                        },
                 },
 
                 watch: {
                         advancedOptionsIsShown: function() {
-                                if(this.advancedOptionsIsShown) {
-                                        this.label = 'Basic Options';
-                                } else {
-                                        this.label = 'Advanced Options';
-                                }
+                                this.advancedOptionsIsShown ? this.label = 'Basic Options' : this.label = 'Advanced Options';
                         },
                 },
         });

@@ -9,6 +9,8 @@
 </template>
 
 <script lang="ts">
+        import { AdvancedOptions } from '@/interface/store/AdvancedOptions';
+        import { Component } from '@/interface/store/Component';
         import { defineComponent } from 'vue';
         import store from '../store';
 
@@ -24,22 +26,14 @@
                 },
 
                 computed: {
-                        advancedOptions: () => store.getters.advancedOptions,
-                        categories: () => store.getters.componentCategory as [{ category: string; group: string; visible: boolean }]
+                        advancedOptions: () => store.getters.advancedOptions as AdvancedOptions,
+                        categories: () => store.getters.componentCategory as Component[],
                 },
 
                 watch: {
                         advancedOptions: {
                                 deep: true,
-                                handler() {
-                                        if(this.group && this.category) {
-                                                for(let i= 0; i < this.categories.length; i++) {
-                                                        if(this.categories[i].group === this.group) {
-                                                                this.visible = this.categories[i].visible;
-                                                        }
-                                                }
-                                        }
-                                }
+                                handler() { if(this.group && this.category) for(const component of this.categories) component.group === this.group ? this.visible = component.visible : false; }
                         },
                 }
         })

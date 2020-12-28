@@ -20,7 +20,7 @@ protocol.registerSchemesAsPrivileged(
         ]
 );
 
-function createWindow() {
+async function createWindow() {
         // Create the browser window.
         win = new BrowserWindow({
                 width: 800,
@@ -40,13 +40,13 @@ function createWindow() {
         //remove File menu bar
         if (process.env.WEBPACK_DEV_SERVER_URL) {
                 // Load the url of the dev server if in development mode
-                win.loadURL(process.env.WEBPACK_DEV_SERVER_URL as string);
+                await win.loadURL(process.env.WEBPACK_DEV_SERVER_URL)
                 if (!process.env.IS_TEST) win.webContents.openDevTools();
-                else win.removeMenu();
         } else {
                 createProtocol('app');
                 // Load the index.html when not in development
                 win.loadURL('app://./index.html');
+                win.removeMenu();
         }
         
         win.on('closed', () => { win = null; });
