@@ -104,7 +104,9 @@
 
                         visible: function() {
                                 if(!this.visible) this.register();
-                                else for(const component of this.sliders) if(this.group === component.group && this.value !== component.value) this.register;
+                                else {
+                                        for(const component of this.sliders)  if(this.group === component.group && this.value !== component.value) this.register();
+                                }
                         }
                 }
         });

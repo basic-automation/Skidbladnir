@@ -5,11 +5,31 @@ import { ipcRenderer } from 'electron';
 import { State } from './interface/store/State';
 import { CWEBPCommandParameters } from './interface/CWEBPCommandParameters';
 import { Component } from './interface/store/Component';
+import { statSync } from 'fs';
+import { Files } from './interface/store/Files';
 
 export const store = createStore({
         state: {
-                inputFiles: {},
-                outputFiles: {},
+                inputFiles: {
+                        files: [
+                                {
+                                        name: '',
+                                        path: '',
+                                        extention: '',
+                                        direction: 'input',
+                                }
+                        ]
+                },
+                outputFiles: {
+                        files: [
+                                {
+                                        name: '',
+                                        path: '',
+                                        extention: '',
+                                        direction: 'output',
+                                }
+                        ]
+                },
                 app: {
                         isDragEnter: false,
                         canDragEnter: true,
@@ -309,28 +329,160 @@ export const store = createStore({
 
                 advancedOptionsIsShown: state => { return state.advancedOptions.isShown },
 
-                selectedRadio: (state) => (group: string) => { 
+                selectedRadio: (state) => (group: string) => {
                         let radio = state.components.radio as Component[];
                         for (let i = 0; i < radio.length; i++) {
                                 if (group === radio[i].group) {
                                         let val = radio[i].value as boolean[]
                                         for (let j = 0; j < val.length; j++) {
                                                 let id = radio[i].id as string[]
-                                                return (val[j] && id[j]) ?  id[j] : false;
+                                                return (val[j] && id[j]) ? id[j] : false;
                                         }
                                 }
                         }
                 },
 
-                selectedSlider: (state) => (group: string) => { for (let i = 0; i < state.components.slider.length; i++) return state.components.slider[i].group === group ? state.components.slider[i] : false },
+                selectedSlider: (state) => (group: string) => { for (let i = 0; i < state.components.slider.length; i++) if (state.components.slider[i].group === group) return state.components.slider[i] },
 
-                selectedSelect: (state) => (group: string) => { for (let i = 0; i < state.components.select.length; i++) return state.components.select[i].group === group ? state.components.select[i] : false },
+                selectedSelect: (state) => (group: string) => { for (let i = 0; i < state.components.select.length; i++) if (state.components.select[i].group === group) return state.components.select[i] },
+
+                retrieveCommandObject: (state, getters): [CWEBPCommandParameters, string[]] => {
+                        let error: string[] = [];
+
+                        // get path for cwebp binaries
+                        const binariesPath = (): string => {
+                                let outputPath = path.join("./resources", "cwebp");
+                                const isDev = ipcRenderer.sendSync('isDev');
+                                const rootPath = process.cwd();
+                                const platform = (): string => {
+                                        let plat = 'undefined';
+                                        switch (process.platform) {
+                                                case 'aix': case 'freebsd': case 'linux': case 'openbsd': case 'android': plat = 'linux'; break;
+                                                case 'darwin': case 'sunos': plat = 'mac'; break;
+                                                case 'win32': plat = 'win'; break;
+                                        }
+                                        return plat;
+                                }
+
+                                if (platform() && isDev) outputPath = path.join(rootPath, "./src", "./resources", platform(), "cwebp");
+                                outputPath = '"' + path.resolve(path.join(outputPath, "./cwebp")) + '"';
+                                return outputPath;
+                        }
+
+                        // get and validate input file paths
+                        const inputFiles = (): string => {
+                                getters.inputFiles.files[0].path.length < 3 ? error.push('INPUT-001') : false;
+                                statSync(getters.inputFiles.files[0].path).isFile() ? error.push('INPUT-002') : false;
+                                return getters.inputFiles.files[0] ? '"' + getters.inputFiles.files[0].path + '"' : 'undefined';
+                        };
+
+                        // get and validate output directory paths
+                        const ouputFiles = (): string => {
+                                getters.outputFiles.files[0].path.length < 3 ? error.push('OUTPUT-001') : false;
+                                statSync(getters.outputFiles.files[0].path).isDirectory() ? error.push('OUTPUT-002') : false;
+                                return getters.outputFiles.files[0] ? '"' + getters.outputFiles.files[0].path + '\\' + getters.inputFiles.files[0].name + '.' + getters.inputFiles.files[0].extention + '"' : 'undefined';
+                        };
+
+                        // get wether or not the advanced options drawer is open
+                        const isAdvanced = (): boolean => { return getters.advancedOptionsIsShown ? true : false };
+
+                        // get and validate mode selection.
+                        const mode = (): string => { return getters.selectedRadio('Mode') ? getters.selectedRadio('Mode') : 'undefined' };
+
+                        // get and validate preset selection
+                        const preset = (): string => { return getters.selectedSelect('preset').value ? getters.selectedSelect('preset').value : 'undefined' };
+
+                        // get and validate quality selection
+                        const quality = (): string => { return getters.selectedSlider('quality').value ? getters.selectedSlider('quality').value : 'undefined' };
+
+                        // get and validate alpha quality selection
+                        const alphaQuality = (): string => { return getters.selectedSlider('alphaQuality').value ? getters.selectedSlider('alphaQuality').value : 'undefined' };
+
+                        // get and validate compression method selection
+                        const compressionMethod = (): string => { return getters.selectedSlider('compressionMethod').value ? getters.selectedSlider('compressionMethod').value : 'undefined' };
+
+                        // get and validate compression selection
+                        const compression = (): string => { return getters.selectedRadio('compression') ? getters.selectedRadio('compression') : 'undefined' };
+
+                        // get and validate compression target selection
+                        const compressionTarget = (): string => { return compression() === 'fileSize' ? getters.selectedSlider('targetSize').value : compression() == 'PSNR' ? getters.selectedSlider('targetPSNR').value : 'undefined' };
+
+                        // get and validate number of passes
+                        const numberOfPasses = (): string => { return getters.selectedSlider('numberOfPasses').value ? getters.selectedSlider('numberOfPasses').value : 'undefined' };
+
+                        // get and validate deblocking filter selection
+                        const deblockingFilter = (): string => { return getters.selectedRadio('deblocking') ? getters.selectedRadio('deblocking') : 'undefined' };
+
+                        // get and validate deblocking filter strength selection
+                        const deblockingStrength = (): string => { return deblockingFilter() === 'undefined' || deblockingFilter() === 'autoFilter' ? 'undefined' : getters.selectedSlider('strength').value };
+
+                        // get and validate deblocking filter sharpness selection
+                        const deblockingSharpness = (): string => { return deblockingFilter() === 'undefined' || deblockingFilter() === 'autoFilter' ? 'undefined' : getters.selectedSlider('sharpness').value };
+
+                        // get and validate noise shaping amplitude selection
+                        const noiseShapingAmplitude = (): string => { return getters.selectedSlider('amplitude').value ? getters.selectedSlider('amplitude').value : 'undefined' };
+
+                        // get and validate number of noise shaping segments selection
+                        const noiseShapingSegments = (): string => { return getters.selectedSlider('numberOfSegments').value ? getters.selectedSlider('numberOfSegments').value : 'undefined' };
+
+
+
+                        const CMDObject: CWEBPCommandParameters =
+                        {
+                                binariesPath: binariesPath(),
+                                inputFiles: inputFiles(),
+                                ouputFiles: ouputFiles(),
+                                isAdvanced: isAdvanced(),
+                                mode: mode(),
+                                preset: preset(),
+                                quality: quality(),
+                                alphaQuality: alphaQuality(),
+                                compressionMethod: compressionMethod(),
+                                compression: compression(),
+                                compressionTarget: compressionTarget(),
+                                numberOfPasses: numberOfPasses(),
+                                deblockingFilter: deblockingFilter(),
+                                deblockingStrength: deblockingStrength(),
+                                deblockingSharpness: deblockingSharpness(),
+                                noiseShapingAmplitude: noiseShapingAmplitude(),
+                                noiseShapingSegments: noiseShapingSegments(),
+                        }
+
+                        return [CMDObject, error]
+
+
+                },
         },
 
         mutations: {
-                setInputFiles: (state, payload: File) => state.inputFiles = payload,
+                setInputFiles: (state, payload: Files) => {
+                        //console.log("payload:", JSON.stringify(payload, null, 4));
+                        let newInputFiles = state.inputFiles.files;
+                        let i = 0;
+                        newInputFiles.forEach((file) => {
+                                if (file.name === "") delete newInputFiles[i];
+                                i++;
+                        });
+                        newInputFiles = newInputFiles.filter((a) => { return typeof a !== 'undefined' });
+                        newInputFiles.push(payload);
 
-                setOutputFiles: (state, payload: File) => state.outputFiles = payload,
+                        state.inputFiles.files = newInputFiles;
+                        //console.log("state.inputFiles.files:", JSON.stringify(state.inputFiles.files, null, 4));
+                },
+
+                setOutputFiles: (state, payload: Files) => {
+                        //console.log("output payload:", JSON.stringify(payload, null, 4));
+                        let newOutputFiles = state.outputFiles.files;
+                        let i = 0;
+                        newOutputFiles.forEach((file) => {
+                                if (file.name === "") delete newOutputFiles[i];
+                                i++;
+                        });
+                        newOutputFiles = newOutputFiles.filter((a) => { return typeof a !== 'undefined' });
+                        newOutputFiles.push(payload);
+
+                        state.outputFiles.files = newOutputFiles;
+                },
 
                 setAppIsDragEnter: (state, payload: boolean) => state.app.isDragEnter = payload,
 
@@ -346,13 +498,13 @@ export const store = createStore({
 
                 setComponentValue: (state, payload: { type: Component['type']; group: Component['group']; value: Component['value'] }) => {
                         let existingComponents = state.components;
-                        if(existingComponents[payload.type]) {
-                                for(let i = 0; i < existingComponents[payload.type].length; i++) {
-                                        if(existingComponents[payload.type][i].group === payload.group) {
-                                                if(typeof payload.value === typeof state.components[payload.type][i].value) {
-                                                        if(Array.isArray(payload.value) && Array.isArray(state.components[payload.type][i].value)) {
+                        if (existingComponents[payload.type]) {
+                                for (let i = 0; i < existingComponents[payload.type].length; i++) {
+                                        if (existingComponents[payload.type][i].group === payload.group) {
+                                                if (typeof payload.value === typeof state.components[payload.type][i].value) {
+                                                        if (Array.isArray(payload.value) && Array.isArray(state.components[payload.type][i].value)) {
                                                                 let componentValueArray = state.components[payload.type][i].value as boolean[];
-                                                                if(payload.value.length === componentValueArray.length) state.components[payload.type][i].value = payload.value;
+                                                                if (payload.value.length === componentValueArray.length) state.components[payload.type][i].value = payload.value;
                                                         } else state.components[payload.type][i].value = payload.value;
                                                 }
                                         }
@@ -367,14 +519,14 @@ export const store = createStore({
                         /* ************************************************ */
                         // remove and invaild components
                         // delete any groups that are undefined
-                        for(const [typeKey] of Object.entries(state.components)) {
+                        for (const [typeKey] of Object.entries(state.components)) {
                                 //console.log('registerComponent: typeKey: ', typeKey);
-                                for(const [componentIndex, componentValue] of state.components[typeKey].entries()) {
+                                for (const [componentIndex, componentValue] of state.components[typeKey].entries()) {
                                         //console.log('registerComponent: componentIndex: ', componentIndex);
                                         //console.log('registerComponent: componentValue: ', JSON.stringify(componentValue,null,'\t'));
-                                        if(componentValue.group === '') {
+                                        if (componentValue.group === '') {
                                                 delete state.components[typeKey][componentIndex];
-                                                state.components[typeKey] = state.components[typeKey].filter( (a) => { return typeof a !== 'undefined' }) as Component[];
+                                                state.components[typeKey] = state.components[typeKey].filter((a) => { return typeof a !== 'undefined' }) as Component[];
                                                 //console.log('registerComponent: State: Components: ', JSON.stringify(state.components,null,'\t'));
                                         }
                                 }
@@ -399,27 +551,27 @@ export const store = createStore({
                         /* ************************************************ */
 
                         //if component type exist
-                        if(state.components[newComponent.type]) {
+                        if (state.components[newComponent.type]) {
                                 //console.log('Component type found.');
 
                                 // if component type is empty push newComponent
-                                if(state.components[newComponent.type].length === 0) state.components[newComponent.type].push(newComponent);
+                                if (state.components[newComponent.type].length === 0) state.components[newComponent.type].push(newComponent);
 
                                 // if the component type already contains data
                                 else {
                                         //console.log('Data existed on component type.');
                                         let matched = false;
                                         let i = 0;
-                                        for(const component of state.components[newComponent.type]) {
+                                        for (const component of state.components[newComponent.type]) {
                                                 //console.log('registerComponent: component: ', JSON.stringify(component, null, '\t'));
-                                                if(component) {
-                                                        if(component.group === newComponent.group && component.category === newComponent.category) {
+                                                if (component) {
+                                                        if (component.group === newComponent.group && component.category === newComponent.category) {
                                                                 delete state.components[newComponent.type][i];
-                                                                state.components[newComponent.type] = state.components[newComponent.type].filter((a) => { return typeof a !== 'undefined'});
+                                                                state.components[newComponent.type] = state.components[newComponent.type].filter((a) => { return typeof a !== 'undefined' });
                                                                 state.components[newComponent.type].push(newComponent);
                                                                 matched = true;
                                                         } else {
-                                                                if(i === state.components[newComponent.type].length - 1 && !matched) state.components[newComponent.type].push(newComponent);
+                                                                if (i === state.components[newComponent.type].length - 1 && !matched) state.components[newComponent.type].push(newComponent);
                                                         }
                                                 }
                                                 i++;
@@ -536,7 +688,7 @@ export const store = createStore({
                         slider.push(payload);
                         state.components.slider = slider;
                 }, */
-                
+
                 deployAssociation: (state, payload: string) => {
                         //console.log('Payload: ', payload, ': Association Deployment Request Recieved.');
                         const assoc = state.advancedOptions.associations[payload as keyof {}] as { components: string[]; visible: boolean[] }
@@ -548,13 +700,13 @@ export const store = createStore({
                                 if (associations) {
                                         //console.log('Original State: ', JSON.stringify(state,null,'\t'));
                                         // loop through all associations
-                                        for(const [associationIndex, associationValue] of associations.entries()) {
+                                        for (const [associationIndex, associationValue] of associations.entries()) {
                                                 // loop through all components
-                                                for(const [, componentValue] of Object.entries(components)) {
+                                                for (const [, componentValue] of Object.entries(components)) {
                                                         // loop through each item in each component
-                                                        for(const val of componentValue) {
+                                                        for (const val of componentValue) {
                                                                 // if group matches association then set visible to true
-                                                                if('visible' in val && val.group === associationValue) val.visible = visible[associationIndex];
+                                                                if ('visible' in val && val.group === associationValue) val.visible = visible[associationIndex];
                                                         }
                                                 }
                                         }
@@ -577,7 +729,7 @@ export const store = createStore({
                                         //         }
                                         // }
                                         /* old */
-                                        
+
                                 }
                         }
                 }
@@ -585,12 +737,12 @@ export const store = createStore({
 
         actions: {
 
-                addFiles({ commit }, payload: { type: string; paths: string[] }) {
-                        switch(payload.type) {
-                        case "output":
-                                return new Promise(() => commit('setOutputFiles', payload.paths));
-                        default:
-                                return new Promise(() => commit('setInputFiles', payload.paths));
+                addFiles({ commit }, payload: Files) {
+                        switch (payload.direction) {
+                                case "output":
+                                        return new Promise(() => commit('setOutputFiles', payload));
+                                default:
+                                        return new Promise(() => commit('setInputFiles', payload));
                         }
                 },
 
@@ -614,10 +766,10 @@ export const store = createStore({
                 },
 
                 syncModeWithRadioGroup({ getters, commit }, payload: { group: string; id: string }) {
-                        for(const radio of getters.componentsRadio) {
-                                if(radio.group === payload.group) {
-                                        for(const [idKey, idValue] of radio.id.entries()) {
-                                                if(idValue === payload.id && radio.value[idKey]) {
+                        for (const radio of getters.componentsRadio) {
+                                if (radio.group === payload.group) {
+                                        for (const [idKey, idValue] of radio.id.entries()) {
+                                                if (idValue === payload.id && radio.value[idKey]) {
                                                         commit('setAdvancedOptionsMode', payload.id);
                                                 }
                                         }
@@ -635,104 +787,66 @@ export const store = createStore({
                         } */
                 },
 
-                constructCMD({ getters }) {
-                        const inputFiles = (): string => { return getters.inputFiles[0] ? getters.inputFiles[0] : 'undefined' };
-                        const ouputFiles = (): string => { return getters.outputFiles[0] ? getters.outputFiles[0] : 'undefined' };
-                        const mode = (): string => { return getters.selectedRadio('Mode') ? getters.selectedRadio('Mode') : 'undefined' };
-                        const isAdvanced = (): boolean => { return mode() !== 'undefined' ? true : false };
-                        const preset = (): string => { return getters.selectedSelect('preset').value === '' ? 'undefined' : getters.selectedSelect('preset').value };
-                        const quality = (): string => { return getters.selectedSlider('quality').value ? getters.selectedSlider('quality').value : 'undefined' };
-                        const alphaQuality = (): string => { return getters.selectedSlider('alphaQuality').value ? getters.selectedSlider('alphaQuality').value : 'undefined' };
-                        const compressionMethod = (): string => { return getters.selectedSlider('compressionMethod').value ? getters.selectedSlider('compressionMethod').value : 'undefined' };
-                        const compression = (): string => { return getters.selectedRadio('compression') ? getters.selectedRadio('compression') : 'undefined' };
-                        const compressionTarget = (): string => { return compression() === 'fileSize' ? getters.selectedSlider('targetSize').value : compression() == 'PSNR' ? getters.selectedSlider('targetPSNR').value : 'undefined' };
-                        const numberOfPasses = (): string => { return getters.selectedSlider('numberOfPasses').value ? getters.selectedSlider('numberOfPasses').value : 'undefined' };
-                        const deblockingFilter = (): string => { return getters.selectedRadio('deblocking') ? getters.selectedRadio('deblocking') : 'undefined' };
-                        const deblockingStrength = (): string => { return deblockingFilter() === 'undefined' || deblockingFilter() === 'autoFilter' ? 'undefined' : getters.selectedSlider('strength').value };
-                        const deblockingSharpness = (): string => { return deblockingFilter() === 'undefined' || deblockingFilter() === 'autoFilter' ? 'undefined' : getters.selectedSlider('sharpness').value };
-                        const noiseShapingAmplitude = (): string => { return getters.selectedSlider('amplitude').value ? getters.selectedSlider('amplitude').value : 'undefined' };
-                        const noiseShapingSegments = (): string => { return getters.selectedSlider('numberOfSegments').value ? getters.selectedSlider('numberOfSegments').value : 'undefined' };
-                        const binariesPath = (): string => { 
-                                let outputPath = path.join("./resources", "cwebp");
-                                const isDev = ipcRenderer.sendSync('isDev');
-                                const rootPath = process.cwd();
-                                const platform = (): string => {
-                                        let plat = 'undefined';
-                                        switch (process.platform) {
-                                        case 'aix': case 'freebsd': case 'linux': case 'openbsd': case 'android': plat = 'linux'; break;
-                                        case 'darwin': case 'sunos': plat = 'mac'; break;
-                                        case 'win32': plat = 'win'; break;
-                                        }
-                                        return plat;
-                                }
-
-                                if (platform() && isDev) outputPath = path.join(rootPath, "./resources", platform(), "cwebp");
-                                outputPath = path.resolve(path.join(outputPath, "./cwebp"));
-                                return outputPath;
+                getErrors({ state }, payload: string) {
+                        state;
+                        switch (payload) {
+                                case 'INPUT001':
+                                        return 'Please select valid input file.';
+                                case 'INPUT002':
+                                        return 'Please select valid input file.';
+                                case 'OUTPUT-001':
+                                        return 'Please select a valid output directory.'
+                                case 'OUTPUT-002':
+                                        return 'Please select a valid output directory.'
+                                default:
+                                        return false;
                         }
+                },
 
-                        const CMDObject: CWEBPCommandParameters =
-                                {
-                                        binariesPath: binariesPath(),
-                                        inputFiles: inputFiles(),
-                                        ouputFiles: ouputFiles(),
-                                        isAdvanced: isAdvanced(),
-                                        mode: mode(),
-                                        preset: preset(),
-                                        quality: quality(),
-                                        alphaQuality: alphaQuality(),
-                                        compressionMethod: compressionMethod(),
-                                        compression: compression(),
-                                        compressionTarget: compressionTarget(),
-                                        numberOfPasses: numberOfPasses(),
-                                        deblockingFilter: deblockingFilter(),
-                                        deblockingStrength: deblockingStrength(),
-                                        deblockingSharpness: deblockingSharpness(),
-                                        noiseShapingAmplitude: noiseShapingAmplitude(),
-                                        noiseShapingSegments: noiseShapingSegments(),
-                                }
 
-                        //console.log(JSON.stringify(CMDObject, null, '\t'));
+
+                constructCMD({ getters }) {
 
                         const command = (payload: CWEBPCommandParameters): string => {
-
+                                console.log('command: payload: ');
+                                console.log(JSON.stringify(payload, null, '\t'));
                                 let CMD = '';
 
-                                if(payload.isAdvanced) {
+                                if (payload.isAdvanced) {
                                         const modeFlag = (): string => {
                                                 switch (payload.mode) {
-                                                case 'lossless':
-                                                        return ' -lossless -exact';
-        
-                                                case 'jpegLike':
-                                                        return ' -jpeg_like';
-        
-                                                case 'nearLossless':
-                                                        return ' -near_lossless' + payload.quality;
-                                                
-                                                case 'preset':
-                                                        return ' -preset ' + payload.preset;
-                                                
-                                                default:
-                                                        return '';
+                                                        case 'lossless':
+                                                                return ' -lossless -exact';
+
+                                                        case 'jpegLike':
+                                                                return ' -jpeg_like';
+
+                                                        case 'nearLossless':
+                                                                return ' -near_lossless' + payload.quality;
+
+                                                        case 'preset':
+                                                                return ' -preset ' + payload.preset;
+
+                                                        default:
+                                                                return '';
                                                 }
                                         }
 
-                                        const qualityFlag = (): string => { return payload.quality !== 'undefinded' ? ' -q ' + payload.quality : '' };
-                                        const alphaQualityFlag = (): string => { return payload.alphaQuality !== 'undefinded' ? ' -alpha_q ' + payload.alphaQuality : '' };
+                                        const qualityFlag = (): string => { return payload.quality !== 'undefined' ? ' -q ' + payload.quality : '' };
+                                        const alphaQualityFlag = (): string => { return payload.alphaQuality !== 'undefined' ? ' -alpha_q ' + payload.alphaQuality : '' };
                                         const compressionMethodFlag = (): string => { return payload.alphaQuality !== 'undefined' ? ' -m ' + payload.compressionMethod : '' };
                                         const multiThreadingFlag = (): string => { return ' -mt' };
 
                                         const compressionFlag = (): string => {
                                                 switch (payload.compression) {
-                                                case 'fileSize':
-                                                        return  ' -size ' + payload.compressionTarget;
+                                                        case 'fileSize':
+                                                                return ' -size ' + payload.compressionTarget;
 
-                                                case 'PSNR':
-                                                        return ' -psnr ' + payload.compressionTarget;
-                                        
-                                                default:
-                                                        return '';
+                                                        case 'PSNR':
+                                                                return ' -psnr ' + payload.compressionTarget;
+
+                                                        default:
+                                                                return '';
                                                 }
                                         };
 
@@ -741,14 +855,14 @@ export const store = createStore({
 
                                         const deblockingFilterFlag = (): string => {
                                                 switch (payload.deblockingFilter) {
-                                                case 'strongFilter':
-                                                        return ' -strong';
-                                                case 'simpleFilter':
-                                                        return ' -nostrong';
-                                                case 'autoFilter':
-                                                        return ' -af'
-                                                default:
-                                                        return '';
+                                                        case 'strongFilter':
+                                                                return ' -strong';
+                                                        case 'simpleFilter':
+                                                                return ' -nostrong';
+                                                        case 'autoFilter':
+                                                                return ' -af'
+                                                        default:
+                                                                return '';
                                                 }
                                         };
 
@@ -756,15 +870,29 @@ export const store = createStore({
                                         const sharpYUVFlag = (): string => { return ' -sharp_yuv' };
                                         const noiseShapingAmplitudeFlag = (): string => { return payload.noiseShapingAmplitude !== 'undefined' ? ' -sns ' + payload.noiseShapingAmplitude : '' };
                                         const noiseShapingSegmentsFlag = (): string => { return payload.noiseShapingSegments !== 'undefined' ? ' -segments ' + payload.noiseShapingSegments : '' };
+                                        const input = (): string => { return payload.inputFiles !== 'undefined' ? ' ' + payload.inputFiles : '' };
+                                        const output = (): string => { return payload.ouputFiles !== 'undefined' ? ' -o ' + payload.ouputFiles : '' };
 
-                                        CMD = payload.binariesPath + modeFlag() + qualityFlag() + alphaQualityFlag() + compressionMethodFlag() + multiThreadingFlag() + compressionFlag() + numberOfPassesFlag() + deblockingStrengthFlag() + deblockingFilterFlag() + deblockingSharpnessFlag() + sharpYUVFlag() + noiseShapingAmplitudeFlag() + noiseShapingSegmentsFlag();
-                                        console.log(CMD);
 
+                                        CMD = payload.binariesPath + modeFlag() + qualityFlag() + alphaQualityFlag() + compressionMethodFlag() + multiThreadingFlag() + compressionFlag() + numberOfPassesFlag() + deblockingStrengthFlag() + deblockingFilterFlag() + deblockingSharpnessFlag() + sharpYUVFlag() + noiseShapingAmplitudeFlag() + noiseShapingSegmentsFlag() + input() + output();
+                                        console.log('Final Command: ', CMD);
+
+                                } else {
+                                        const input = (): string => { return payload.inputFiles !== 'undefined' ? ' ' + payload.inputFiles : '' };
+                                        const output = (): string => { return payload.ouputFiles !== 'undefined' ? ' -o ' + payload.ouputFiles : '' };
+
+                                        CMD = payload.binariesPath + input() + output();
+                                        console.log('Final Command: ', CMD);
                                 }
-                                
 
-                                return JSON.stringify(CMD, null, '\t');
+                                return CMD;
                         }
+
+                        let CMDObject = getters.retrieveCommandObject[0];
+
+                        console.log('constructCommand: command: ' + command(CMDObject));
+
+                        ipcRenderer.send('convertToCwebp', command(CMDObject));
 
                         return command(CMDObject);
 

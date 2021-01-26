@@ -19,7 +19,9 @@ import { defineComponent } from "vue";
 import store from "../store";
 import { State } from '../interface/store/State'; 
 import { AppComponent } from '../interface/store/AppComponent';
-const { dialog } = require('electron').remote;
+import { Files } from '../interface/store/Files';
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { dialog } = require('@electron/remote');
 
 export default defineComponent({
         name: "FileUpload",
@@ -91,11 +93,39 @@ export default defineComponent({
                                 
                         } else if(typeof path !== 'undefined') selection = path;
 
-                        //construct payload
-                        const payload = { type: this.type, paths: selection };
+
+                        let direction: Files['direction'] = 'input';
+                        if(this.type === 'output') {
+                                direction = 'output';
+                        }
+
+                        const payload: Files[] = [];
+                        for(let i = 0; i < selection.length; i++) {
+                                if(selection[i]) {
+                                        const filename: string = JSON.stringify(selection[i]).split('\\').pop() || '';
+
+                                        let name: string = filename.split('.')[0];
+                                        if(direction === 'output') name = filename.slice(0, -1);
+                                        let extention: string = filename.split('.').pop()?.slice(0, -1) || '';
+                                        if(direction === 'output') extention = '\\';
+
+                                        payload.push(
+                                                { 
+                                                        name: name,
+                                                        path: selection[i],
+                                                        extention: extention,
+                                                        direction: direction,
+                                                }
+                                        );
+                                }
+                        }
 
                         //update the store
-                        this.store.dispatch("addFiles",payload);
+                        payload.forEach((load: Files) => {
+                                console.log("Load:", JSON.stringify(load, null, 4));
+                                this.store.dispatch("addFiles",load);
+                        })
+                        
                 },
 
                 fileUploadDragEnter() { if(!this.isFileUploadDragEnter) this.isFileUploadDragEnter = true; },
@@ -139,17 +169,13 @@ export default defineComponent({
                         deep: true,
                         handler() {
                                 if(this.type === 'input') {
+                                        console.log("files:", JSON.stringify(this.inputFiles.files, null, 4));
                                         this.input = '';
                                         const newInput = [];
-                                        for(const [, fileValue] of Object.entries(this.inputFiles)) newInput.push(fileValue);
+                                        for(let i = 0; i < this.inputFiles.files.length; i++) {
+                                                newInput.push(this.inputFiles.files[i].name + '.' + this.inputFiles.files[i].extention);
+                                        }
                                         this.input = newInput.join(', ');
-
-                                        //old
-                                        /* for(let i = 0; i < this.inputFiles.length; i++) {
-                                                if(i === this.inputFiles.length - 1) this.input += this.inputFiles[i];
-                                                else this.input += this.inputFiles[i] + ', ';
-                                        } */
-                                        //old
                                 }
                                 
                         }
@@ -161,15 +187,10 @@ export default defineComponent({
                                 if(this.type === 'output') {
                                         this.input = '';
                                         const newInput = [];
-                                        for(const [, fileValue] of Object.entries(this.outputFiles)) newInput.push(fileValue);
+                                        for(let i = 0; i < this.outputFiles.files.length; i++) {
+                                                newInput.push(this.outputFiles.files[i].name.concat(this.outputFiles.files[i].extention.toString()) );
+                                        }
                                         this.input = newInput.join(', ');
-
-                                        //old
-                                        /* for(let i = 0; i < this.outputFiles.length; i++) {
-                                                if(i === this.outputFiles.length - 1) this.input += this.outputFiles[i];
-                                                else this.input += this.outputFiles[i] + ', ';
-                                        } */
-                                        //old
                                 }
                         }
                 },

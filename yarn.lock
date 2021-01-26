@@ -924,6 +924,11 @@
     global-agent "^2.0.2"
     global-tunnel-ng "^2.7.1"
 
+"@electron/remote@^1.0.2":
+  version "1.0.2"
+  resolved "https://registry.yarnpkg.com/@electron/remote/-/remote-1.0.2.tgz#34e1450db6951d980f91728698f90ccce212a958"
+  integrity sha512-h/hDZoHDS5Rclw8kGWa16P029huVunuOzBtuvFOK49JbFTneK3EUnme4JdoCyjCZH1H3fGM5MyQHuCKkQkE3nw==
+
 "@fullhuman/postcss-purgecss@^3.0.0":
   version "3.0.0"
   resolved "https://registry.yarnpkg.com/@fullhuman/postcss-purgecss/-/postcss-purgecss-3.0.0.tgz#e39bf7a7d2a2c664ed151b639785b2efcbca33ff"
@@ -1172,6 +1177,11 @@
   version "12.12.63"
   resolved "https://registry.yarnpkg.com/@types/node/-/node-12.12.63.tgz#88220b261bc95afa17d25be5daf268214c19c780"
   integrity sha512-jRP6uNtUKAFz3Cl7zwCKW9hoRSNzuNSsQ3sLGSv5Uf+yWQvx226DF9a0Moa3HADkIp7ae/FhLwlqQzrgfg9hFg==
+
+"@types/node@^14.6.2":
+  version "14.14.16"
+  resolved "https://registry.yarnpkg.com/@types/node/-/node-14.14.16.tgz#3cc351f8d48101deadfed4c9e4f116048d437b4b"
+  integrity sha512-naXYePhweTi+BMv11TgioE2/FXU4fSl29HAH1ffxVciNsH3rYXjNP2yM8wqmSm7jS20gM8TIklKiTen+1iVncw==
 
 "@types/normalize-package-data@^2.4.0":
   version "2.4.0"
@@ -4195,13 +4205,13 @@ electron-to-chromium@^1.3.571:
   resolved "https://registry.yarnpkg.com/electron-to-chromium/-/electron-to-chromium-1.3.577.tgz#9885f3f72c6e3367010b461ff6f2d9624a929720"
   integrity sha512-dSb64JQSFif/pD8mpVAgSFkbVi6YHbK6JeEziwNNmXlr/Ne2rZtseFK5SM7JoWSLf6gP0gVvRGi4/2ZRhSX/rA==
 
-electron@^11.0.0-beta.9:
-  version "11.0.0-beta.11"
-  resolved "https://registry.yarnpkg.com/electron/-/electron-11.0.0-beta.11.tgz#b6020b5276a1fb7090047547c38d68d5fd483b1c"
-  integrity sha512-57eOF4toq9+0n1t9YBSqAz2qMYqo4r/KY49+m9Oq4MAchYj6naGzHgavQejH0hlL7k4yXD/1Aq3dAmBSadHTHQ==
+electron@^12.0.0-beta.12:
+  version "12.0.0-beta.12"
+  resolved "https://registry.yarnpkg.com/electron/-/electron-12.0.0-beta.12.tgz#7a9ec2e4a9c43cefdc1f6b958a697638facacdf1"
+  integrity sha512-KsLYSobAgN0F//WuJJxpNK7K2yWqVSPPG/mecGcZh72rRiz0K6oV3UX9xd/37F8l6dqbE3GmfEVAjzD7ZzPwNg==
   dependencies:
     "@electron/get" "^1.0.1"
-    "@types/node" "^12.0.12"
+    "@types/node" "^14.6.2"
     extract-zip "^1.0.3"
 
 electron@^7.0.0:

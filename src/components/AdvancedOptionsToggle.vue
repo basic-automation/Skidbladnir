@@ -34,7 +34,9 @@
 
                 methods: {
                         advancedOptionsClick: function() {
+                                console.log('setting advancedOptionsIsShown to : ', !store.getters.advancedOptionsIsShown);
                                 store.dispatch('setAdvancedOptionsIsShown', !store.getters.advancedOptionsIsShown);
+                                console.log('New advancedOptionsIsShown: ', store.getters.advancedOptionsIsShown);
                         },
                 },
 
