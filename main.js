@@ -307,6 +307,11 @@ function resetWebpScript(){
   lossless = "";
   filterStrength = "";
   filterSharp = "";
+  PSNR = "";
+  passes = "";
+  JPEGLike = "";
+  preset = "";
+  nearLossless = "";
   console.log("Webp Shell Script Reset.");
 }
 
