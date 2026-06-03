@@ -220,6 +220,15 @@
                 </div>
                 <input class="reversedInput" type="range" id="segments" min="1" max="4" value="4">
               </div>
+              <div class="container-2 options">
+                <div class="advanced-container">
+                  <button class="partitionLimit-btn">
+                    Partition Limit:
+                  </button>
+                  <span class="partitionLimit-info" id="partitionLimit-info">0</span>
+                </div>
+                <input type="range" id="partitionLimit" min="0" max="100" value="0">
+              </div>
             </div>
           </div>
         </div>
@@ -253,6 +262,7 @@
     const alphaQuality = document.getElementById('alphaQuality');
     const cMethod = document.getElementById('cMethod');
     const segments = document.getElementById('segments');
+    const partitionLimit = document.getElementById('partitionLimit');
     const targetSize = document.getElementById('targetSize');
     const sns = document.getElementById('sns');
     const modeLossless = document.getElementById('modeLossless');
@@ -512,6 +522,10 @@
       document.getElementById('segments-info').textContent = segments.value.toString();
     });
 
+    partitionLimit.addEventListener('change',()=>{
+      document.getElementById('partitionLimit-info').textContent = partitionLimit.value.toString();
+    });
+
     sns.addEventListener('change',()=>{
       document.getElementById('sns-info').textContent = sns.value.toString();
     });
@@ -570,6 +584,7 @@
             ipcRenderer.send('alphaQuality', alphaQuality.value.toString());
             ipcRenderer.send('cMethod', cMethod.value.toString());
             ipcRenderer.send('segments', segments.value.toString());
+            ipcRenderer.send('partitionLimit', partitionLimit.value.toString());
             ipcRenderer.send('passes', passes.value.toString());
             if(compressionType == "fileSize"){
               ipcRenderer.send('targetSize', targetSize.value.toString());
