@@ -93,6 +93,7 @@ var passes = "";
 var JPEGLike = "";
 var preset = "";
 var nearLossless = "";
+var inputPaths = [];
 
 
 // Define OS platform in order to load required executables
@@ -156,6 +157,10 @@ ipcMain.on('maxPSNR',(event, value) =>{
 // Detect ipcMain data recived and assign data to variable
 ipcMain.on('inputPath',function(e,inputPath){input = inputPath;});
 
+ipcMain.on('inputPaths',function(e,inputPathsJson){
+  inputPaths = JSON.parse(inputPathsJson);
+});
+
 ipcMain.on('lossless',function(e,losslessValue){
   if(losslessValue=="true"){
     lossless = ' -lossless -exact ';
@@ -218,51 +223,87 @@ ipcMain.on('nearLossless',function(e,nearLosslessValue){
 // Detect ipcMain data recived and assign it to a variable
 // Because it is know that this data will be send last we can
 // execute shell functions to cwebp
-ipcMain.on('outputPath',function(e,outputPath){
+ipcMain.on('outputPath', async function(e,outputPath){
 
-  // The final output path is (the user selected directory)+(the original file name)+.webp extention
-  output = path.join(outputPath,"\\"+path.basename(input,path.extname(input))+".webp");
+  if(inputPaths.length > 0){
+    // Batch processing: process all selected files sequentially
+    var paths = inputPaths.slice();
+    inputPaths = [];
 
-  // Log the final input and final output for debuging
-  console.log('Input File: '+input);
-  console.log('Output File: '+output);
+    // Capture current options before any reset can occur
+    var opts = {
+      preset, nearLossless, JPEGLike, lossless, af, mt,
+      filterStrength, filterSharp, alphaFilter, quality,
+      alphaQuality, cMethod, segments, targetSize, PSNR, passes, sns
+    };
 
-  // Bring all inputs together into a shell script
-  cwebpShellScript = [preset+nearLossless+JPEGLike+lossless+af+mt+filterStrength+filterSharp+alphaFilter+quality+alphaQuality+cMethod+segments+targetSize+PSNR+passes+sns+' "'+input+'"'+' -o "'+output+'"'];
+    for(var i = 0; i < paths.length; i++){
+      var inputFile = paths[i];
 
-  // Send the shell script the convert function
-  convertToWebp(cwebpShellScript);
+      // The final output path is (the user selected directory)+(the original file name)+.webp extention
+      var outputFile = path.join(outputPath,"\\"+path.basename(inputFile,path.extname(inputFile))+".webp");
+
+      // Log the final input and final output for debuging
+      console.log('Input File: '+inputFile);
+      console.log('Output File: '+outputFile);
+
+      // Bring all inputs together into a shell script
+      var script = [opts.preset+opts.nearLossless+opts.JPEGLike+opts.lossless+opts.af+opts.mt+opts.filterStrength+opts.filterSharp+opts.alphaFilter+opts.quality+opts.alphaQuality+opts.cMethod+opts.segments+opts.targetSize+opts.PSNR+opts.passes+opts.sns+' "'+inputFile+'"'+' -o "'+outputFile+'"'];
+
+      // Send the shell script the convert function and wait for completion
+      await convertToWebp(script);
+    }
+    resetWebpScript();
+  }
+  else{
+    // Single file (legacy path)
+
+    // The final output path is (the user selected directory)+(the original file name)+.webp extention
+    output = path.join(outputPath,"\\"+path.basename(input,path.extname(input))+".webp");
+
+    // Log the final input and final output for debuging
+    console.log('Input File: '+input);
+    console.log('Output File: '+output);
+
+    // Bring all inputs together into a shell script
+    cwebpShellScript = [preset+nearLossless+JPEGLike+lossless+af+mt+filterStrength+filterSharp+alphaFilter+quality+alphaQuality+cMethod+segments+targetSize+PSNR+passes+sns+' "'+input+'"'+' -o "'+output+'"'];
+
+    // Send the shell script the convert function
+    await convertToWebp(cwebpShellScript);
+    resetWebpScript();
+  }
 });
 
 
 // Pass defined shell script to cwebp.exe
 async function convertToWebp(cwebpShellScript){
-  var sout;
+  return new Promise((resolve) => {
 
-  // Log the exact script being passes to cwebp.exe
-  console.log("Cwebp.exe Shell Script: "+cwebpPath+cwebpShellScript.toString());
+    // Log the exact script being passes to cwebp.exe
+    console.log("Cwebp.exe Shell Script: "+cwebpPath+cwebpShellScript.toString());
 
-  // Make sure that the script is a string
-  var webpCMD = cwebpPath+cwebpShellScript.toString();
+    // Make sure that the script is a string
+    var webpCMD = cwebpPath+cwebpShellScript.toString();
 
-  // Create a data stream with cwebp.exe
-  proc = spawn(webpCMD,[],{ 
-    shell: true,
-    stdio:['pipe', 'pipe', 'pipe','pipe','pipe']
-  });
+    // Create a data stream with cwebp.exe
+    proc = spawn(webpCMD,[],{ 
+      shell: true,
+      stdio:['pipe', 'pipe', 'pipe','pipe','pipe']
+    });
 
-  proc.stdout.on('data', (data) => {
-    console.log(`stdout: ${data}`);
-  });
-  
-  proc.stderr.on('data', (data) => {
-    console.log(`stderr: ${data}`);
-  });
-  
-  proc.on('close', (code) => {
-    console.log(`child process exited with code ${code}`);
-    isConvertedWebP = code;
-    resetWebpScript();
+    proc.stdout.on('data', (data) => {
+      console.log(`stdout: ${data}`);
+    });
+    
+    proc.stderr.on('data', (data) => {
+      console.log(`stderr: ${data}`);
+    });
+    
+    proc.on('close', (code) => {
+      console.log(`child process exited with code ${code}`);
+      isConvertedWebP = code;
+      resolve(code);
+    });
   });
 }
 

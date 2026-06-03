@@ -10,7 +10,7 @@
       <div class="row-subheader">
         <div class="container-2">
           <div class="input-container">
-            <input type="file" id="inputPath">
+            <input type="file" id="inputPath" multiple>
             <button class="input-browse-btn">
               Input File
             </button>
@@ -295,22 +295,33 @@
     // Then change the vanity input box value to match.
     realInput.addEventListener('change', () => {
       console.log("input changed");
-      const name = realInput.value.split(/\\|\//).pop();
-      const truncated = name.length > 20 
-        ? name.substr(name.length - 20) 
-        : name;
-        inputFileInfo.innerHTML = truncated;
+      const files = realInput.files;
 
-      ipcRenderer.sendSync('fileSize', document.querySelector('#inputPath').files[0].path);
-      var filesize = ipcRenderer.sendSync('fileSize', document.querySelector('#inputPath').files[0].path);
-      console.log('File Size: '+filesize);
-      document.getElementById('originalSize').textContent = filesize+' bytes (original)';
-      document.getElementById('targetSize').value = filesize;
+      if (files.length === 1) {
+        const name = realInput.value.split(/\\|\//).pop();
+        const truncated = name.length > 20
+          ? name.substr(name.length - 20)
+          : name;
+        inputFileInfo.textContent = truncated;
+      } else {
+        inputFileInfo.textContent = files.length + ' files selected';
+      }
 
-      ipcRenderer.sendSync('maxPSNR', document.querySelector('#inputPath').files[0].path);
-      var returnPSNR = ipcRenderer.sendSync('maxPSNR', document.querySelector('#inputPath').files[0].path);
-      returnPSNR = parseInt(returnPSNR*1.2);
-      console.log("Returned PSNR: "+returnPSNR);
+      // Find the largest file size among all selected files
+      var maxSize = 0;
+      for (var i = 0; i < files.length; i++) {
+        var filesize = ipcRenderer.sendSync('fileSize', files[i].path);
+        console.log('File Size [' + i + ']: ' + filesize);
+        if (filesize > maxSize) maxSize = filesize;
+      }
+      document.getElementById('originalSize').textContent = maxSize + ' bytes (original)';
+      document.getElementById('targetSize').value = maxSize;
+
+      // Use the first file for PSNR calculation
+      ipcRenderer.sendSync('maxPSNR', files[0].path);
+      var returnPSNR = ipcRenderer.sendSync('maxPSNR', files[0].path);
+      returnPSNR = parseInt(returnPSNR * 1.2);
+      console.log("Returned PSNR: " + returnPSNR);
       targetPSNR.setAttribute("max", returnPSNR.toString());
       targetPSNR.value = returnPSNR;
       document.getElementById('targetPSNR-info').textContent = returnPSNR;
@@ -547,14 +558,13 @@
       // Prevent default handling of form submition
       e.preventDefault();
 
-
-      // Load collected data into variables
-      //var inputPath = document.querySelector('#inputPath').files[0].path;
-      //var outputPath = document.querySelector('#outputPath').files[0].path;
-
       if(formCheck()){
-        // Send collected data to main.js for processing
-        ipcRenderer.send('inputPath', inputPath); 
+        // Collect all selected input file paths
+        const files = document.querySelector('#inputPath').files;
+        const inputPaths = Array.from(files).map(f => f.path);
+
+        // Send all input file paths to main.js for batch processing
+        ipcRenderer.send('inputPaths', JSON.stringify(inputPaths));
         console.log('Advanced:'+advanced.toString());
         if(advanced){
           if(appMode == "lossless"){
@@ -626,39 +636,45 @@
       document.getElementById('inputError').textContent = "";
       document.getElementById('outputError').textContent = "";
       document.getElementById('presetError').textContent ="";
+
+      var files;
       try{
-        inputPath = document.querySelector('#inputPath').files[0].path;
+        files = document.querySelector('#inputPath').files;
+        if(files.length === 0) throw new Error("No files selected.");
       }catch{
         console.error("Error: Missing input selection.");
         document.getElementById('inputError').textContent = "Error: Missing input selection.";
         return false;
       }
-      var inputExt = path.extname(inputPath).toUpperCase();
-      if((inputExt == ".PNG" || inputExt == ".JPG" || inputExt == ".JPEG" || inputExt == ".JPE" || inputExt == ".Jif" || inputExt == ".JFIF" || inputExt == ".JFI" || inputExt == ".TIF" || inputExt == ".TIFF" || inputExt == ".WEBP")){
-        try{
-          outputPath = document.querySelector('#outputPath').files[0].path;
-        }
-        catch{
-          console.error("Error: Missing input selection.");
-          document.getElementById('outputError').textContent = "Error: Missing output selection.";
+
+      // Validate that every selected file has an accepted extension
+      var validExts = [".PNG", ".JPG", ".JPEG", ".JPE", ".JIF", ".JFIF", ".JFI", ".TIF", ".TIFF", ".WEBP"];
+      for(var i = 0; i < files.length; i++){
+        var ext = path.extname(files[i].path).toUpperCase();
+        if(!validExts.includes(ext)){
+          document.getElementById('inputError').textContent = "Error: Invalid input file type (JPEG, PNG, TIFF, WebP).";
+          console.log("Error: Wrong input file type.");
           return false;
         }
-        if(appMode == "preset"){
-          if(presetType.value != "select"){}
-          else{
-            document.getElementById('presetError').textContent = "Error: Missing preset selection.";
-            console.log("Error: No preset selected.");
-            return false;
-          }
-        }
-        return true;
       }
-      else{
-        document.getElementById('inputError').textContent = "Error: Invalid input file type (JPEG, PNG, TIFF, WebP).";
-        console.log("Error: Wrong input file type.");
+
+      try{
+        outputPath = document.querySelector('#outputPath').files[0].path;
+      }
+      catch{
+        console.error("Error: Missing output selection.");
+        document.getElementById('outputError').textContent = "Error: Missing output selection.";
         return false;
       }
-      return false;
+      if(appMode == "preset"){
+        if(presetType.value != "select"){}
+        else{
+          document.getElementById('presetError').textContent = "Error: Missing preset selection.";
+          console.log("Error: No preset selected.");
+          return false;
+        }
+      }
+      return true;
     }
 
     async function isconvertComplete(){
