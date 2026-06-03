@@ -480,7 +480,7 @@
     });
 
     lowMem.addEventListener('change',()=>{
-
+      isLowMem = lowMem.checked ? "true" : "false";
     })
 
 
@@ -571,6 +571,7 @@
             ipcRenderer.send('cMethod', cMethod.value.toString());
             ipcRenderer.send('segments', segments.value.toString());
             ipcRenderer.send('passes', passes.value.toString());
+            ipcRenderer.send('lowMem', isLowMem);
             if(compressionType == "fileSize"){
               ipcRenderer.send('targetSize', targetSize.value.toString());
             } 
