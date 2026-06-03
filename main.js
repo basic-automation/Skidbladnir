@@ -85,6 +85,7 @@ var alphaFilter = " -alpha_filter best ";
 var lossless = "";
 var filterStrength = "";
 var filterSharp = "";
+var sharpYuv = "";
 var proc = spawn;
 var isConvertedWebP = "";
 var maxPSNR = "";
@@ -195,6 +196,17 @@ ipcMain.on('filterStrength',function(e,filterStrengthValue){filterStrength = ' -
 
 ipcMain.on('filterSharp',function(e,filterSharpValue){filterSharp = ' -sharpness '+filterSharpValue; console.log('Filter Strength Recieved: '+filterSharp);});
 
+ipcMain.on('sharpYuv',function(e,sharpYuvValue){
+  if(sharpYuvValue == "true"){
+    sharpYuv = ' -sharp_yuv ';
+    console.log('Sharp YUV: enabled');
+  }
+  else{
+    sharpYuv = '';
+    console.log('Sharp YUV: disabled');
+  }
+});
+
 ipcMain.on('PSNR',function(e,PSNRValue){PSNR = ' -print_psnr -psnr '+PSNRValue; console.log('PSNR Recieved: '+PSNR);});
 
 ipcMain.on('passes',function(e,passesValue){passes = ' -pass '+passesValue; console.log('PSNR Recieved: '+passes);});
@@ -228,7 +240,7 @@ ipcMain.on('outputPath',function(e,outputPath){
   console.log('Output File: '+output);
 
   // Bring all inputs together into a shell script
-  cwebpShellScript = [preset+nearLossless+JPEGLike+lossless+af+mt+filterStrength+filterSharp+alphaFilter+quality+alphaQuality+cMethod+segments+targetSize+PSNR+passes+sns+' "'+input+'"'+' -o "'+output+'"'];
+  cwebpShellScript = [preset+nearLossless+JPEGLike+lossless+af+mt+filterStrength+filterSharp+sharpYuv+alphaFilter+quality+alphaQuality+cMethod+segments+targetSize+PSNR+passes+sns+' "'+input+'"'+' -o "'+output+'"'];
 
   // Send the shell script the convert function
   convertToWebp(cwebpShellScript);
@@ -307,6 +319,7 @@ function resetWebpScript(){
   lossless = "";
   filterStrength = "";
   filterSharp = "";
+  sharpYuv = "";
   console.log("Webp Shell Script Reset.");
 }
 
