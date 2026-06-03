@@ -169,18 +169,18 @@
                     </label>
                   </div>
                   <div class="subcontainer-5">
-                    <label class="radioContainer">Strong Filter
-                      <input id="strongFilterCustom" type="radio" name="filterType" value="strong">
-                      <span class="radioCheckmark"></span>
-                    </label>
-                  </div>
-                  <div class="subcontainer-5">
-                    <label class="radioContainer">Simple Filter
-                      <input id="simpleFilterCustom" type="radio" name="filterType" value="simple">
+                    <label class="radioContainer">Custom Filter
+                      <input id="customFilter" type="radio" name="filterType" value="custom">
                       <span class="radioCheckmark"></span>
                     </label>
                   </div>
                 </div>
+              <div id="strongFilterContainer" class="container-2 options inactive">
+                <div class="inputGroup">
+                  <input id="strongFilter" name="strongFilter" type="checkbox" checked disabled/>
+                  <label for="strongFilter">Enable Strong Filtering</label>
+                </div>
+              </div>
               <div id="filterStrengthContainer" class="container-2 options inactive">
                 <div class="advanced-container">
                   <button class="filterStrength-btn">
@@ -259,8 +259,8 @@
     const lossyOptions = document.getElementById('lossyOptions');
     const modeLossy = document.getElementById('modeLossy');
     const filterAuto = document.getElementById('filterAuto');
-    const strongFilterCustom = document.getElementById('strongFilterCustom');
-    const simpleFilterCustom = document.getElementById('simpleFilterCustom');
+    const customFilter = document.getElementById('customFilter');
+    const strongFilter = document.getElementById('strongFilter');
     const filterStrength = document.getElementById('filterStrength');
     const filterSharp = document.getElementById('filterSharp');
     const targetPSNR = document.getElementById('targetPSNR');
@@ -421,14 +421,15 @@
       isAF = "auto";
     });
 
-    strongFilterCustom.addEventListener('change', () => {
+    customFilter.addEventListener('change', () => {
       enableCustomFilter();
-      isAF = "strong";
+      isAF = strongFilter.checked ? "strong" : "simple";
     });
 
-    simpleFilterCustom.addEventListener('change', () => {
-      enableCustomFilter();
-      isAF = "simple";
+    strongFilter.addEventListener('change', () => {
+      if(customFilter.checked){
+        isAF = strongFilter.checked ? "strong" : "simple";
+      }
     });
 
     compressionFS.addEventListener('change', () => {
@@ -448,6 +449,9 @@
     });
 
     function disableCustomFilter(){
+      strongFilter.setAttribute('disabled', 'true');
+      document.getElementById('strongFilterContainer').className = "container-2 options inactive";
+
       filterStrength.setAttribute('disabled', 'true');
       document.getElementById('filterStrengthContainer').className = "container-2 options inactive";
 
@@ -456,6 +460,9 @@
     }
 
     function enableCustomFilter(){
+      strongFilter.removeAttribute('disabled');
+      document.getElementById('strongFilterContainer').className = "container-2 options";
+
       filterStrength.removeAttribute('disabled');
       document.getElementById('filterStrengthContainer').className = "container-2 options";
 
