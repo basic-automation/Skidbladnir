@@ -77,6 +77,7 @@ var quality = "";
 var alphaQuality = "";
 var cMethod = "";
 var segments = "";
+var partitionLimit = "";
 var sns = "";
 var mt = " -mt ";
 var af = "";
@@ -177,6 +178,8 @@ ipcMain.on('cMethod',function(e,cMethodValue){cMethod = ' -m '+cMethodValue; con
 
 ipcMain.on('segments',function(e,segmentsValue){segments = ' -segments '+segmentsValue; console.log('Number of Segments Recieved: '+segments);});
 
+ipcMain.on('partitionLimit',function(e,partitionLimitValue){partitionLimit = ' -partition_limit '+partitionLimitValue; console.log('Partition Limit Recieved: '+partitionLimit);});
+
 ipcMain.on('targetSize',function(e,targetSizeValue){targetSize = ' -size '+targetSizeValue; console.log('Target File Size Recieved: '+targetSize);});
 
 ipcMain.on('sns',function(e,snsValue){sns = ' -sns '+snsValue; console.log('Spatial Noise Shaping Recieved: '+sns);});
@@ -245,7 +248,7 @@ ipcMain.on('outputPath',function(e,outputPath){
   console.log('Output File: '+output);
 
   // Bring all inputs together into a shell script
-  cwebpShellScript = [preset+nearLossless+JPEGLike+lossless+af+mt+filterStrength+filterSharp+alphaFilter+quality+alphaQuality+cMethod+lowMem+segments+targetSize+PSNR+passes+sns+resize+' "'+input+'"'+' -o "'+output+'"'];
+  cwebpShellScript = [preset+nearLossless+JPEGLike+lossless+af+mt+filterStrength+filterSharp+alphaFilter+quality+alphaQuality+cMethod+lowMem+segments+partitionLimit+targetSize+PSNR+passes+sns+resize+' "'+input+'"'+' -o "'+output+'"'];
 
   // Send the shell script the convert function
   convertToWebp(cwebpShellScript);
@@ -316,6 +319,7 @@ function resetWebpScript(){
   alphaQuality = "";
   cMethod = "";
   segments = "";
+  partitionLimit = "";
   sns = "";
   mt = " -mt ";
   af = "";
