@@ -107,6 +107,25 @@
                 <input type="range" id="cMethod" min="0" max="6" value="4">
               </div>
             </div>
+            <div class="group-1 options">
+              <h2>Resize</h2>
+              <div class="container-2 options">
+                <div class="advanced-container">
+                  <button class="targetSize-btn">
+                    Width:
+                  </button>
+                  <div class="numberContainer"><input type="number" id="resizeWidth" min="0" step="1" value="0"> px </div><br>
+                </div>
+              </div>
+              <div class="container-2 options">
+                <div class="advanced-container">
+                  <button class="targetSize-btn">
+                    Height:
+                  </button>
+                  <div class="numberContainer"><input type="number" id="resizeHeight" min="0" step="1" value="0"> px </div>
+                </div>
+              </div>
+            </div>
             <div id="lossyOptions" class="group-1 options">
               <h2>Lossy Options</h2>
               <div class="container-2">
@@ -169,18 +188,18 @@
                     </label>
                   </div>
                   <div class="subcontainer-5">
-                    <label class="radioContainer">Strong Filter
-                      <input id="strongFilterCustom" type="radio" name="filterType" value="strong">
-                      <span class="radioCheckmark"></span>
-                    </label>
-                  </div>
-                  <div class="subcontainer-5">
-                    <label class="radioContainer">Simple Filter
-                      <input id="simpleFilterCustom" type="radio" name="filterType" value="simple">
+                    <label class="radioContainer">Custom Filter
+                      <input id="customFilter" type="radio" name="filterType" value="custom">
                       <span class="radioCheckmark"></span>
                     </label>
                   </div>
                 </div>
+              <div id="strongFilterContainer" class="container-2 options inactive">
+                <div class="inputGroup">
+                  <input id="strongFilter" name="strongFilter" type="checkbox" checked disabled/>
+                  <label for="strongFilter">Enable Strong Filtering</label>
+                </div>
+              </div>
               <div id="filterStrengthContainer" class="container-2 options inactive">
                 <div class="advanced-container">
                   <button class="filterStrength-btn">
@@ -264,13 +283,15 @@
     const segments = document.getElementById('segments');
     const partitionLimit = document.getElementById('partitionLimit');
     const targetSize = document.getElementById('targetSize');
+    const resizeWidth = document.getElementById('resizeWidth');
+    const resizeHeight = document.getElementById('resizeHeight');
     const sns = document.getElementById('sns');
     const modeLossless = document.getElementById('modeLossless');
     const lossyOptions = document.getElementById('lossyOptions');
     const modeLossy = document.getElementById('modeLossy');
     const filterAuto = document.getElementById('filterAuto');
-    const strongFilterCustom = document.getElementById('strongFilterCustom');
-    const simpleFilterCustom = document.getElementById('simpleFilterCustom');
+    const customFilter = document.getElementById('customFilter');
+    const strongFilter = document.getElementById('strongFilter');
     const filterStrength = document.getElementById('filterStrength');
     const filterSharp = document.getElementById('filterSharp');
     const targetPSNR = document.getElementById('targetPSNR');
@@ -306,24 +327,38 @@
     realInput.addEventListener('change', () => {
       console.log("input changed");
       const name = realInput.value.split(/\\|\//).pop();
+      const selectedInputFile = document.querySelector('#inputPath').files[0];
       const truncated = name.length > 20 
         ? name.substr(name.length - 20) 
         : name;
         inputFileInfo.innerHTML = truncated;
 
-      ipcRenderer.sendSync('fileSize', document.querySelector('#inputPath').files[0].path);
-      var filesize = ipcRenderer.sendSync('fileSize', document.querySelector('#inputPath').files[0].path);
+      ipcRenderer.sendSync('fileSize', selectedInputFile.path);
+      var filesize = ipcRenderer.sendSync('fileSize', selectedInputFile.path);
       console.log('File Size: '+filesize);
       document.getElementById('originalSize').textContent = filesize+' bytes (original)';
       document.getElementById('targetSize').value = filesize;
 
-      ipcRenderer.sendSync('maxPSNR', document.querySelector('#inputPath').files[0].path);
-      var returnPSNR = ipcRenderer.sendSync('maxPSNR', document.querySelector('#inputPath').files[0].path);
+      ipcRenderer.sendSync('maxPSNR', selectedInputFile.path);
+      var returnPSNR = ipcRenderer.sendSync('maxPSNR', selectedInputFile.path);
       returnPSNR = parseInt(returnPSNR*1.2);
       console.log("Returned PSNR: "+returnPSNR);
       targetPSNR.setAttribute("max", returnPSNR.toString());
       targetPSNR.value = returnPSNR;
       document.getElementById('targetPSNR-info').textContent = returnPSNR;
+
+      resizeHeight.value = "0";
+      const imageSource = URL.createObjectURL(selectedInputFile);
+      const imageDimensions = new Image();
+      imageDimensions.onload = function() {
+        resizeWidth.value = imageDimensions.naturalWidth.toString();
+        URL.revokeObjectURL(imageSource);
+      };
+      imageDimensions.onerror = function() {
+        resizeWidth.value = "0";
+        URL.revokeObjectURL(imageSource);
+      };
+      imageDimensions.src = imageSource;
     });
 
 
@@ -431,14 +466,15 @@
       isAF = "auto";
     });
 
-    strongFilterCustom.addEventListener('change', () => {
+    customFilter.addEventListener('change', () => {
       enableCustomFilter();
-      isAF = "strong";
+      isAF = strongFilter.checked ? "strong" : "simple";
     });
 
-    simpleFilterCustom.addEventListener('change', () => {
-      enableCustomFilter();
-      isAF = "simple";
+    strongFilter.addEventListener('change', () => {
+      if(customFilter.checked){
+        isAF = strongFilter.checked ? "strong" : "simple";
+      }
     });
 
     compressionFS.addEventListener('change', () => {
@@ -458,6 +494,9 @@
     });
 
     function disableCustomFilter(){
+      strongFilter.setAttribute('disabled', 'true');
+      document.getElementById('strongFilterContainer').className = "container-2 options inactive";
+
       filterStrength.setAttribute('disabled', 'true');
       document.getElementById('filterStrengthContainer').className = "container-2 options inactive";
 
@@ -466,6 +505,9 @@
     }
 
     function enableCustomFilter(){
+      strongFilter.removeAttribute('disabled');
+      document.getElementById('strongFilterContainer').className = "container-2 options";
+
       filterStrength.removeAttribute('disabled');
       document.getElementById('filterStrengthContainer').className = "container-2 options";
 
@@ -571,6 +613,21 @@
         ipcRenderer.send('inputPath', inputPath); 
         console.log('Advanced:'+advanced.toString());
         if(advanced){
+          var resizeWidthValue = parseInt(resizeWidth.value, 10);
+          var resizeHeightValue = parseInt(resizeHeight.value, 10);
+
+          if(!Number.isInteger(resizeWidthValue) || resizeWidthValue < 0){
+            resizeWidthValue = 0;
+          }
+
+          if(!Number.isInteger(resizeHeightValue) || resizeHeightValue < 0){
+            resizeHeightValue = 0;
+          }
+
+          if(resizeWidthValue != 0 || resizeHeightValue != 0){
+            ipcRenderer.send('resize', resizeWidthValue.toString(), resizeHeightValue.toString());
+          }
+
           if(appMode == "lossless"){
             console.log('Mode: Lossless');
             ipcRenderer.send('lossless', 'true');
