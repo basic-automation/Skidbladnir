@@ -94,6 +94,7 @@ var JPEGLike = "";
 var preset = "";
 var nearLossless = "";
 var inputPaths = [];
+var resize = "";
 
 
 // Define OS platform in order to load required executables
@@ -219,6 +220,11 @@ ipcMain.on('nearLossless',function(e,nearLosslessValue){
   nearLossless = ' -near_lossless '+nearLosslessValue;
 });
 
+ipcMain.on('resize',function(e,resizeWidthValue,resizeHeightValue){
+  resize = ' -resize '+resizeWidthValue+' '+resizeHeightValue;
+  console.log('Resize Recieved: '+resize);
+});
+
 
 // Detect ipcMain data recived and assign it to a variable
 // Because it is know that this data will be send last we can
@@ -234,7 +240,7 @@ ipcMain.on('outputPath', async function(e,outputPath){
     var opts = {
       preset, nearLossless, JPEGLike, lossless, af, mt,
       filterStrength, filterSharp, alphaFilter, quality,
-      alphaQuality, cMethod, segments, targetSize, PSNR, passes, sns
+      alphaQuality, cMethod, segments, targetSize, PSNR, passes, sns, resize
     };
 
     for(var i = 0; i < paths.length; i++){
@@ -248,7 +254,7 @@ ipcMain.on('outputPath', async function(e,outputPath){
       console.log('Output File: '+outputFile);
 
       // Bring all inputs together into a shell script
-      var script = [opts.preset+opts.nearLossless+opts.JPEGLike+opts.lossless+opts.af+opts.mt+opts.filterStrength+opts.filterSharp+opts.alphaFilter+opts.quality+opts.alphaQuality+opts.cMethod+opts.segments+opts.targetSize+opts.PSNR+opts.passes+opts.sns+' "'+inputFile+'"'+' -o "'+outputFile+'"'];
+      var script = [opts.preset+opts.nearLossless+opts.JPEGLike+opts.lossless+opts.af+opts.mt+opts.filterStrength+opts.filterSharp+opts.alphaFilter+opts.quality+opts.alphaQuality+opts.cMethod+opts.segments+opts.targetSize+opts.PSNR+opts.passes+opts.sns+opts.resize+' "'+inputFile+'"'+' -o "'+outputFile+'"'];
 
       // Send the shell script the convert function and wait for completion
       await convertToWebp(script);
@@ -266,7 +272,7 @@ ipcMain.on('outputPath', async function(e,outputPath){
     console.log('Output File: '+output);
 
     // Bring all inputs together into a shell script
-    cwebpShellScript = [preset+nearLossless+JPEGLike+lossless+af+mt+filterStrength+filterSharp+alphaFilter+quality+alphaQuality+cMethod+segments+targetSize+PSNR+passes+sns+' "'+input+'"'+' -o "'+output+'"'];
+    cwebpShellScript = [preset+nearLossless+JPEGLike+lossless+af+mt+filterStrength+filterSharp+alphaFilter+quality+alphaQuality+cMethod+segments+targetSize+PSNR+passes+sns+resize+' "'+input+'"'+' -o "'+output+'"'];
 
     // Send the shell script the convert function
     await convertToWebp(cwebpShellScript);
@@ -348,6 +354,7 @@ function resetWebpScript(){
   lossless = "";
   filterStrength = "";
   filterSharp = "";
+  resize = "";
   console.log("Webp Shell Script Reset.");
 }
 
