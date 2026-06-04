@@ -77,6 +77,7 @@ var quality = "";
 var alphaQuality = "";
 var cMethod = "";
 var segments = "";
+var partitionLimit = "";
 var sns = "";
 var mt = " -mt ";
 var af = "";
@@ -85,6 +86,7 @@ var alphaFilter = " -alpha_filter best ";
 var lossless = "";
 var filterStrength = "";
 var filterSharp = "";
+var sharpYuv = "";
 var proc = spawn;
 var isConvertedWebP = "";
 var maxPSNR = "";
@@ -93,6 +95,8 @@ var passes = "";
 var JPEGLike = "";
 var preset = "";
 var nearLossless = "";
+var inputPaths = [];
+var lowMem = "";
 var resize = "";
 
 
@@ -157,6 +161,10 @@ ipcMain.on('maxPSNR',(event, value) =>{
 // Detect ipcMain data recived and assign data to variable
 ipcMain.on('inputPath',function(e,inputPath){input = inputPath;});
 
+ipcMain.on('inputPaths',function(e,inputPathsJson){
+  inputPaths = JSON.parse(inputPathsJson);
+});
+
 ipcMain.on('lossless',function(e,losslessValue){
   if(losslessValue=="true"){
     lossless = ' -lossless -exact ';
@@ -175,6 +183,8 @@ ipcMain.on('alphaQuality',function(e,alphaQualityValue){alphaQuality = ' -alpha_
 ipcMain.on('cMethod',function(e,cMethodValue){cMethod = ' -m '+cMethodValue; console.log('Compression Method Recieved: '+cMethod);});
 
 ipcMain.on('segments',function(e,segmentsValue){segments = ' -segments '+segmentsValue; console.log('Number of Segments Recieved: '+segments);});
+
+ipcMain.on('partitionLimit',function(e,partitionLimitValue){partitionLimit = ' -partition_limit '+partitionLimitValue; console.log('Partition Limit Recieved: '+partitionLimit);});
 
 ipcMain.on('targetSize',function(e,targetSizeValue){targetSize = ' -size '+targetSizeValue; console.log('Target File Size Recieved: '+targetSize);});
 
@@ -196,9 +206,30 @@ ipcMain.on('filterStrength',function(e,filterStrengthValue){filterStrength = ' -
 
 ipcMain.on('filterSharp',function(e,filterSharpValue){filterSharp = ' -sharpness '+filterSharpValue; console.log('Filter Strength Recieved: '+filterSharp);});
 
+ipcMain.on('sharpYuv',function(e,sharpYuvValue){
+  if(sharpYuvValue == "true"){
+    sharpYuv = ' -sharp_yuv ';
+    console.log('Sharp YUV: enabled');
+  }
+  else{
+    sharpYuv = '';
+    console.log('Sharp YUV: disabled');
+  }
+});
+
 ipcMain.on('PSNR',function(e,PSNRValue){PSNR = ' -print_psnr -psnr '+PSNRValue; console.log('PSNR Recieved: '+PSNR);});
 
 ipcMain.on('passes',function(e,passesValue){passes = ' -pass '+passesValue; console.log('PSNR Recieved: '+passes);});
+
+ipcMain.on('lowMem',function(e,lowMemValue){
+  if(lowMemValue == "true"){
+    lowMem = " -low_memory ";
+  }
+  else{
+    lowMem = "";
+  }
+  console.log('Low Memory Recieved: '+lowMem);
+});
 
 ipcMain.on('JPEGLike',function(e,JPEGLikeValue){
   if(JPEGLikeValue == "true"){
@@ -224,51 +255,89 @@ ipcMain.on('resize',function(e,resizeWidthValue,resizeHeightValue){
 // Detect ipcMain data recived and assign it to a variable
 // Because it is know that this data will be send last we can
 // execute shell functions to cwebp
-ipcMain.on('outputPath',function(e,outputPath){
+ipcMain.on('outputPath', async function(e,outputPath){
 
-  // The final output path is (the user selected directory)+(the original file name)+.webp extention
-  output = path.join(outputPath,"\\"+path.basename(input,path.extname(input))+".webp");
+  if(inputPaths.length > 0){
+    // Batch processing: process all selected files sequentially
+    var paths = inputPaths.slice();
+    inputPaths = [];
 
-  // Log the final input and final output for debuging
-  console.log('Input File: '+input);
-  console.log('Output File: '+output);
+    // Capture current options before any reset can occur
+    var opts = {
+      preset, nearLossless, JPEGLike, lossless, af, mt,
+      filterStrength, filterSharp, alphaFilter, quality,
+      alphaQuality, cMethod, lowMem, segments, partitionLimit, targetSize, PSNR, passes, sns, resize
+    };
 
   // Bring all inputs together into a shell script
-  cwebpShellScript = [preset+nearLossless+JPEGLike+lossless+af+mt+filterStrength+filterSharp+alphaFilter+quality+alphaQuality+cMethod+segments+targetSize+PSNR+passes+sns+resize+' "'+input+'"'+' -o "'+output+'"'];
+  cwebpShellScript = [preset+nearLossless+JPEGLike+lossless+af+mt+filterStrength+filterSharp+sharpYuv+alphaFilter+quality+alphaQuality+cMethod+segments+targetSize+PSNR+passes+sns+resize+' "'+input+'"'+' -o "'+output+'"'];
+    for(var i = 0; i < paths.length; i++){
+      var inputFile = paths[i];
 
-  // Send the shell script the convert function
-  convertToWebp(cwebpShellScript);
+      // The final output path is (the user selected directory)+(the original file name)+.webp extention
+      var outputFile = path.join(outputPath,"\\"+path.basename(inputFile,path.extname(inputFile))+".webp");
+
+      // Log the final input and final output for debuging
+      console.log('Input File: '+inputFile);
+      console.log('Output File: '+outputFile);
+
+      // Bring all inputs together into a shell script
+      var script = [opts.preset+opts.nearLossless+opts.JPEGLike+opts.lossless+opts.af+opts.mt+opts.filterStrength+opts.filterSharp+opts.alphaFilter+opts.quality+opts.alphaQuality+opts.cMethod+opts.lowMem+opts.segments+opts.partitionLimit+opts.targetSize+opts.PSNR+opts.passes+opts.sns+opts.resize+' "'+inputFile+'"'+' -o "'+outputFile+'"'];
+
+      // Send the shell script the convert function and wait for completion
+      await convertToWebp(script);
+    }
+    resetWebpScript();
+  }
+  else{
+    // Single file (legacy path)
+
+    // The final output path is (the user selected directory)+(the original file name)+.webp extention
+    output = path.join(outputPath,"\\"+path.basename(input,path.extname(input))+".webp");
+
+    // Log the final input and final output for debuging
+    console.log('Input File: '+input);
+    console.log('Output File: '+output);
+
+    // Bring all inputs together into a shell script
+    cwebpShellScript = [preset+nearLossless+JPEGLike+lossless+af+mt+filterStrength+filterSharp+alphaFilter+quality+alphaQuality+cMethod+lowMem+segments+partitionLimit+targetSize+PSNR+passes+sns+resize+' "'+input+'"'+' -o "'+output+'"'];
+
+    // Send the shell script the convert function
+    await convertToWebp(cwebpShellScript);
+    resetWebpScript();
+  }
 });
 
 
 // Pass defined shell script to cwebp.exe
 async function convertToWebp(cwebpShellScript){
-  var sout;
+  return new Promise((resolve) => {
 
-  // Log the exact script being passes to cwebp.exe
-  console.log("Cwebp.exe Shell Script: "+cwebpPath+cwebpShellScript.toString());
+    // Log the exact script being passes to cwebp.exe
+    console.log("Cwebp.exe Shell Script: "+cwebpPath+cwebpShellScript.toString());
 
-  // Make sure that the script is a string
-  var webpCMD = cwebpPath+cwebpShellScript.toString();
+    // Make sure that the script is a string
+    var webpCMD = cwebpPath+cwebpShellScript.toString();
 
-  // Create a data stream with cwebp.exe
-  proc = spawn(webpCMD,[],{ 
-    shell: true,
-    stdio:['pipe', 'pipe', 'pipe','pipe','pipe']
-  });
+    // Create a data stream with cwebp.exe
+    proc = spawn(webpCMD,[],{ 
+      shell: true,
+      stdio:['pipe', 'pipe', 'pipe','pipe','pipe']
+    });
 
-  proc.stdout.on('data', (data) => {
-    console.log(`stdout: ${data}`);
-  });
-  
-  proc.stderr.on('data', (data) => {
-    console.log(`stderr: ${data}`);
-  });
-  
-  proc.on('close', (code) => {
-    console.log(`child process exited with code ${code}`);
-    isConvertedWebP = code;
-    resetWebpScript();
+    proc.stdout.on('data', (data) => {
+      console.log(`stdout: ${data}`);
+    });
+    
+    proc.stderr.on('data', (data) => {
+      console.log(`stderr: ${data}`);
+    });
+    
+    proc.on('close', (code) => {
+      console.log(`child process exited with code ${code}`);
+      isConvertedWebP = code;
+      resolve(code);
+    });
   });
 }
 
@@ -305,6 +374,7 @@ function resetWebpScript(){
   alphaQuality = "";
   cMethod = "";
   segments = "";
+  partitionLimit = "";
   sns = "";
   mt = " -mt ";
   af = "";
@@ -318,6 +388,8 @@ function resetWebpScript(){
   JPEGLike = "";
   preset = "";
   nearLossless = "";
+  sharpYuv = "";
+  lowMem = "";
   resize = "";
   console.log("Webp Shell Script Reset.");
 }
