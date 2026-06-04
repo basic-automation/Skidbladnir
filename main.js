@@ -94,6 +94,7 @@ var JPEGLike = "";
 var preset = "";
 var nearLossless = "";
 var lowMem = "";
+var resize = "";
 
 
 // Define OS platform in order to load required executables
@@ -225,6 +226,11 @@ ipcMain.on('nearLossless',function(e,nearLosslessValue){
   nearLossless = ' -near_lossless '+nearLosslessValue;
 });
 
+ipcMain.on('resize',function(e,resizeWidthValue,resizeHeightValue){
+  resize = ' -resize '+resizeWidthValue+' '+resizeHeightValue;
+  console.log('Resize Recieved: '+resize);
+});
+
 
 // Detect ipcMain data recived and assign it to a variable
 // Because it is know that this data will be send last we can
@@ -239,7 +245,7 @@ ipcMain.on('outputPath',function(e,outputPath){
   console.log('Output File: '+output);
 
   // Bring all inputs together into a shell script
-  cwebpShellScript = [preset+nearLossless+JPEGLike+lossless+af+mt+filterStrength+filterSharp+alphaFilter+quality+alphaQuality+cMethod+lowMem+segments+targetSize+PSNR+passes+sns+' "'+input+'"'+' -o "'+output+'"'];
+  cwebpShellScript = [preset+nearLossless+JPEGLike+lossless+af+mt+filterStrength+filterSharp+alphaFilter+quality+alphaQuality+cMethod+lowMem+segments+targetSize+PSNR+passes+sns+resize+' "'+input+'"'+' -o "'+output+'"'];
 
   // Send the shell script the convert function
   convertToWebp(cwebpShellScript);
@@ -319,6 +325,7 @@ function resetWebpScript(){
   filterStrength = "";
   filterSharp = "";
   lowMem = "";
+  resize = "";
   console.log("Webp Shell Script Reset.");
 }
 
