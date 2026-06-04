@@ -134,6 +134,12 @@
                   <label for="lowMem">Enable Low Memory Mode</label>
                 </div>
               </div>
+              <div class="container-2">
+                <div class="inputGroup">
+                  <input id="sharpYuv" name="sharpYuv" type="checkbox"/>
+                  <label for="sharpYuv">Enable Sharp YUV</label>
+                </div>
+              </div>
               <div id="lossyFilterOptions" class="group-1 options">
                 <h2>Compression</h2>
                 <div class="container-1">
@@ -303,6 +309,7 @@
     const presetType = document.getElementById('presetType');
     const modeNearLossless = document.getElementById('modeNearLossless');
     const lowMem = document.getElementById('lowMem');
+    const sharpYuv = document.getElementById('sharpYuv');
 
     var inputPath = "";
     var outputPath = "";
@@ -546,6 +553,10 @@
       isLowMem = lowMem.checked ? "true" : "false";
     })
 
+    sharpYuv.addEventListener('change',()=>{
+
+    })
+
 
 
     // Listen for a change in the value of the output file box.
@@ -662,6 +673,7 @@
             }
             ipcRenderer.send('sns', sns.value.toString());
             ipcRenderer.send('isAF', isAF);
+            ipcRenderer.send('sharpYuv', sharpYuv.checked.toString());
             if(isAF == "simple" || isAF == "strong"){
               ipcRenderer.send('filterStrength', filterStrength.value.toString());
               ipcRenderer.send('filterSharp', filterSharp.value.toString());
