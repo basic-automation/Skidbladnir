@@ -77,6 +77,7 @@ var quality = "";
 var alphaQuality = "";
 var cMethod = "";
 var segments = "";
+var partitionLimit = "";
 var sns = "";
 var mt = " -mt ";
 var af = "";
@@ -94,6 +95,7 @@ var JPEGLike = "";
 var preset = "";
 var nearLossless = "";
 var inputPaths = [];
+var lowMem = "";
 var resize = "";
 
 
@@ -181,6 +183,8 @@ ipcMain.on('cMethod',function(e,cMethodValue){cMethod = ' -m '+cMethodValue; con
 
 ipcMain.on('segments',function(e,segmentsValue){segments = ' -segments '+segmentsValue; console.log('Number of Segments Recieved: '+segments);});
 
+ipcMain.on('partitionLimit',function(e,partitionLimitValue){partitionLimit = ' -partition_limit '+partitionLimitValue; console.log('Partition Limit Recieved: '+partitionLimit);});
+
 ipcMain.on('targetSize',function(e,targetSizeValue){targetSize = ' -size '+targetSizeValue; console.log('Target File Size Recieved: '+targetSize);});
 
 ipcMain.on('sns',function(e,snsValue){sns = ' -sns '+snsValue; console.log('Spatial Noise Shaping Recieved: '+sns);});
@@ -204,6 +208,16 @@ ipcMain.on('filterSharp',function(e,filterSharpValue){filterSharp = ' -sharpness
 ipcMain.on('PSNR',function(e,PSNRValue){PSNR = ' -print_psnr -psnr '+PSNRValue; console.log('PSNR Recieved: '+PSNR);});
 
 ipcMain.on('passes',function(e,passesValue){passes = ' -pass '+passesValue; console.log('PSNR Recieved: '+passes);});
+
+ipcMain.on('lowMem',function(e,lowMemValue){
+  if(lowMemValue == "true"){
+    lowMem = " -low_memory ";
+  }
+  else{
+    lowMem = "";
+  }
+  console.log('Low Memory Recieved: '+lowMem);
+});
 
 ipcMain.on('JPEGLike',function(e,JPEGLikeValue){
   if(JPEGLikeValue == "true"){
@@ -240,7 +254,7 @@ ipcMain.on('outputPath', async function(e,outputPath){
     var opts = {
       preset, nearLossless, JPEGLike, lossless, af, mt,
       filterStrength, filterSharp, alphaFilter, quality,
-      alphaQuality, cMethod, segments, targetSize, PSNR, passes, sns, resize
+      alphaQuality, cMethod, lowMem, segments, partitionLimit, targetSize, PSNR, passes, sns, resize
     };
 
     for(var i = 0; i < paths.length; i++){
@@ -254,7 +268,7 @@ ipcMain.on('outputPath', async function(e,outputPath){
       console.log('Output File: '+outputFile);
 
       // Bring all inputs together into a shell script
-      var script = [opts.preset+opts.nearLossless+opts.JPEGLike+opts.lossless+opts.af+opts.mt+opts.filterStrength+opts.filterSharp+opts.alphaFilter+opts.quality+opts.alphaQuality+opts.cMethod+opts.segments+opts.targetSize+opts.PSNR+opts.passes+opts.sns+opts.resize+' "'+inputFile+'"'+' -o "'+outputFile+'"'];
+      var script = [opts.preset+opts.nearLossless+opts.JPEGLike+opts.lossless+opts.af+opts.mt+opts.filterStrength+opts.filterSharp+opts.alphaFilter+opts.quality+opts.alphaQuality+opts.cMethod+opts.lowMem+opts.segments+opts.partitionLimit+opts.targetSize+opts.PSNR+opts.passes+opts.sns+opts.resize+' "'+inputFile+'"'+' -o "'+outputFile+'"'];
 
       // Send the shell script the convert function and wait for completion
       await convertToWebp(script);
@@ -272,7 +286,7 @@ ipcMain.on('outputPath', async function(e,outputPath){
     console.log('Output File: '+output);
 
     // Bring all inputs together into a shell script
-    cwebpShellScript = [preset+nearLossless+JPEGLike+lossless+af+mt+filterStrength+filterSharp+alphaFilter+quality+alphaQuality+cMethod+segments+targetSize+PSNR+passes+sns+resize+' "'+input+'"'+' -o "'+output+'"'];
+    cwebpShellScript = [preset+nearLossless+JPEGLike+lossless+af+mt+filterStrength+filterSharp+alphaFilter+quality+alphaQuality+cMethod+lowMem+segments+partitionLimit+targetSize+PSNR+passes+sns+resize+' "'+input+'"'+' -o "'+output+'"'];
 
     // Send the shell script the convert function
     await convertToWebp(cwebpShellScript);
@@ -346,6 +360,7 @@ function resetWebpScript(){
   alphaQuality = "";
   cMethod = "";
   segments = "";
+  partitionLimit = "";
   sns = "";
   mt = " -mt ";
   af = "";
@@ -354,6 +369,7 @@ function resetWebpScript(){
   lossless = "";
   filterStrength = "";
   filterSharp = "";
+  lowMem = "";
   resize = "";
   console.log("Webp Shell Script Reset.");
 }
