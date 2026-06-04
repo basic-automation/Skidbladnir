@@ -94,6 +94,7 @@ var passes = "";
 var JPEGLike = "";
 var preset = "";
 var nearLossless = "";
+var lowMem = "";
 var resize = "";
 
 
@@ -203,6 +204,16 @@ ipcMain.on('PSNR',function(e,PSNRValue){PSNR = ' -print_psnr -psnr '+PSNRValue; 
 
 ipcMain.on('passes',function(e,passesValue){passes = ' -pass '+passesValue; console.log('PSNR Recieved: '+passes);});
 
+ipcMain.on('lowMem',function(e,lowMemValue){
+  if(lowMemValue == "true"){
+    lowMem = " -low_memory ";
+  }
+  else{
+    lowMem = "";
+  }
+  console.log('Low Memory Recieved: '+lowMem);
+});
+
 ipcMain.on('JPEGLike',function(e,JPEGLikeValue){
   if(JPEGLikeValue == "true"){
     JPEGLike = ' -jpeg_like ';
@@ -237,7 +248,7 @@ ipcMain.on('outputPath',function(e,outputPath){
   console.log('Output File: '+output);
 
   // Bring all inputs together into a shell script
-  cwebpShellScript = [preset+nearLossless+JPEGLike+lossless+af+mt+filterStrength+filterSharp+alphaFilter+quality+alphaQuality+cMethod+segments+partitionLimit+targetSize+PSNR+passes+sns+resize+' "'+input+'"'+' -o "'+output+'"'];
+  cwebpShellScript = [preset+nearLossless+JPEGLike+lossless+af+mt+filterStrength+filterSharp+alphaFilter+quality+alphaQuality+cMethod+lowMem+segments+partitionLimit+targetSize+PSNR+passes+sns+resize+' "'+input+'"'+' -o "'+output+'"'];
 
   // Send the shell script the convert function
   convertToWebp(cwebpShellScript);
@@ -317,6 +328,7 @@ function resetWebpScript(){
   lossless = "";
   filterStrength = "";
   filterSharp = "";
+  lowMem = "";
   resize = "";
   console.log("Webp Shell Script Reset.");
 }
