@@ -63,7 +63,6 @@ typings/
 # next.js build output
 .next
 
-# lock files
-yarn.lock
-package-lock.json
+# routine transient output
+scratch/
 documentation/planning-implementation.docx

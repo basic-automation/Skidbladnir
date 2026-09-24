@@ -1,40 +1,82 @@
-# ba | Next Generation Image
-A Graphical User Interface (GUI) for the conversion tools of most popular next-generation open-source image formats. Including WebP and JPG2000(coming soon).
+# Skidbladnir
 
-This project is an electron app that simply generates a shell command and passes that command to the binaries provided by the open-source projects (for example cwebp.exe).
+A desktop GUI for converting images to next-generation open-source formats. Today it
+drives Google's `cwebp` encoder and exposes its full control surface — not just a
+quality slider — so you can tune an encode the way the command-line tool allows,
+without memorising the command line.
 
-# Screenshot
 ![screenshot](https://basicautomation.io/ba-nextGenIMG/images/screenshots/nextgenimg-v0-1-1.webp)
 
+## Features
 
-## Minimum Path to Awesome
+**Encoding modes**
 
-**Clone git repository: **
+- Lossy, lossless, near-lossless and JPEG-like modes
+- Built-in presets: default, photo, picture, drawing, icon, text
+- Quality and alpha-quality control
+- Target file size or target PSNR instead of a fixed quality
 
-`git clone git@github.com:Creative515/ba-nextGenIMG.git`
+**Expert controls**
 
-**Install yarn:**
+- Compression method and segment count
+- Spatial noise shaping (SNS)
+- Filter strength, filter sharpness, strong/simple filtering and auto-filter
+- Multi-pass encoding
+- Partition limit
+- Sharp YUV (higher-quality RGB→YUV conversion)
+- Low-memory mode
+- Resize on the way out (width and height)
+- Multi-threading
 
-`npm install -g yarn`
+**Workflow**
 
-**Install dependencies:**
+- Batch conversion across multiple input files
+- Original and converted file sizes reported after each conversion
+- Advanced options hidden behind a disclosure so the common path stays simple
 
-`yarn install`
+## Install
 
-**Create directory:**
+Grab a build from the [releases page](https://github.com/basic-automation/Skidbladnir/releases).
 
-`./resources/win/bin/`
+Builds are currently **Windows only**.
 
-**Download WebP CLI:**
+## Build from source
 
-`https://developers.google.com/speed/webp/docs/precompiled`
-and place cwebp.exe (found in ./bin/cwebp.exe) in 
-`./resources/win/bin/`
+Requires Node.js and npm.
 
-**Create distributable**
+```bash
+git clone https://github.com/basic-automation/Skidbladnir.git
+cd Skidbladnir
+npm install
+```
 
-`yarn dist`
+Skidbladnir shells out to the `cwebp` binary, which is not vendored in this
+repository. Download the [WebP precompiled
+binaries](https://developers.google.com/speed/webp/docs/precompiled) and place
+`cwebp.exe` at `./resources/win/bin/cwebp.exe`.
 
-**Load program**
+Then:
 
-Double click: `./dist/bin/ba-nextgenimg 0.0.1.exe`
+```bash
+npm start          # run the app
+npm run dist       # build a distributable into ./dist
+```
+
+## Status
+
+Skidbladnir is an Electron application. A rewrite onto **Rust + Tauri 2** with a
+**Nuxt + Tailwind** frontend — targeting Windows, Linux and macOS — is in progress;
+the work queue lives in [ROADMAP.md](ROADMAP.md). The Electron app remains the
+shipping application until that port reaches feature parity.
+
+Known gaps in the current release:
+
+- Windows only; no Linux or macOS build.
+- The `cwebp` binary is not bundled and must be downloaded manually.
+- WebP is the only output format. JPEG 2000 has been listed as "coming soon" since
+  2019 and has not been implemented.
+- No automated tests and no CI.
+
+## License
+
+ISC. See [LICENSE](LICENSE) if present, or the `license` field in `package.json`.
