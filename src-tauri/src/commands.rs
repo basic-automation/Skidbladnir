@@ -17,7 +17,7 @@ use skidbladnir_encode::{
 use tauri::{Emitter as _, Manager as _};
 
 use crate::{
-	preferences::{self, LoadedPreferences, Preferences}, presets::{self, Preset}
+	preferences::{self, LoadedPreferences, Preferences}, presets::{self, Preset}, preview::{self, Preview}
 };
 
 /// A human-readable description of the encode core, for the UI's about/diagnostics view.
@@ -151,6 +151,22 @@ pub struct ConversionProgress {
 	/// libwebp does not guarantee a final call at 100, so this reaching 100 is not how
 	/// completion is detected — the command returning is.
 	pub percent: u32,
+}
+
+/// Encode `input` with these settings **into memory** and return it beside the original,
+/// so the user can see the trade before committing a file to disk.
+///
+/// Both images come back as `data:` URLs, which means the preview needs no filesystem
+/// permission in the webview and cannot show a stale file from an earlier run.
+///
+/// # Errors
+///
+/// Returns the failure as a string for display, including a refusal for images too large
+/// to hold two copies of in the webview.
+#[tauri::command]
+#[expect(clippy::needless_pass_by_value, reason = "Tauri deserializes command arguments into owned values; the preview borrows them")]
+pub fn preview_encode(settings: EncodeSettings, input: PathBuf) -> Result<Preview, String> {
+	preview::preview(&settings, &input)
 }
 
 /// The user's saved presets, sorted by name.

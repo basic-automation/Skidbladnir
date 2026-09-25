@@ -104,6 +104,7 @@ What the new app can already do:
   at their contents rather than their file extension.
 - Convert a batch of files, showing progress per file, with a Cancel button that stops
   without leaving a half-converted image behind.
+- Preview the result beside the original before anything is written to disk.
 - Remember your settings and destination between launches, and save named presets of
   your own.
 - Look like Skidbladnir: the original layout — dot-textured header and footer bands,

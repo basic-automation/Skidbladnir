@@ -29,8 +29,10 @@ custom-protocol = ["tauri/custom-protocol"]
 tauri-build = { workspace = true }
 
 [dependencies]
+base64 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+libwebp-sys = { workspace = true }
 skidbladnir-encode = { workspace = true }
 tauri = { workspace = true }
 thiserror = { workspace = true }
@@ -38,3 +40,7 @@ tauri-plugin-dialog = { workspace = true }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+# Writing PNG fixtures for the preview tests.
+image = { workspace = true }

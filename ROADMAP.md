@@ -277,7 +277,15 @@ prettier subset.
       could never be delivered. Measured, not assumed — a 1800x1400 encode ran to
       completion every time before the change, and cancels after 3 progress events with an
       empty output directory after it.
-- [ ] Preview: original vs encoded, side by side, before committing the write.
+- [x] Preview: original vs encoded, side by side, before committing the write. Encodes
+      into memory and writes nothing.
+      Both sides come back as `data:` URLs rather than file paths, which means the preview
+      needs **no filesystem permission in the webview at all** and cannot show a stale file
+      from an earlier run. The left-hand side is the source pixels encoded *losslessly*
+      rather than the source file re-served, so both sides are WebP the webview can display
+      while the reference image stays pixel-exact — and any resize is applied to both, so
+      the comparison is like for like instead of a big image beside a small one.
+      Refused above 24 megapixels: two base64 copies in the webview is real memory.
 - [x] Persist settings between launches. `src-tauri/src/preferences.rs` stores the last
       used settings and destination as JSON in the OS's per-app config directory, saved
       after a conversion run rather than on every slider drag.
