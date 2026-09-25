@@ -12,7 +12,9 @@
 pub mod cwebp;
 pub mod encoder;
 pub mod settings;
+pub mod source;
 
 pub use cwebp::cwebp_args;
 pub use encoder::{EncodeError, RgbaImage, encode_rgba};
 pub use settings::{AlphaFiltering, EncodeSettings, FilterType, Mode, Preset, Resize, TargetMetric, ValidationError};
+pub use source::{Conversion, ConvertError, SourceError, SourceFormat, SourceImage, encode_file, load};

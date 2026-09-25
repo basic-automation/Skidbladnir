@@ -229,3 +229,62 @@ fn matches_reference_cwebp_across_the_whole_control_surface() {
 	assert!(mismatches.is_empty(), "{} of {total} settings diverged from the reference cwebp {}.{}.{}:\n  {}", mismatches.len(), linked.0, linked.1, linked.2, mismatches.join("\n  "));
 	eprintln!("PARITY OK: {total} settings matched the reference cwebp {}.{}.{} byte for byte.", linked.0, linked.1, linked.2);
 }
+
+/// The same comparison, but through a **PNG file** rather than raw pixels.
+///
+/// The main test deliberately removes the image decoder from the comparison so a mismatch
+/// can only be the encoder. This one puts it back: our pipeline decodes the PNG with the
+/// `image` crate, `cwebp` decodes it with libpng, and both then encode. Passing means the
+/// whole file path agrees, not just the encoder — which is what a user actually exercises.
+///
+/// A failure here is therefore a *decoder* difference, not an encoder one, and the message
+/// says so; the two are worth telling apart.
+#[test]
+fn matches_reference_cwebp_through_a_png_file() {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let Some(cwebp) = reference_cwebp() else {
+		let message = "PNG PARITY NOT RUN: no reference cwebp found.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+	let linked = skidbladnir_encode::encoder::linked_encoder_version();
+	if reference_version(&cwebp) != Some(linked) {
+		let message = "PNG PARITY NOT RUN: reference cwebp and the linked libwebp are different versions.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	}
+
+	let (width, height) = (64_u32, 48_u32);
+	let pixels = fixture(width, height);
+	let dir = env::temp_dir().join(format!("skidbladnir-parity-png-{}", std::process::id()));
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+	let png = dir.join("fixture.png");
+	image::RgbaImage::from_raw(width, height, pixels).expect("buffer matches the dimensions").save_with_format(&png, image::ImageFormat::Png).expect("write the PNG fixture");
+
+	let mut mismatches: Vec<String> = Vec::new();
+	// A representative slice rather than all 76: this test is about the decoder agreeing,
+	// and the encoder surface is already covered above.
+	let subset = [("default lossy", EncodeSettings::default()), ("lossless", EncodeSettings { mode: Mode::Lossless, ..Default::default() }), ("near-lossless 60", EncodeSettings { mode: Mode::NearLossless, quality: 60, ..Default::default() }), ("quality 30", EncodeSettings { quality: 30, ..Default::default() }), ("sharp yuv", EncodeSettings { sharp_yuv: true, ..Default::default() }), ("resize 32x0", EncodeSettings { resize: Resize { width: 32, height: 0 }, ..Default::default() })];
+
+	for (name, settings) in &subset {
+		let theirs_path = dir.join(format!("cwebp-{}.webp", name.replace(' ', "-")));
+		let args = cwebp_args(settings, &png, &theirs_path);
+		let run = Command::new(&cwebp).args(&args).output().expect("run the reference cwebp");
+		assert!(run.status.success(), "reference cwebp failed for `{name}`: {}", String::from_utf8_lossy(&run.stderr));
+		let expected = fs::read(&theirs_path).expect("read the reference output");
+
+		let ours_path = dir.join(format!("ours-{}.webp", name.replace(' ', "-")));
+		skidbladnir_encode::source::encode_file(settings, &png, &ours_path).expect("our pipeline encodes");
+		let actual = fs::read(&ours_path).expect("read our output");
+
+		if actual != expected {
+			mismatches.push(format!("`{name}`: ours {} bytes, cwebp {} bytes", actual.len(), expected.len()));
+		}
+	}
+
+	let _ = fs::remove_dir_all(&dir);
+	assert!(mismatches.is_empty(), "{} of {} PNG-file conversions diverged. The raw-pixel parity test covers the encoder, so this is a DECODER difference between the `image` crate and libpng:\n  {}", mismatches.len(), subset.len(), mismatches.join("\n  "));
+	eprintln!("PNG PARITY OK: {} PNG-file conversions matched the reference cwebp end to end.", subset.len());
+}

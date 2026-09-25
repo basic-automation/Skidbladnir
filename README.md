@@ -98,6 +98,11 @@ What the new app can already do:
   spanning the whole control surface, verified by a test that runs both encoders on the
   same pixels and compares the result.
 - Open a window that renders the frontend and talks to the Rust encode core.
+- Read PNG, JPEG, TIFF and WebP input, identifying the format by its contents rather
+  than by its file extension.
+- Refuse to overwrite your source image, and stage every write through a temporary
+  file so a failed conversion cannot damage a file that was already there.
+- Report the before and after sizes, and the dimensions actually produced.
 - Build and pass its tests on Windows, Linux and macOS in CI.
 
 Known gaps:
@@ -107,7 +112,9 @@ Known gaps:
   land in Phase 3. Use the Electron app for real work.
 - The released build is Windows only; no Linux or macOS release has been cut yet.
 - No installer or AppImage is produced on Linux yet; bundling needs `patchelf`.
-- The Electron app still requires a manually downloaded `cwebp.exe`.
+- The Electron app still requires a manually downloaded `cwebp.exe`, and it will
+  silently overwrite your original if you convert a WebP into the folder it already
+  lives in. The Tauri app refuses that conversion instead.
 - WebP is the only output format. JPEG 2000 has been listed as "coming soon" since
   2019 and has not been implemented.
 - The screenshot above is the Electron app.

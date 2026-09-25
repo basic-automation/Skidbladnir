@@ -23,6 +23,10 @@ repository = "https://github.com/basic-automation/Skidbladnir"
 # encoder (which reaches none of the advanced knobs) or a bundled cwebp sidecar.
 # Vendored and statically linked by default, so there is no system libwebp to find on
 # Windows or macOS.
+# Decodes the user's input files only. It is NOT the encoder: its WebP encoder exposes
+# none of the advanced controls, which is why libwebp-sys does the encoding. Default
+# features are off so the binary carries the four formats the app accepts and no more.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tiff"] }
 libwebp-sys = "0.14"
 skidbladnir-encode = { path = "crates/skidbladnir-encode" }
 tauri = { version = "2", features = [] }

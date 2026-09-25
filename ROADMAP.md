@@ -177,8 +177,31 @@ The Electron app shells out to `cwebp.exe`. The Rust port should not.
 - [x] Port **low memory** (`-low_memory`) — parity-tested.
 - [x] Port **resize** (width/height) — parity-tested at four sizes including width-only and height-only, and the `-exact` path lossless takes.
 - [x] Port **multi-threading** (`-mt`) — parity-tested on and off.
-- [ ] Report real before/after file sizes and the original size back to the UI — the
-      Electron app does this and users rely on it.
+- [x] Report real before/after file sizes and the original size back to the UI.
+      `Conversion { source_bytes, output_bytes, width, height }` plus `saving_percent()`.
+      The dimensions are read back out of the encoded file rather than echoed from the
+      request, because a resize with one dimension given as `0` is only resolved by the
+      encoder.
+- [x] Read the user's input files. `crates/skidbladnir-encode/src/source.rs` decodes PNG,
+      JPEG and TIFF with the `image` crate and WebP with libwebp itself, identifying the
+      format by **content sniffing** rather than by extension as the Electron app does.
+      The full file pipeline is parity-tested too: our PNG decode plus libwebp encode
+      matches `cwebp`'s libpng decode plus libwebp encode byte for byte.
+- [x] Write output files safely. `encode_file` refuses to overwrite the source image and
+      stages the write through a temporary file in the destination directory, renamed into
+      place only on success, so a failed encode cannot truncate an existing file. It also
+      refuses to create an output directory the user did not choose.
+      **This closes a real data-loss bug in the Electron app**: it accepts WebP input and
+      derives the output name as `<stem>.webp` in the chosen directory, so converting a
+      WebP into its own folder silently overwrites the original.
+- [x] A `convert_image` IPC command over the above, returning the input path, the output
+      path and the sizes — enough for a batch UI to attach each result to its row.
+- [ ] Support the remaining input formats the Electron app's file filter lists but which
+      are only aliases today (`.jpe`, `.jif`, `.jfif`, `.jfi`) — content sniffing already
+      handles them, but confirm against real files from each producer.
+- [ ] Decide what to do about 16-bit PNG and CMYK JPEG input. The `image` crate reduces
+      both to 8-bit RGBA, and whether that matches libpng/libjpeg as `cwebp` drives them
+      is **untested** — the PNG parity test covers 8-bit RGBA only.
 
 ## Phase 3 — Frontend parity (Nuxt + Tailwind)
 

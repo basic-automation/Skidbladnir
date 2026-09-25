@@ -8,11 +8,14 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+image = { workspace = true }
 libwebp-sys = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+# The parity test writes PNG fixtures; integration tests do not inherit [dependencies].
+image = { workspace = true }
 serde_json = { workspace = true }
 
 [lints]
