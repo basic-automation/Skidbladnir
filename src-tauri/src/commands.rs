@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 use skidbladnir_encode::{
-	encoder::{linked_decoder_version, linked_encoder_version}, settings::EncodeSettings, source::{Conversion, encode_file, output_path_in}
+	encoder::{linked_decoder_version, linked_encoder_version}, settings::EncodeSettings, source::{Conversion, PathInspection, encode_file, inspect_paths, output_path_in}
 };
 
 /// A human-readable description of the encode core, for the UI's about/diagnostics view.
@@ -68,6 +68,19 @@ pub struct ConversionReport {
 	pub conversion: Conversion,
 }
 
+/// Identify which of these paths Skidbladnir can actually read.
+///
+/// Used by the drag-and-drop handler so the window can accept a mixed selection and say
+/// what it will do with it. The answer comes from the encode core's own content sniffing,
+/// not from a list of extensions in the frontend, so the UI can never accept a file the
+/// loader will then reject.
+#[tauri::command]
+#[must_use]
+#[expect(clippy::needless_pass_by_value, reason = "Tauri deserializes command arguments into owned values; the encode core borrows them")]
+pub fn inspect_dropped_paths(paths: Vec<PathBuf>) -> Vec<PathInspection> {
+	inspect_paths(&paths)
+}
+
 /// Convert one image into `output_directory`, using the Electron app's output naming.
 ///
 /// The destination is a *directory* rather than a file path, matching how the UI asks the
@@ -92,7 +105,7 @@ pub fn convert_image(settings: EncodeSettings, input: PathBuf, output_directory:
 mod tests {
 	use skidbladnir_encode::settings::{EncodeSettings, Mode};
 
-	use super::{convert_image, default_settings, encoder_version, validate_settings};
+	use super::{convert_image, default_settings, encoder_version, inspect_dropped_paths, validate_settings};
 
 	/// The version string is shown to users, so it must actually contain versions rather
 	/// than a placeholder.
@@ -126,6 +139,30 @@ mod tests {
 		let validated = validate_settings(partial).expect("partial settings are valid");
 		assert_eq!(validated.quality, 90);
 		assert_eq!(validated.method, EncodeSettings::default().method, "an omitted field comes back as the core's default");
+	}
+
+	/// The drop handler must agree with the loader, because they answer the same question.
+	#[test]
+	fn inspect_dropped_paths_matches_what_the_loader_accepts() {
+		let dir = std::env::temp_dir().join(format!("skidbladnir-drop-{}", std::process::id()));
+		let _ = std::fs::remove_dir_all(&dir);
+		std::fs::create_dir_all(&dir).expect("create the scratch directory");
+		let webp = dir.join("image.webp");
+		let pixels = [1_u8, 2, 3, 255];
+		let bytes = skidbladnir_encode::encoder::encode_rgba(&EncodeSettings { mode: Mode::Lossless, ..Default::default() }, &skidbladnir_encode::encoder::RgbaImage { width: 1, height: 1, pixels: &pixels }).expect("encode the fixture");
+		std::fs::write(&webp, &bytes).expect("write the fixture");
+		let junk = dir.join("readme.txt");
+		std::fs::write(&junk, b"not an image").expect("write the junk file");
+
+		let inspected = inspect_dropped_paths(vec![webp.clone(), junk.clone()]);
+		assert_eq!(inspected.len(), 2);
+		assert!(inspected[0].supported && inspected[0].format == Some("WebP"), "{inspected:#?}");
+		assert!(!inspected[1].supported, "{inspected:#?}");
+		// The loader must agree on both, or the UI accepts what the encoder refuses.
+		assert!(skidbladnir_encode::source::load(&webp).is_ok());
+		assert!(skidbladnir_encode::source::load(&junk).is_err());
+
+		let _ = std::fs::remove_dir_all(&dir);
 	}
 
 	/// The conversion command must reach the file-safety guard in the core rather than

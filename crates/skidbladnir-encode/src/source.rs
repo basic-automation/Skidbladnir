@@ -162,6 +162,54 @@ fn decode_webp(bytes: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
 	Some((width, height, pixels))
 }
 
+/// What is known about a path the user offered, without decoding the whole image.
+///
+/// Dropping a folder of mixed files on the window should tell the user which ones the app
+/// can actually take, and that answer has to come from the same place the loader's answer
+/// comes from — otherwise the UI accepts a file the encoder then rejects.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathInspection {
+	/// The path that was offered.
+	pub path: PathBuf,
+	/// Whether Skidbladnir can read it.
+	pub supported: bool,
+	/// The detected format's display name, or `None` if it is not an accepted image.
+	pub format: Option<&'static str>,
+}
+
+/// Identify which of these paths are images Skidbladnir can read.
+///
+/// Reads only the first few bytes of each file, so dropping a large selection on the
+/// window does not read every one of them off disk in full. Anything unreadable — a
+/// directory, a broken link, a file without permission — is simply reported unsupported
+/// rather than raised as an error: the user dropped it, they did not ask for it to be
+/// diagnosed.
+#[must_use]
+pub fn inspect_paths(paths: &[PathBuf]) -> Vec<PathInspection> {
+	paths.iter()
+		.map(|path| {
+			let format = read_prefix(path).as_deref().and_then(SourceFormat::sniff);
+			PathInspection { path: path.clone(), supported: format.is_some(), format: format.map(SourceFormat::name) }
+		})
+		.collect()
+}
+
+/// Read the leading bytes of a file, enough for every signature [`SourceFormat::sniff`]
+/// checks. Returns `None` for anything that cannot be read as a file.
+fn read_prefix(path: &Path) -> Option<Vec<u8>> {
+	use std::io::Read as _;
+
+	if !path.is_file() {
+		return None;
+	}
+	let mut file = fs::File::open(path).ok()?;
+	let mut prefix = vec![0_u8; 16];
+	let read = file.read(&mut prefix).ok()?;
+	prefix.truncate(read);
+	Some(prefix)
+}
+
 /// What a completed conversion did, for the UI's before/after readout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -473,6 +521,42 @@ mod tests {
 		assert_eq!((loaded.width, loaded.height), (40, 30));
 		let original = load(&png).expect("decode the png");
 		assert_eq!(loaded.pixels, original.pixels, "a lossless round trip must return the exact pixels");
+	}
+
+	#[test]
+	fn inspect_paths_separates_images_from_everything_else() {
+		let scratch = Scratch::new("inspect");
+		let png = scratch.join("real.png");
+		write_png(&png, 8, 8);
+		let text = scratch.join("notes.txt");
+		fs::write(&text, b"not an image at all").expect("write the text file");
+		// A file whose extension lies: PNG bytes named .txt, and text named .png.
+		let mislabelled_image = scratch.join("actually-a-png.txt");
+		fs::copy(&png, &mislabelled_image).expect("copy the png");
+		let mislabelled_text = scratch.join("actually-text.png");
+		fs::write(&mislabelled_text, b"still not an image").expect("write the fake png");
+		let directory = scratch.join("a-folder");
+		fs::create_dir_all(&directory).expect("create the directory");
+		let missing = scratch.join("does-not-exist.png");
+
+		let inspected = super::inspect_paths(&[png, text, mislabelled_image, mislabelled_text, directory, missing]);
+		let supported: Vec<bool> = inspected.iter().map(|entry| entry.supported).collect();
+		assert_eq!(supported, vec![true, false, true, false, false, false], "{inspected:#?}");
+		assert_eq!(inspected[0].format, Some("PNG"));
+		assert_eq!(inspected[2].format, Some("PNG"), "a PNG named .txt is still a PNG");
+		assert_eq!(inspected[3].format, None, "text named .png is still not an image");
+	}
+
+	/// A tiny file must not be mistaken for an image just because it is short.
+	#[test]
+	fn inspect_paths_handles_files_shorter_than_a_signature() {
+		let scratch = Scratch::new("shortfile");
+		let tiny = scratch.join("tiny.png");
+		fs::write(&tiny, b"\x89PN").expect("write the tiny file");
+		let empty = scratch.join("empty.png");
+		fs::write(&empty, b"").expect("write the empty file");
+		let inspected = super::inspect_paths(&[tiny, empty]);
+		assert!(inspected.iter().all(|entry| !entry.supported), "{inspected:#?}");
 	}
 
 	#[test]

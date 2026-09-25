@@ -7,7 +7,7 @@
 // Help text is taken from `cwebp -longhelp`, i.e. libwebp's own wording. The Electron app
 // was not a source for it: its `-info` spans are live value readouts, and it has exactly
 // one tooltip in the whole UI.
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { ConversionReport, EncodeSettings, Mode, Preset } from '~/composables/useSettings'
 import { formatBytes, usesLossyOptions, usesManualFilter } from '~/composables/useSettings'
 import { invokeCommand, isTauri } from '~/composables/useTauri'
@@ -22,6 +22,12 @@ const busy = ref(false)
 const reports = ref<ConversionReport[]>([])
 const failures = ref<{ path: string, message: string }[]>([])
 const validationError = ref('')
+const dragging = ref(false)
+const dropRejected = ref(0)
+let unlistenDrop: (() => void) | null = null
+
+/** What the Rust core says about a path the user offered. */
+interface PathInspection { path: string, supported: boolean, format: string | null }
 
 const MODES: { value: Mode, label: string, help: string }[] = [
 	{ value: 'lossy', label: 'Lossy', help: 'Ordinary WebP. The only mode with the advanced controls.' },
@@ -73,6 +79,30 @@ onMounted(async () => {
 	catch (error) {
 		startupError.value = error instanceof Error ? error.message : String(error)
 	}
+
+	if (!isTauri()) return
+	// Tauri's NATIVE drag-drop, not the HTML5 kind: with the native handler enabled the
+	// webview's own dragover/drop events never fire, so listening for those would look
+	// correct and silently do nothing.
+	const { getCurrentWebview } = await import('@tauri-apps/api/webview')
+	unlistenDrop = await getCurrentWebview().onDragDropEvent(async (event) => {
+		if (event.payload.type === 'over') { dragging.value = true; return }
+		if (event.payload.type === 'leave') { dragging.value = false; return }
+		if (event.payload.type !== 'drop') return
+		dragging.value = false
+
+		// Which files are usable is decided by the Rust core, by reading each file's
+		// leading bytes — never by matching extensions here, which would let the UI accept
+		// something the loader then refuses.
+		const inspected = await invokeCommand<PathInspection[]>('inspect_dropped_paths', { paths: event.payload.paths })
+		const usable = inspected.filter(entry => entry.supported).map(entry => entry.path)
+		dropRejected.value = inspected.length - usable.length
+		if (usable.length > 0) inputPaths.value = usable
+	})
+})
+
+onUnmounted(() => {
+	unlistenDrop?.()
 })
 
 async function chooseInputs() {
@@ -134,7 +164,10 @@ function basename(path: string): string {
 </script>
 
 <template>
-	<main class="mx-auto flex min-h-full max-w-5xl flex-col gap-5 p-6 text-slate-900 dark:text-slate-100">
+	<main class="relative mx-auto flex min-h-full max-w-5xl flex-col gap-5 p-6 text-slate-900 dark:text-slate-100">
+		<div v-if="dragging" class="pointer-events-none fixed inset-3 z-50 flex items-center justify-center rounded-xl border-2 border-dashed border-sky-500 bg-sky-50/80 text-lg font-semibold text-sky-700 dark:bg-sky-950/80 dark:text-sky-300">
+			Drop images to convert
+		</div>
 		<header class="flex items-baseline justify-between gap-4">
 			<div>
 				<h1 class="text-2xl font-semibold tracking-tight">
@@ -171,10 +204,14 @@ function basename(path: string): string {
 						{{ outputDirectory || 'No destination selected' }}
 					</span>
 				</div>
+				<p v-if="dropRejected > 0" class="text-xs text-amber-600 dark:text-amber-400">
+					{{ dropRejected }} dropped {{ dropRejected === 1 ? 'file was' : 'files were' }} not a
+					PNG, JPEG, TIFF or WebP and {{ dropRejected === 1 ? 'was' : 'were' }} skipped.
+				</p>
 				<p class="text-xs text-slate-500 dark:text-slate-400">
-					PNG, JPEG, TIFF and WebP. Converted files are written as
-					<code>&lt;name&gt;.webp</code> in the destination. Your originals are never
-					written over.
+					PNG, JPEG, TIFF and WebP &mdash; drop them anywhere on the window, or use the
+					button. Converted files are written as <code>&lt;name&gt;.webp</code> in the
+					destination. Your originals are never written over.
 				</p>
 			</ControlPanel>
 

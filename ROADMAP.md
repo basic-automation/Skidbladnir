@@ -215,7 +215,15 @@ prettier subset.
 - [x] File selection: input paths and output path, via `tauri-plugin-dialog`. The window
       holds only `dialog:allow-open` and no filesystem permission at all — every read and
       write happens in Rust against a path the user picked.
-- [ ] Drag-and-drop of input files onto the window.
+- [x] Drag-and-drop of input files onto the window, using Tauri's **native** drag-drop
+      event rather than HTML5 dragover/drop — with the native handler enabled the
+      webview's own events never fire, so the HTML5 approach looks right and silently does
+      nothing. Which dropped files are usable is decided by the Rust core reading each
+      file's leading bytes, so the UI cannot accept something the loader then refuses.
+      **Caveat: the drop gesture itself is unverified.** A native drag cannot be
+      synthesised over WebDriver; what was verified in the running app is that the
+      listener registers without error and that `inspect_dropped_paths` correctly sorts a
+      real PNG, a text file and a missing path.
 - [x] The mode selector and its conditional control groups. Verified in the running
       window over WebDriver: lossy shows 9 sliders plus the advanced disclosure, and
       switching to lossless collapses to 3 sliders with no advanced group.
@@ -240,11 +248,6 @@ prettier subset.
 - [x] Original vs converted size readout — a results table with before, after, the
       percentage change and the encoded dimensions, per file.
 - [x] Dark mode (Tailwind), following the system preference.
-
-- [ ] Drag-and-drop of input files onto the window is still open, and now needs
-      `dragDropEnabled` in `tauri.conf.json` plus the webview's drag-drop event — note
-      that Tauri disables the webview's own HTML5 drag-and-drop when its native handler is
-      on, so the two approaches are mutually exclusive and the choice should be recorded.
 
 ## Phase 4 — Beyond parity
 
