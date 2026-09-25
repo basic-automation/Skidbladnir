@@ -28,6 +28,27 @@
 //!
 //! The gate for all of it is `tests/parity.rs`, which encodes the same pixels through
 //! this module and through a real `cwebp` and compares the output byte for byte.
+//!
+//! # Safety invariants
+//!
+//! This module is mostly FFI, so rather than repeating the same note on thirty calls, the
+//! invariants that hold throughout are stated once here. Anything that does **not** follow
+//! from these carries its own `SAFETY:` comment at the call site.
+//!
+//! - **Every pointer handed to libwebp points at a live local** of this module, and the
+//!   local outlives the call. Nothing is stored by libwebp beyond a call except
+//!   `WebPPicture::writer`/`custom_ptr` and `progress_hook`/`user_data`, which are cleared
+//!   before their targets go out of scope.
+//! - **`WebPConfig` and `WebPPicture` are `#[repr(C)]` plain data** and are zeroed before
+//!   their `*Init*` function runs, which is what libwebp's own examples do. A zeroed
+//!   struct is a valid starting state for both.
+//! - **Allocations are owned by guards, not by control flow.** [`Picture`] and [`Writer`]
+//!   free their buffers in `Drop`, so an early return from any fallible step in between
+//!   cannot leak.
+//! - **The ABI version is passed to every `*Internal` entry point** via [`abi_version`],
+//!   which is how libwebp detects a caller built against a different struct layout.
+//! - **Nothing here is `Send` or `Sync` across a call.** An encode owns its picture and
+//!   config for the duration; concurrency happens inside libwebp via `thread_level`.
 
 use std::ffi::c_int;
 
@@ -357,6 +378,9 @@ pub fn encode_rgba_with_progress(settings: &EncodeSettings, image: &RgbaImage<'_
 
 	// 4 bytes per pixel, tightly packed, so the stride is the row length.
 	let stride = width.checked_mul(4).ok_or(EncodeError::ImageTooLarge { width: image.width, height: image.height })?;
+	// SAFETY: beyond the module-wide invariants, this one depends on the buffer actually
+	// being as large as the dimensions claim — libwebp reads `height * stride` bytes from
+	// it. That was checked above: `pixels.len()` is exactly `width * height * 4`.
 	if unsafe { WebPPictureImportRGBA(&raw mut picture.0, image.pixels.as_ptr(), stride) } == 0 {
 		return Err(EncodeError::Libwebp("WebPPictureImportRGBA"));
 	}
@@ -393,6 +417,9 @@ pub fn encode_rgba_with_progress(settings: &EncodeSettings, image: &RgbaImage<'_
 		return Err(EncodeError::EncodeFailed(picture.0.error_code as c_int));
 	}
 
+	// SAFETY: on success WebPMemoryWrite has filled `mem` with exactly `size` bytes; the
+	// null check covers the case where the encode produced nothing. The slice is copied
+	// before `writer` is dropped and frees it.
 	let bytes = if writer.0.mem.is_null() { Vec::new() } else { unsafe { std::slice::from_raw_parts(writer.0.mem, writer.0.size) }.to_vec() };
 	Ok(bytes)
 }
@@ -450,6 +477,9 @@ fn resize_picture(picture: &mut Picture, settings: &EncodeSettings, config: &Web
 	}
 	let rows = usize::try_from(picture.0.height).unwrap_or(0);
 	let width = usize::try_from(picture.0.width).unwrap_or(0);
+	// SAFETY: both pictures were confirmed non-null just above and are on the ARGB path, so
+	// each holds `height` rows of `argb_stride` u32s and `width <= argb_stride`. The two
+	// slices come from different allocations, so they cannot alias.
 	for y in 0..rows {
 		let dst = unsafe { std::slice::from_raw_parts_mut(picture.0.argb.add(y * usize::try_from(picture.0.argb_stride).unwrap_or(0)), width) };
 		let src = unsafe { std::slice::from_raw_parts(opaque.0.argb.add(y * usize::try_from(opaque.0.argb_stride).unwrap_or(0)), width) };
