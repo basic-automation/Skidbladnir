@@ -25,8 +25,12 @@ the Electron app exposes today.
       on stable Rust, with `fail-fast: false` so a Windows- or macOS-only break is not
       hidden. It installs the Linux Tauri system dependencies and a reference `cwebp`
       (apt on Linux, brew on macOS) ahead of the phases that need them.
-- [ ] Add the **frontend** job to `ci.yml` once `frontend/` exists — the Rust job is
-      green but nothing yet builds Nuxt in CI.
+- [x] Build the frontend in `ci.yml`. It turned out not to be an optional extra job:
+      `tauri::generate_context!` embeds `frontendDist` at **compile** time, so without
+      `npm ci && npm run generate` ahead of it the Rust build fails outright with
+      "the `frontendDist` configuration is set to ... but this path doesn't exist".
+- [ ] Cache the Nuxt build in CI as well as npm's download cache; today every job
+      regenerates the frontend from scratch.
 - [ ] Add `.github/dependabot.yml` covering the `cargo`, `npm` and `github-actions`
       ecosystems. Dependabot is enabled on the repo but there is no config file in-tree,
       so its coverage is whatever the GitHub UI was set to and is not reviewable here.

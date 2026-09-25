@@ -75,6 +75,21 @@ jobs:
         if: matrix.os == 'macos-latest'
         run: brew install webp
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build the frontend
+        # This is NOT optional and NOT merely "the frontend job". `tauri::generate_context!`
+        # embeds `frontendDist` at COMPILE time, so without these two steps the Rust build
+        # fails with "the frontendDist configuration is set to ... but this path doesn't
+        # exist" — a proc-macro panic, not a missing-asset warning.
+        run: |
+          npm --prefix frontend ci
+          npm --prefix frontend run generate
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
