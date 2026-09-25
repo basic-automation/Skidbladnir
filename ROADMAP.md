@@ -262,12 +262,24 @@ prettier subset.
 
 ## Phase 5 — Tri-platform packaging and release
 
-- [ ] `cargo tauri build` green on **Linux** (AppImage + `.deb`), blocked on `patchelf`.
+- [x] `cargo tauri build` green on **Linux** for `.deb` — **this was not actually blocked
+      on `patchelf`.** Only the AppImage target needs it; `cargo tauri build --bundles deb`
+      produces a valid 3.8 MB `Skidbladnir_<version>_amd64.deb` on the dev host today,
+      containing `usr/bin/skidbladnir` and the hicolor icon set.
+- [ ] AppImage on Linux still needs `patchelf` (owner-gated locally: `sudo pacman -S
+      patchelf`). CI installs it from apt, so the AppImage is produced there — it simply
+      cannot be produced or checked on the dev host.
 - [ ] `cargo tauri build` green on **Windows** (MSI/NSIS) — CI-verified, the dev host
       cannot build Windows targets.
 - [ ] `cargo tauri build` green on **macOS** (`.dmg`) — CI-verified, no local Mac.
-- [ ] A `release.yml` workflow that builds all three targets and attaches them to a
-      GitHub release.
+- [x] A `release.yml` workflow that builds all three targets and attaches them to the
+      GitHub release for a tag. Triggers on `v*` tags, or manually with a tag input so a
+      release whose build failed can be retried without moving the tag. `fail-fast: false`,
+      so one platform failing does not deny the release the artifacts the others produced,
+      and the collect step **fails loudly** if a platform produced no installer rather
+      than uploading nothing.
+      **Unverified until a tag exists** — a tag-triggered workflow cannot be exercised
+      before the tag it reacts to.
 - [ ] Decide whether the Tauri updater is in scope; if yes, a signing key is required
       and that is owner-gated (the key never passes through the routine).
 - [ ] First tri-platform release of the Tauri app.
