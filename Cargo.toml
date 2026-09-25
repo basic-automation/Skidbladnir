@@ -1,0 +1,30 @@
+# Skidbladnir is mid-migration: this workspace is the Rust + Tauri 2 app that will
+# replace the Electron app at the repo root. Both live here until Phase 6 of
+# ROADMAP.md retires Electron, so nothing in this workspace may depend on
+# main.js / index.html, and removing them must not break `cargo build`.
+#
+# Layout (the Phase 1 decision, recorded in ROADMAP.md):
+#   crates/*    pure-Rust logic with no Tauri dependency — testable offline
+#   src-tauri/  the Tauri 2 application shell (added in Phase 1)
+#   frontend/   the Nuxt + Tailwind frontend (added in Phase 1)
+[workspace]
+resolver = "2"
+members = ["crates/skidbladnir-encode"]
+
+[workspace.package]
+edition = "2024"
+license = "ISC"
+authors = ["Justin Icenhour"]
+repository = "https://github.com/basic-automation/Skidbladnir"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+# Clippy runs with `-D warnings` in CI. `nursery` is deliberately absent: its lints
+# are unstable across toolchains and the dev host (nightly) and CI (stable) would
+# disagree. Never silence a lint with `#![allow(...)]` — fix the code.
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"

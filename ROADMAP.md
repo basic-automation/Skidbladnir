@@ -23,8 +23,13 @@ the Electron app exposes today.
 - [ ] Add a CI workflow (`.github/workflows/ci.yml`): build + test the Rust workspace
       and the frontend on `ubuntu-latest`, `windows-latest`, `macos-latest`. CI pins
       **stable** Rust even though the dev host defaults to nightly.
-- [ ] Add `rustfmt.toml` and a clippy configuration matching the owner's other Rust
-      repos (hard tabs, `-D warnings` in CI).
+- [x] Add `rustfmt.toml` and a clippy configuration matching the owner's other Rust
+      repos (hard tabs, `-D warnings` in CI). `rustfmt.toml` copies `DSP/rustfmt.toml`
+      verbatim (hard tabs, `tab_spaces = 8`, `max_width = 10000`, horizontal imports,
+      `StdExternalCrate` grouping). Clippy is configured as `[workspace.lints.clippy]`
+      with `all` and `pedantic` at warn, consumed by members via `lints.workspace = true`.
+      `clippy::nursery` is deliberately excluded — its lints move between toolchains and
+      the dev host (nightly) and CI (stable) would disagree.
 - [x] Decide and record the app's product identity. **The answer:** the product is
       **Skidbladnir** — the repo name, the name every released tag carries, and the
       only one of the four candidates a user has ever seen. Concretely:
@@ -54,10 +59,24 @@ the Electron app exposes today.
 The new app lands **alongside** the Electron app, not on top of it. `master` keeps
 building and running the Electron app until Phase 6 retires it.
 
-- [ ] Choose the layout: a Cargo workspace at the repo root with `src-tauri/`
-      (Tauri app) + `crates/` (pure-Rust logic) and `frontend/` (Nuxt). Record the
-      chosen layout here before creating directories.
-- [ ] `cargo install tauri-cli` on the dev host (no `sudo` needed); pin the version.
+- [x] Choose the layout. **The answer: exactly that.** A Cargo workspace at the repo
+      root, with:
+      - `crates/*` — pure-Rust logic with **no Tauri dependency**, so the encode core is
+        testable from plain `cargo test` with no window, no IPC and no frontend. First
+        member: `crates/skidbladnir-encode`.
+      - `src-tauri/` — the Tauri 2 application shell, a thin IPC layer over `crates/*`.
+      - `frontend/` — the Nuxt + Tailwind frontend.
+      The Electron files stay at the repo root until Phase 6. Nothing in the workspace
+      may reference them, so deleting them cannot break `cargo build`.
+- [x] `cargo install tauri-cli` on the dev host — **installed, version 2.11.5**.
+      It does **not** build on the dev host's default nightly: every tauri-cli 2.x
+      dependency tree resolves a `rustix` below 1.0 (`0.37.28` under `--locked`,
+      `0.38.43` unlocked), and those use `rustc_attrs`, which rustc 1.100.0-nightly
+      rejects with "attributes starting with `rustc` are reserved". Install it on
+      **stable** with the global nightly-only rustflags cleared:
+      `RUSTFLAGS= cargo +stable install tauri-cli --locked --version '^2'`.
+      This is a host/toolchain quirk, not an in-tree nightly dependency — the workspace
+      itself must keep building on stable.
 - [ ] Scaffold the Tauri 2 app: `src-tauri/` with `tauri.conf.json`, an appId, the
       window config, and the existing `build/icon.png` wired as the app icon.
 - [ ] Scaffold the Nuxt frontend in `frontend/` with Tailwind, configured for
