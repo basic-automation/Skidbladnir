@@ -8,6 +8,7 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+libwebp-sys = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 

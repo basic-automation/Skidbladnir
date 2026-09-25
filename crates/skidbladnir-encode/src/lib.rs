@@ -10,7 +10,9 @@
 //! Every control it exposes is represented in [`EncodeSettings`]; see ROADMAP.md Phase 2.
 
 pub mod cwebp;
+pub mod encoder;
 pub mod settings;
 
 pub use cwebp::cwebp_args;
+pub use encoder::{EncodeError, RgbaImage, encode_rgba};
 pub use settings::{AlphaFiltering, EncodeSettings, FilterType, Mode, Preset, Resize, TargetMetric, ValidationError};

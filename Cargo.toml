@@ -18,6 +18,12 @@ authors = ["Justin Icenhour"]
 repository = "https://github.com/basic-automation/Skidbladnir"
 
 [workspace.dependencies]
+# Binds libwebp's WebPConfig, which carries a 1:1 field for every encoder control the
+# Electron UI exposes — the reason this is the encode backend rather than a pure-Rust
+# encoder (which reaches none of the advanced knobs) or a bundled cwebp sidecar.
+# Vendored and statically linked by default, so there is no system libwebp to find on
+# Windows or macOS.
+libwebp-sys = "0.14"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

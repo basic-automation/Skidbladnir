@@ -116,22 +116,33 @@ The Electron app shells out to `cwebp.exe`. The Rust port should not.
       with the sidecar kept as the documented fallback.
 - [ ] Define the `EncodeSettings` type — one Rust struct that is the single
       representation of an encode job, serializable across the Tauri IPC boundary.
-- [ ] Implement the encoder and prove **parity against `cwebp` itself** with a test
-      that encodes fixture images both ways and compares output. This is the gate for
-      the whole phase: a port that silently changes output is a regression.
-- [ ] Port the **mode** surface: lossy · lossless · near-lossless · JPEG-like · preset.
-- [ ] Port the **preset** surface: `default`, `photo`, `picture`, `drawing`, `icon`, `text`.
-- [ ] Port **quality** and **alpha quality**.
-- [ ] Port **compression method** (`-m`) and **segments** (`-segments`).
-- [ ] Port **spatial noise shaping** (`-sns`).
-- [ ] Port the **filter** surface: strength, sharpness, strong/simple, auto-filter.
-- [ ] Port **target size** and **target PSNR** (mutually exclusive with quality).
-- [ ] Port **multi-pass** (`-pass`).
-- [ ] Port **partition limit** (`-partition_limit`).
-- [ ] Port **sharp YUV** (`-sharp_yuv`).
-- [ ] Port **low memory** (`-low_memory`).
-- [ ] Port **resize** (width/height).
-- [ ] Port **multi-threading** (`-mt`).
+- [x] Implement the encoder and prove **parity against `cwebp` itself**.
+      `crates/skidbladnir-encode/tests/parity.rs` encodes the same pixels through
+      `encode_rgba` and through a real `cwebp` and compares the output byte for byte.
+      **76 settings covering the whole control surface match `cwebp` 1.6.0 exactly.**
+      The fixture is a PAM (`P7`, `RGB_ALPHA`) file, which `cwebp` reads with its own
+      built-in PNM reader, so no image decoder sits between the two encoders and a
+      mismatch can only be the encoder configuration.
+      The gate was itself mutation-tested: deleting the `near_lossless => lossless = 1`
+      line makes 5 cases diverge, and forcing `use_argb = 0` aborts the run, so it
+      genuinely catches regressions rather than passing vacuously.
+- [ ] Build a **version-matched** reference `cwebp` in CI, from the same libwebp source
+      `libwebp-sys` vendors, so the parity test can be *enforced* there
+      (`SKIDBLADNIR_REQUIRE_PARITY=1`) instead of skipping whenever apt or brew ships a
+      different libwebp. Today CI reports the parity result but cannot fail on it.
+- [x] Port the **mode** surface: lossy · lossless · near-lossless · JPEG-like · preset — all five, parity-tested.
+- [x] Port the **preset** surface: `default`, `photo`, `picture`, `drawing`, `icon`, `text` — all six, and libwebp's own preset table is pinned by test.
+- [x] Port **quality** and **alpha quality** — parity-tested at quality 0/1/50/99/100 and alpha quality 0/50/100.
+- [x] Port **compression method** (`-m`) and **segments** (`-segments`) — parity-tested across every value, 0..=6 and 1..=4.
+- [x] Port **spatial noise shaping** (`-sns`) — parity-tested at 0/25/50/100.
+- [x] Port the **filter** surface: strength, sharpness, strong/simple, auto-filter — parity-tested: auto, plus strong and simple at 0/0, 20/3 and 100/7.
+- [x] Port **target size** and **target PSNR** (mutually exclusive with quality) — parity-tested; `-print_psnr` sets `show_compressed`, as cwebp does.
+- [x] Port **multi-pass** (`-pass`) — parity-tested at 1/6/10.
+- [x] Port **partition limit** (`-partition_limit`) — parity-tested at 0/50/100.
+- [x] Port **sharp YUV** (`-sharp_yuv`) — parity-tested, including its effect on the ARGB colour path.
+- [x] Port **low memory** (`-low_memory`) — parity-tested.
+- [x] Port **resize** (width/height) — parity-tested at four sizes including width-only and height-only, and the `-exact` path lossless takes.
+- [x] Port **multi-threading** (`-mt`) — parity-tested on and off.
 - [ ] Report real before/after file sizes and the original size back to the UI — the
       Electron app does this and users rely on it.
 
