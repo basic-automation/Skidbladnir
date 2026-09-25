@@ -16,7 +16,10 @@
 # Pass --app <path> to test a specific binary. Exits non-zero on the first failed check.
 set -euo pipefail
 
-HARNESS="${SKIDBLADNIR_WEBDRIVER_HARNESS:-$HOME/.claude/scheduled-tasks/_shared/tauri-webdriver.sh}"
+# The harness ships with the repository, so this check runs anywhere the tools are
+# installed rather than only on the one machine that had it under $HOME.
+# SKIDBLADNIR_WEBDRIVER_HARNESS overrides it.
+HARNESS="${SKIDBLADNIR_WEBDRIVER_HARNESS:-$(dirname "$0")/webdriver.sh}"
 APP=""
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -26,10 +29,20 @@ while [ $# -gt 0 ]; do
 done
 
 if [ ! -x "$HARNESS" ]; then
-	echo "SKIP: no WebDriver harness at $HARNESS (set SKIDBLADNIR_WEBDRIVER_HARNESS)." >&2
-	echo "      The window is therefore UNVERIFIED by this run." >&2
-	exit 0
+	echo "FAIL: no WebDriver harness at $HARNESS" >&2
+	exit 1
 fi
+
+# Without these the window cannot be driven at all. Say so and skip, rather than
+# reporting a pass that checked nothing.
+for tool in tauri-driver WebKitWebDriver curl python3; do
+	if ! command -v "$tool" >/dev/null; then
+		echo "SKIP: $tool is not installed, so the window is UNVERIFIED by this run." >&2
+		echo "      tauri-driver: cargo install tauri-driver" >&2
+		echo "      WebKitWebDriver: webkit2gtk-driver (Debian/Ubuntu) or webkitgtk-6.0 (Arch)" >&2
+		exit 0
+	fi
+done
 
 if [ -z "$APP" ]; then
 	# Honour the shared CARGO_TARGET_DIR rather than assuming ./target.

@@ -152,9 +152,16 @@ building and running the Electron app until Phase 6 retires it.
       present, every focusable control has an accessible name, a real PNG converts to a
       real WebP on disk, and converting a WebP into its own directory is refused.
       It was mutation-tested: a wrong expectation and a missing binary both fail it.
-- [ ] Run `scripts/smoke-test.sh` in CI. It needs a display and `WebKitWebDriver`, so it
-      needs `xvfb` on the Linux runner — worth doing, but it is a separate piece of work
-      from writing the script.
+- [x] Make the smoke test self-contained. `scripts/webdriver.sh` is now an in-repo
+      WebDriver harness (tauri-driver → WebKitWebDriver → the app), so the check no longer
+      reaches into a file under `$HOME` and can run anywhere the tools are installed. It
+      skips loudly, naming the missing tool and how to install it, rather than passing
+      when it checked nothing.
+- [ ] Run `scripts/smoke-test.sh` in CI. The harness dependency is gone; what remains is
+      runner setup — `xvfb` for a display, the `webkit2gtk-driver` package, and
+      `cargo install tauri-driver`. Note `execute/sync`, not `execute/async`: the async
+      endpoint waits for a completion callback, so a script that simply returns hangs
+      until the driver times out (this cost a debugging round already).
 
 ## Phase 2 — Encode core in Rust (the real work)
 
