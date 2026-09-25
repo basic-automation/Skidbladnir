@@ -133,30 +133,13 @@ building and running the Electron app until Phase 6 retires it.
       `connect-src 'self' ipc: http://ipc.localhost` — the app talks to Rust over the IPC
       bridge and should never open a socket — plus `object-src`, `frame-src`,
       `frame-ancestors` and `form-action` all `'none'`, and `base-uri 'self'`.
-- [ ] Remove `script-src 'unsafe-inline'`. Nuxt emits **three** inline scripts of its own
-      (a 44-byte importmap and two runtime bootstraps of 1213 and 154 bytes), so the
-      directive cannot simply be dropped — the window would go blank, and a CSP that
-      blocks the bundle shows up as a blank window rather than an error, so any attempt
-      must be re-verified over WebDriver.
-      The fix is SHA-256 hashes, and the blocker is *when*: `tauri::generate_context!`
-      reads `tauri.conf.json` at **compile** time, while the hashes are only known after
-      `nuxt generate` runs, so it needs a build step that computes them and injects them
-      between the two — and one that does not leave the tracked config file dirty.
-      Worth doing; not a one-line change, and mis-scoping it as one is how it would get
-      half-done.
-- [x] `scripts/smoke-test.sh` — a committed WebDriver smoke test, so "the window renders
-      and IPC answers" is a repeatable check rather than something each run redoes by hand.
-      Nine checks: the window loads from `tauri://localhost` (**not** a dev server — the
-      check that would have caught the `custom-protocol` bug), the app renders, the IPC
-      returns the linked encoder version and the core's defaults, the lossy control set is
-      present, every focusable control has an accessible name, a real PNG converts to a
-      real WebP on disk, and converting a WebP into its own directory is refused.
-      It was mutation-tested: a wrong expectation and a missing binary both fail it.
-- [x] Make the smoke test self-contained. `scripts/webdriver.sh` is now an in-repo
-      WebDriver harness (tauri-driver → WebKitWebDriver → the app), so the check no longer
-      reaches into a file under `$HOME` and can run anywhere the tools are installed. It
-      skips loudly, naming the missing tool and how to install it, rather than passing
-      when it checked nothing.
+- [x] Remove `script-src 'unsafe-inline'`. **It turned out not to need the build-time
+      hashing this item described.** Tauri rewrites the CSP it delivers to cover the inline
+      scripts it serves from the bundle, so `script-src 'self'` is enough on its own and
+      naming Nuxt's three inline scripts by hash is unnecessary machinery. A hash-injecting
+      build script was written, and then deleted once measurement showed it was redundant.
+      **Enforcement was verified, not assumed** — in the running window an injected inline
+      `<script>` does not execute and `fetch("https://example.com/")` is blocked.
 - [ ] Run `scripts/smoke-test.sh` in CI. The harness dependency is gone; what remains is
       runner setup — `xvfb` for a display, the `webkit2gtk-driver` package, and
       `cargo install tauri-driver`. Note `execute/sync`, not `execute/async`: the async
