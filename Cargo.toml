@@ -30,6 +30,9 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 libwebp-sys = "0.14"
 skidbladnir-encode = { path = "crates/skidbladnir-encode" }
 tauri = { version = "2", features = [] }
+# The native file and directory pickers. The app never browses the filesystem itself —
+# the user picks, and the app writes only where they pointed.
+tauri-plugin-dialog = "2"
 tauri-build = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -33,6 +33,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 skidbladnir-encode = { workspace = true }
 tauri = { workspace = true }
+tauri-plugin-dialog = { workspace = true }
 
 [lints]
 workspace = true

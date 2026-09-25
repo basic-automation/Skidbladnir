@@ -97,7 +97,9 @@ What the new app can already do:
   above — and its output is **byte-for-byte identical to `cwebp`** across 76 settings
   spanning the whole control surface, verified by a test that runs both encoders on the
   same pixels and compares the result.
-- Open a window that renders the frontend and talks to the Rust encode core.
+- Convert images from a window with **every encoder control above** exposed, grouped
+  the way the Electron app grouped them, with the advanced controls behind a
+  disclosure and shown only for the mode that actually uses them.
 - Read PNG, JPEG, TIFF and WebP input, identifying the format by its contents rather
   than by its file extension.
 - Refuse to overwrite your source image, and stage every write through a temporary
@@ -107,9 +109,8 @@ What the new app can already do:
 
 Known gaps:
 
-- **The new app has no encoder UI yet.** The controls are implemented and tested in the
-  Rust core, but the window is still a shell — file selection and the control surface
-  land in Phase 3. Use the Electron app for real work.
+- The new app has **no drag-and-drop** and no per-file progress while a batch runs,
+  and a running batch cannot be cancelled.
 - The released build is Windows only; no Linux or macOS release has been cut yet.
 - No installer or AppImage is produced on Linux yet; bundling needs `patchelf`.
 - The Electron app still requires a manually downloaded `cwebp.exe`, and it will

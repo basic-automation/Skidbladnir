@@ -212,23 +212,45 @@ The Electron app shells out to `cwebp.exe`. The Rust port should not.
 Parity means a user of the Electron app finds every control they had, not a
 prettier subset.
 
-- [ ] File selection: input paths and output path, via Tauri's dialog plugin.
+- [x] File selection: input paths and output path, via `tauri-plugin-dialog`. The window
+      holds only `dialog:allow-open` and no filesystem permission at all — every read and
+      write happens in Rust against a path the user picked.
 - [ ] Drag-and-drop of input files onto the window.
-- [ ] The mode selector and its conditional control groups (lossy shows the lossy
-      options; lossless hides them) — the Electron UI's show/hide logic is real
-      behaviour, not decoration.
-- [ ] Every Phase 2 control bound to the UI, with the same ranges and defaults.
-- [ ] The advanced-options disclosure that hides the expert controls by default.
-- [ ] Per-control help text — the Electron UI has an `-info` element for most
-      controls; carry the copy over rather than rewriting it from scratch.
-- [ ] Input/output validation and the error states the Electron UI shows.
-- [ ] Conversion progress and the completed/converted state.
-- [ ] Original vs converted size readout.
-- [ ] Dark mode (Tailwind), since Electron never had it and it is cheap here.
+- [x] The mode selector and its conditional control groups. Verified in the running
+      window over WebDriver: lossy shows 9 sliders plus the advanced disclosure, and
+      switching to lossless collapses to 3 sliders with no advanced group.
+- [x] Every Phase 2 control bound to the UI, with the same ranges and defaults. The
+      defaults are **fetched from the Rust core** on mount rather than written again in
+      TypeScript, which is how the two would otherwise drift.
+- [x] The advanced-options disclosure. It is present for lossy mode, where the expert
+      controls actually reach the encoder.
+- [x] Per-control help text. **The premise of this item was wrong and is corrected
+      here:** the Electron UI's `-info` elements are live numeric value readouts, not help
+      text, and the whole app contains exactly one tooltip (on the file picker). There was
+      no copy to carry over, so the help text is taken from `cwebp -longhelp` — libwebp's
+      own wording, which is the authoritative description of what each flag does.
+- [x] Input/output validation and error states. Convert is disabled until inputs, a
+      destination and (in preset mode) a preset are chosen, and settings are validated by
+      the **Rust** `validate_settings` command rather than a second copy of the rules in
+      TypeScript. Per-file failures are listed without stopping the run.
+- [ ] Conversion progress. There is a busy state and a per-file result list, but no
+      per-file progress while a batch runs and no indication of which file is in flight.
+      libwebp exposes `WebPPicture::progress_hook`, which is the route to a real
+      percentage.
+- [x] Original vs converted size readout — a results table with before, after, the
+      percentage change and the encoded dimensions, per file.
+- [x] Dark mode (Tailwind), following the system preference.
+
+- [ ] Drag-and-drop of input files onto the window is still open, and now needs
+      `dragDropEnabled` in `tauri.conf.json` plus the webview's drag-drop event — note
+      that Tauri disables the webview's own HTML5 drag-and-drop when its native handler is
+      on, so the two approaches are mutually exclusive and the choice should be recorded.
 
 ## Phase 4 — Beyond parity
 
-- [ ] Batch conversion with a real queue, per-file status, and cancel.
+- [ ] Batch conversion: **partly done.** Multi-select and sequential conversion with
+      per-file success/failure rows work today. Still missing: cancel, and a queue that
+      reports progress as it goes rather than only when each file finishes.
 - [ ] Preview: original vs encoded, side by side, before committing the write.
 - [ ] Persist settings between launches.
 - [ ] Named user presets (save/load an `EncodeSettings`).
