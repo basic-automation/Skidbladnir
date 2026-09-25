@@ -131,9 +131,17 @@ building and running the Electron app until Phase 6 retires it.
       type="importmap">`. That is weaker than a desktop app needs; either make Nuxt drop
       the importmap or move to hashes/nonces, and re-verify over WebDriver — a CSP that
       silently blocks the bundle shows up as a blank window, not an error.
-- [ ] Add a WebDriver smoke test to CI or to a committed script, so "the window renders
-      and IPC answers" is a repeatable check rather than something each run redoes by
-      hand.
+- [x] `scripts/smoke-test.sh` — a committed WebDriver smoke test, so "the window renders
+      and IPC answers" is a repeatable check rather than something each run redoes by hand.
+      Nine checks: the window loads from `tauri://localhost` (**not** a dev server — the
+      check that would have caught the `custom-protocol` bug), the app renders, the IPC
+      returns the linked encoder version and the core's defaults, the lossy control set is
+      present, every focusable control has an accessible name, a real PNG converts to a
+      real WebP on disk, and converting a WebP into its own directory is refused.
+      It was mutation-tested: a wrong expectation and a missing binary both fail it.
+- [ ] Run `scripts/smoke-test.sh` in CI. It needs a display and `WebKitWebDriver`, so it
+      needs `xvfb` on the Linux runner — worth doing, but it is a separate piece of work
+      from writing the script.
 
 ## Phase 2 — Encode core in Rust (the real work)
 

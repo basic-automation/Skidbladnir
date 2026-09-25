@@ -120,6 +120,17 @@ jobs:
         if: matrix.os != 'windows-latest'
         shell: bash
         run: |
+          # cwebp's makefile.unix compiles its PNG/JPEG/TIFF readers unconditionally and,
+          # on macOS, looks for their headers in /opt/local (MacPorts) which the runner
+          # does not have. CPATH and LIBRARY_PATH are honoured by the compiler directly,
+          # so the Homebrew prefix is added without overriding the makefile's own
+          # variables — passing EXTRA_FLAGS on the command line would replace them.
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            brew install jpeg-turbo libpng libtiff
+            prefix=$(brew --prefix)
+            export CPATH="$prefix/include${CPATH:+:$CPATH}"
+            export LIBRARY_PATH="$prefix/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+          fi
           version=$(cargo run -q --example libwebp-version --package skidbladnir-encode)
           echo "linked libwebp: $version"
           git clone --depth 1 --branch "v$version" https://github.com/webmproject/libwebp.git "$RUNNER_TEMP/libwebp"
