@@ -34,6 +34,13 @@ interface WebpInfo { width: number, height: number, hasAlpha: boolean, hasAnimat
 interface PathInspection { path: string, supported: boolean, format: string | null, webp: WebpInfo | null }
 
 const inspected = ref<PathInspection[]>([])
+
+/** An image found by scanning a folder, with its position under the scan root. */
+interface FoundImage { path: string, relative: string }
+// Non-empty only when the selection came from a folder scan, which is what decides whether
+// output mirrors the source tree or lands flat.
+const scanned = ref<FoundImage[]>([])
+const mirrorStructure = ref(true)
 const animatedInputs = computed(() => inspected.value.filter(entry => entry.webp?.hasAnimation))
 
 /** Preferences as the Rust side stores them, plus why it fell back if it did. */
@@ -161,6 +168,7 @@ onMounted(async () => {
 		const usable = dropped.filter(entry => entry.supported)
 		dropRejected.value = dropped.length - usable.length
 		if (usable.length > 0) {
+			scanned.value = []
 			inputPaths.value = usable.map(entry => entry.path)
 			inspected.value = usable
 		}
@@ -175,6 +183,7 @@ onUnmounted(() => {
 async function chooseInputs() {
 	const { open } = await import('@tauri-apps/plugin-dialog')
 	const picked = await open({ multiple: true, filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'jpe', 'jif', 'jfif', 'jfi', 'tif', 'tiff', 'webp'] }] })
+	scanned.value = []
 	if (Array.isArray(picked)) inputPaths.value = picked
 	else if (typeof picked === 'string') inputPaths.value = [picked]
 	await describeInputs()
@@ -190,6 +199,15 @@ async function describeInputs() {
 	catch {
 		inspected.value = []
 	}
+}
+
+async function chooseFolder() {
+	const { open } = await import('@tauri-apps/plugin-dialog')
+	const picked = await open({ directory: true })
+	if (typeof picked !== 'string') return
+	scanned.value = await invokeCommand<FoundImage[]>('scan_folder', { directory: picked, recursive: true })
+	inputPaths.value = scanned.value.map(entry => entry.path)
+	await describeInputs()
 }
 
 async function chooseOutput() {
@@ -227,7 +245,13 @@ async function convert() {
 	// Sequential, so one failure is attributed to its own file and the rest still run.
 	for (const input of inputPaths.value) {
 		try {
-			reports.value.push(await invokeCommand<ConversionReport>('convert_image', { settings: settings.value, input, outputDirectory: outputDirectory.value }))
+			// A folder scan can reproduce the source tree in the destination; a flat
+			// selection has no tree to reproduce.
+			const found = scanned.value.find(entry => entry.path === input)
+			const report = found && mirrorStructure.value
+				? await invokeCommand<ConversionReport>('convert_scanned', { settings: settings.value, input, relative: found.relative, outputRoot: outputDirectory.value })
+				: await invokeCommand<ConversionReport>('convert_image', { settings: settings.value, input, outputDirectory: outputDirectory.value })
+			reports.value.push(report)
 		}
 		catch (error) {
 			const message = error instanceof Error ? error.message : String(error)
@@ -354,6 +378,9 @@ function basename(path: string): string {
 								<UButton color="neutral" variant="subtle" block :disabled="!isTauri()" @click="chooseInputs">
 									Choose images…
 								</UButton>
+								<UButton color="neutral" variant="ghost" block size="xs" class="mt-1" :disabled="!isTauri()" @click="chooseFolder">
+									…or a whole folder
+								</UButton>
 								<p class="mt-2 truncate text-xs text-palenight-fg" data-selectable>
 									{{ inputPaths.length === 0 ? 'No files selected' : inputPaths.length === 1 ? basename(inputPaths[0]!) : `${inputPaths.length} files selected` }}
 								</p>
@@ -366,6 +393,13 @@ function basename(path: string): string {
 									{{ outputDirectory || 'No destination selected' }}
 								</p>
 							</div>
+						</div>
+						<div v-if="scanned.length > 0" class="flex flex-col items-center gap-2">
+							<p class="text-xs text-palenight-cyan">
+								Found {{ scanned.length }} image{{ scanned.length === 1 ? '' : 's' }} in that folder,
+								including subfolders. Symlinks are skipped.
+							</p>
+							<ControlToggle v-model="mirrorStructure" label="Recreate the folder structure in the destination" help="Off writes every converted file side by side in the destination." />
 						</div>
 						<p v-if="inspected.length === 1 && inspected[0]?.webp" class="text-center text-xs text-palenight-cyan" data-selectable>
 							Already a WebP: {{ inspected[0]!.webp!.width }}&times;{{ inspected[0]!.webp!.height }},

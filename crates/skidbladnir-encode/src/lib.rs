@@ -19,4 +19,4 @@ pub use cwebp::cwebp_args;
 pub use encoder::{EncodeError, RgbaImage, encode_rgba, encode_rgba_with_progress};
 pub use inspect::{WebpCompression, WebpInfo, inspect_webp};
 pub use settings::{AlphaFiltering, EncodeSettings, FilterType, Mode, Preset, Resize, TargetMetric, ValidationError};
-pub use source::{Conversion, ConvertError, PathInspection, SourceError, SourceFormat, SourceImage, encode_file, encode_file_with_progress, inspect_paths, load};
+pub use source::{Conversion, ConvertError, FoundImage, PathInspection, SourceError, SourceFormat, SourceImage, encode_file, encode_file_with_progress, inspect_paths, load, mirrored_output_path, scan_directory};

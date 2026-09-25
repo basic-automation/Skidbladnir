@@ -303,7 +303,16 @@ prettier subset.
       Names are trimmed, must be non-empty and at most 80 characters; settings the encoder
       would reject are refused on save and hidden on load; a damaged file reads as empty
       and is left on disk rather than destroyed.
-- [ ] Recursive directory input with an output-structure mirror.
+- [x] Recursive directory input with an output-structure mirror. "…or a whole folder"
+      scans a directory for images **by content**, and conversions reproduce the source
+      tree in the destination (toggleable — off writes everything side by side).
+      Three bounds, because a folder picker is an invitation to point at a home directory:
+      **symlinks are not followed** (a symlinked directory can point at its own ancestor,
+      which turns a scan into an endless walk, and a symlinked file can point outside the
+      tree the user thought they chose), the walk is depth-bounded at 32, and it stops at
+      10,000 files.
+      `mirrored_output_path` refuses any relative path containing `..`, an absolute path or
+      a path prefix, so a mirrored write cannot land outside the chosen folder.
 - [x] Keyboard-navigable and screen-reader-labelled controls. Audited in the running
       window rather than assumed: **all 32 focusable controls now have an accessible name**
       (3 did not — the preset-name and resize/target number fields, whose labels were

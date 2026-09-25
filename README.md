@@ -104,6 +104,8 @@ What the new app can already do:
   at their contents rather than their file extension.
 - Convert a batch of files, showing progress per file, with a Cancel button that stops
   without leaving a half-converted image behind.
+- Convert a whole folder, including subfolders, recreating its structure in the
+  destination.
 - Preview the result beside the original before anything is written to disk.
 - Tell you what an existing WebP already is — size, lossy or lossless, alpha — and warn
   when a file is an animation it cannot re-encode.

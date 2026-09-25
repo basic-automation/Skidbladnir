@@ -5,14 +5,14 @@
 //! because that is all the frontend can act on; the typed error stays on this side.
 
 use std::{
-	path::PathBuf, sync::{
+	path::{Path, PathBuf}, sync::{
 		Arc, atomic::{AtomicBool, Ordering}
 	}
 };
 
 use serde::Serialize;
 use skidbladnir_encode::{
-	encoder::{linked_decoder_version, linked_encoder_version}, settings::EncodeSettings, source::{Conversion, PathInspection, encode_file_with_progress, inspect_paths, output_path_in}
+	encoder::{linked_decoder_version, linked_encoder_version}, settings::EncodeSettings, source::{Conversion, FoundImage, PathInspection, encode_file_with_progress, inspect_paths, mirrored_output_path, output_path_in, scan_directory}
 };
 use tauri::{Emitter as _, Manager as _};
 
@@ -151,6 +151,55 @@ pub struct ConversionProgress {
 	/// libwebp does not guarantee a final call at 100, so this reaching 100 is not how
 	/// completion is detected — the command returning is.
 	pub percent: u32,
+}
+
+/// Find the images in a directory the user picked, optionally descending into it.
+///
+/// Symlinks are not followed and the walk is depth- and count-bounded, so dropping a home
+/// directory on the window produces a bounded answer rather than hanging it.
+#[tauri::command]
+#[must_use]
+#[expect(clippy::needless_pass_by_value, reason = "Tauri deserializes command arguments into owned values; the scanner borrows them")]
+pub fn scan_folder(directory: PathBuf, recursive: bool) -> Vec<FoundImage> {
+	scan_directory(&directory, recursive)
+}
+
+/// Convert one image found by a folder scan, mirroring its position under the scan root
+/// into the output directory.
+///
+/// Separate from [`convert_image`] because the destination is computed differently: a
+/// flat selection writes everything side by side, a folder scan reproduces the tree.
+///
+/// # Errors
+///
+/// Returns the failure as a string for display, including a refusal if the relative path
+/// would write outside the chosen output directory.
+#[tauri::command]
+pub async fn convert_scanned(app: tauri::AppHandle, state: tauri::State<'_, CancelFlag>, settings: EncodeSettings, input: PathBuf, relative: PathBuf, output_root: PathBuf) -> Result<ConversionReport, String> {
+	let Some(output_path) = mirrored_output_path(&output_root, &relative) else {
+		return Err(format!("refusing to write `{}`: it would land outside the chosen folder", relative.display()));
+	};
+	let Some(parent) = output_path.parent().map(Path::to_path_buf) else {
+		return Err("the output path has no parent directory".to_owned());
+	};
+	// The mirror only creates directories underneath the folder the user chose, which
+	// `mirrored_output_path` has already confirmed.
+	std::fs::create_dir_all(&parent).map_err(|error| format!("could not create `{}`: {error}", parent.display()))?;
+
+	let cancelled = Arc::clone(&state.0);
+	cancelled.store(false, Ordering::Relaxed);
+	let reporting_path = input.clone();
+
+	tauri::async_runtime::spawn_blocking(move || {
+		let conversion = encode_file_with_progress(&settings, &input, &output_path, &mut |percent| {
+			let _ = app.emit("conversion-progress", ConversionProgress { input_path: reporting_path.clone(), percent });
+			!cancelled.load(Ordering::Relaxed)
+		})
+		.map_err(|error| error.to_string())?;
+		Ok(ConversionReport { input_path: input, output_path, conversion })
+	})
+	.await
+	.map_err(|error| format!("the conversion thread failed: {error}"))?
 }
 
 /// Encode `input` with these settings **into memory** and return it beside the original,

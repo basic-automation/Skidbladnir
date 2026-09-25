@@ -218,6 +218,95 @@ fn read_prefix(path: &Path) -> Option<Vec<u8>> {
 	Some(prefix)
 }
 
+/// How deep a recursive scan will go.
+///
+/// A bound rather than unlimited recursion: a pathological tree (or a symlink arrangement
+/// this walker does not follow but a future one might) should not be able to hang the
+/// window.
+const MAX_SCAN_DEPTH: usize = 32;
+
+/// The most files a single scan will return.
+///
+/// Dropping a home directory on the window should produce a refusal, not a hundred
+/// thousand entries the UI then tries to render.
+const MAX_SCAN_FILES: usize = 10_000;
+
+/// An image found by scanning a directory, and where it sat relative to the scan root.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FoundImage {
+	/// The absolute path of the image.
+	pub path: PathBuf,
+	/// Its path relative to the directory that was scanned, used to mirror the structure
+	/// into the output directory.
+	pub relative: PathBuf,
+}
+
+/// Find the images in `root`, optionally descending into subdirectories.
+///
+/// Returns paths sorted, so a batch converts in a predictable order rather than whatever
+/// order the filesystem hands back.
+///
+/// **Symlinks are not followed.** A symlinked directory can point at its own ancestor, and
+/// following one turns a scan into an infinite walk; a symlinked *file* can point outside
+/// the tree the user thought they selected. Neither is worth the convenience.
+///
+/// Files are identified by content, as everywhere else, so a `.txt` that is really a PNG is
+/// found and a `.png` that is really text is not.
+#[must_use]
+pub fn scan_directory(root: &Path, recursive: bool) -> Vec<FoundImage> {
+	let mut found = Vec::new();
+	let mut queue = vec![(root.to_path_buf(), 0_usize)];
+
+	while let Some((directory, depth)) = queue.pop() {
+		let Ok(entries) = fs::read_dir(&directory) else { continue };
+		let mut children: Vec<PathBuf> = entries.filter_map(Result::ok).map(|entry| entry.path()).collect();
+		// Sorted, and reversed for the stack, so the output order is deterministic.
+		children.sort();
+		for path in children.into_iter().rev() {
+			if found.len() >= MAX_SCAN_FILES {
+				break;
+			}
+			// symlink_metadata does not traverse the link, which is the point.
+			let Ok(meta) = fs::symlink_metadata(&path) else { continue };
+			if meta.file_type().is_symlink() {
+				continue;
+			}
+			if meta.is_dir() {
+				if recursive && depth < MAX_SCAN_DEPTH {
+					queue.push((path, depth + 1));
+				}
+				continue;
+			}
+			if read_prefix(&path).as_deref().and_then(SourceFormat::sniff).is_some() {
+				let relative = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
+				found.push(FoundImage { path, relative });
+			}
+		}
+	}
+
+	found.sort_by(|a, b| a.path.cmp(&b.path));
+	found
+}
+
+/// Where a scanned image should be written, mirroring its position under the scan root.
+///
+/// Returns `None` if the relative path would escape `output_root` — a `..` component, an
+/// absolute path, or a Windows path prefix. That cannot arise from [`scan_directory`],
+/// whose relatives are built by `strip_prefix`, but this function is public and the
+/// consequence of getting it wrong is writing a file somewhere the user did not choose.
+#[must_use]
+pub fn mirrored_output_path(output_root: &Path, relative: &Path) -> Option<PathBuf> {
+	use std::path::Component;
+
+	let parent = relative.parent().unwrap_or(Path::new(""));
+	if parent.components().any(|component| !matches!(component, Component::Normal(_))) {
+		return None;
+	}
+	let directory = output_root.join(parent);
+	Some(output_path_in(directory, relative))
+}
+
 /// What a completed conversion did, for the UI's before/after readout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -626,6 +715,58 @@ mod tests {
 		fs::write(&empty, b"").expect("write the empty file");
 		let inspected = super::inspect_paths(&[tiny, empty]);
 		assert!(inspected.iter().all(|entry| !entry.supported), "{inspected:#?}");
+	}
+
+	#[test]
+	fn scans_a_directory_flat_and_recursively() {
+		let scratch = Scratch::new("scan");
+		write_png(&scratch.join("b.png"), 8, 8);
+		write_png(&scratch.join("a.png"), 8, 8);
+		fs::write(scratch.join("notes.txt"), b"not an image").expect("write");
+		let nested = scratch.join("nested");
+		fs::create_dir_all(nested.join("deeper")).expect("mkdir");
+		write_png(&nested.join("c.png"), 8, 8);
+		write_png(&nested.join("deeper").join("d.png"), 8, 8);
+
+		let flat = super::scan_directory(&scratch.0, false);
+		assert_eq!(flat.iter().map(|f| f.relative.to_string_lossy().into_owned()).collect::<Vec<_>>(), vec!["a.png", "b.png"], "a flat scan must not descend");
+
+		let deep = super::scan_directory(&scratch.0, true);
+		let relatives: Vec<String> = deep.iter().map(|f| f.relative.to_string_lossy().replace('\\', "/")).collect();
+		assert_eq!(relatives, vec!["a.png", "b.png", "nested/c.png", "nested/deeper/d.png"], "sorted and recursive");
+	}
+
+	/// A symlinked directory can point at its own ancestor; following one turns a scan into
+	/// an endless walk.
+	#[cfg(unix)]
+	#[test]
+	fn symlinks_are_not_followed() {
+		let scratch = Scratch::new("symlink");
+		write_png(&scratch.join("real.png"), 8, 8);
+		let loop_dir = scratch.join("loop");
+		std::os::unix::fs::symlink(&scratch.0, &loop_dir).expect("create the loop");
+		std::os::unix::fs::symlink(scratch.join("real.png"), scratch.join("link.png")).expect("link a file");
+
+		let found = super::scan_directory(&scratch.0, true);
+		assert_eq!(found.len(), 1, "only the real file: {found:#?}");
+		assert_eq!(found[0].relative.to_string_lossy(), "real.png");
+	}
+
+	#[test]
+	fn mirrors_the_structure_into_the_output_directory() {
+		let out = Path::new("/out");
+		assert_eq!(super::mirrored_output_path(out, Path::new("a.png")), Some(PathBuf::from("/out/a.webp")), "the output is a WebP, not a copy of the input name");
+		assert_eq!(super::mirrored_output_path(out, Path::new("nested/deeper/d.JPG")), Some(PathBuf::from("/out/nested/deeper/d.webp")));
+	}
+
+	/// The guard that matters: a relative path must never be able to write outside the
+	/// directory the user chose.
+	#[test]
+	fn a_relative_path_cannot_escape_the_output_directory() {
+		let out = Path::new("/out");
+		assert_eq!(super::mirrored_output_path(out, Path::new("../escaped.png")), None);
+		assert_eq!(super::mirrored_output_path(out, Path::new("nested/../../escaped.png")), None);
+		assert_eq!(super::mirrored_output_path(out, Path::new("/absolute/escaped.png")), None);
 	}
 
 	#[test]
