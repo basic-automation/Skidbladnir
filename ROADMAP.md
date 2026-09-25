@@ -25,14 +25,29 @@ the Electron app exposes today.
       **stable** Rust even though the dev host defaults to nightly.
 - [ ] Add `rustfmt.toml` and a clippy configuration matching the owner's other Rust
       repos (hard tabs, `-D warnings` in CI).
-- [ ] Decide and record the app's product identity: the repo is `Skidbladnir`, the
-      Electron `package.json` says `ba-nextgenimg`, the 2021 rewrite branch says
-      `skidblad`, and the README header says `ba | Next Generation Image`. Pick one
-      name, one appId, one binary name; write it here as the answer.
-- [ ] Triage `origin/copilot/add-resize-control-option` — the only unmerged branch.
-      Either land it on the Electron app or close it as superseded by the Tauri port.
-- [ ] Declare `origin/Skidbladnir` (the cold 2021 Vue 3 POC) dead, and say so in this
-      file, so no future run mistakes it for the migration target.
+- [x] Decide and record the app's product identity. **The answer:** the product is
+      **Skidbladnir** — the repo name, the name every released tag carries, and the
+      only one of the four candidates a user has ever seen. Concretely:
+      - Product / window title / release name: **Skidbladnir**
+      - `appId` (Tauri + electron-builder): **`com.basicautomation.skidbladnir`**
+      - Binary, crate and Nuxt package name: **`skidbladnir`**
+      - Rejected: `ba-nextgenimg` (an internal slug), `skidblad` (a truncation from the
+        dead 2021 branch), `ba | Next Generation Image` (a description, not a name).
+      The Electron `package.json` keeps `name: ba-nextgenimg` and `appId: ba.nextgenimg`
+      until Phase 6 retires it — renaming it now would change the electron-builder output
+      path that the shipped v0.4.3 artifact uses, for an app that is being deleted anyway.
+- [x] Triage `origin/copilot/add-resize-control-option`. **The answer: there was
+      nothing to land.** PR #31 merged it on 2026-06-04 and
+      `git merge-base --is-ancestor origin/copilot/add-resize-control-option master`
+      confirms the tip is an ancestor of `master` with an empty diff — it is a stale
+      post-merge branch, not unmerged work. Deleted from the remote.
+- [x] Declare `origin/Skidbladnir` (the cold 2021 Vue 3 POC) dead. **It is dead.**
+      `master` is the only codeline. Do not revive that branch, do not port from it, and
+      do not mistake it for the migration target: it is a Vue 3 + Vite proof of concept
+      abandoned in 2021, predating this Tauri 2 + Nuxt decision entirely. It is kept on
+      the remote for archaeology only — the one thing it is good for is prior art on the
+      settings-store shape, and even that must be re-derived against the Electron app's
+      real control surface rather than trusted.
 
 ## Phase 1 — Tauri 2 + Nuxt + Tailwind scaffold
 
