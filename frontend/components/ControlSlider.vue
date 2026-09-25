@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// A labelled range control with a live numeric readout, which is what the Electron UI's
-// `-info` spans were for.
+// A labelled slider with a live numeric readout — the job the Electron UI's `-info`
+// spans did, kept in one place instead of wired up nine times.
 const model = defineModel<number>({ required: true })
 
 defineProps<{
@@ -14,20 +14,22 @@ defineProps<{
 </script>
 
 <template>
-	<label class="block" :class="disabled && 'opacity-40'">
-		<span class="flex items-baseline justify-between gap-3">
-			<span class="text-sm font-medium">{{ label }}</span>
-			<output class="font-mono text-sm tabular-nums text-slate-600 dark:text-slate-300">{{ model }}</output>
-		</span>
-		<input
-			v-model.number="model"
-			type="range"
+	<div class="text-left" :class="disabled && 'opacity-40'">
+		<div class="flex items-baseline justify-between gap-3">
+			<span class="text-sm font-medium text-palenight-bright">{{ label }}</span>
+			<output class="font-mono text-sm tabular-nums text-palenight-green">{{ model }}</output>
+		</div>
+		<USlider
+			v-model="model"
+			class="mt-2"
 			:min="min"
 			:max="max"
 			:step="step ?? 1"
 			:disabled="disabled"
-			class="mt-1 w-full accent-sky-600"
-		>
-		<span v-if="help" class="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">{{ help }}</span>
-	</label>
+			size="sm"
+		/>
+		<p v-if="help" class="mt-1 text-xs text-palenight-comment">
+			{{ help }}
+		</p>
+	</div>
 </template>

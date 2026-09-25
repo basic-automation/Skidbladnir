@@ -247,7 +247,23 @@ prettier subset.
       percentage.
 - [x] Original vs converted size readout — a results table with before, after, the
       percentage change and the encoded dimensions, per file.
-- [x] Dark mode (Tailwind), following the system preference.
+- [x] Theming. **Owner directive 2026-09-24: keep the Electron app's design, restyled in
+      the Tailwind Palenight palette, using a skinned component library.** Delivered as:
+      - **Nuxt UI 4** for the components (chosen over shadcn-vue: it is a Nuxt module, so
+        it owns the Tailwind 4 integration and needs no per-component vendoring).
+      - The **Material Theme Palenight** palette written out as Tailwind `@theme` colours
+        in `frontend/assets/css/main.css`, with Nuxt UI's semantic tokens (`--ui-bg`,
+        `--ui-primary`, …) re-pointed at it, so every component it renders is skinned by
+        default rather than restyled one at a time.
+      - The Electron app's **layout kept**: the full-width dot-textured header band with a
+        large centred title, the 2px **dotted** borders around option groups, the
+        two-column control rows, the fixed dot-textured footer, and the circular accent
+        FAB bottom-right. Only the palette moved.
+      The app is dark-only, which is what the Palenight theme is; there is no light variant
+      to follow the system preference into.
+- [x] Bundle the icon set (`@iconify-json/lucide`) rather than letting Nuxt UI fetch icons
+      from the Iconify API at runtime — a desktop app cannot assume network access, and an
+      icon that silently fails to load offline is a broken window. 43 icons, 10.4 KB.
 
 ## Phase 4 — Beyond parity
 

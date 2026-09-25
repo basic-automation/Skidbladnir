@@ -1,7 +1,74 @@
 @import "tailwindcss";
+@import "@nuxt/ui";
 
-/* Skidbladnir is a desktop window, not a web page: no document scroll, no text
-   selection on chrome, and no overscroll bounce. */
+/* ---------------------------------------------------------------------------
+   Palenight
+   ---------------------------------------------------------------------------
+   The Material Theme Palenight palette, as the app's own colour scale. These are
+   the theme's canonical values; they are written out here rather than pulled from
+   a package so there is exactly one place to read them.
+
+   The old Electron app was near-black (#0e1214) with white text, a white header
+   band, dotted-bordered option groups and a single green accent. That structure is
+   kept; only the colours move to Palenight, whose own greens and blues stand in for
+   the old rgba(71,171,108).
+   --------------------------------------------------------------------------- */
+@theme {
+	--color-palenight-bg: #292d3e;
+	--color-palenight-panel: #232635;
+	--color-palenight-raised: #343a51;
+	--color-palenight-selection: #444267;
+	--color-palenight-line: #4e5579;
+	--color-palenight-comment: #676e95;
+	--color-palenight-fg: #a6accd;
+	--color-palenight-bright: #bfc7d5;
+
+	--color-palenight-red: #ff5370;
+	--color-palenight-orange: #f78c6c;
+	--color-palenight-yellow: #ffcb6b;
+	--color-palenight-green: #c3e88d;
+	--color-palenight-cyan: #89ddff;
+	--color-palenight-blue: #82aaff;
+	--color-palenight-paleblue: #b2ccd6;
+	--color-palenight-purple: #c792ea;
+	--color-palenight-pink: #f07178;
+	--color-palenight-violet: #bb80b3;
+
+	--font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Nuxt UI's semantic tokens, re-pointed at Palenight so every component it renders
+   is skinned by default instead of being restyled one at a time. */
+:root,
+.dark {
+	--ui-bg: var(--color-palenight-bg);
+	--ui-bg-muted: var(--color-palenight-panel);
+	--ui-bg-elevated: var(--color-palenight-raised);
+	--ui-bg-accented: var(--color-palenight-selection);
+	--ui-bg-inverted: var(--color-palenight-bright);
+
+	--ui-text-dimmed: var(--color-palenight-comment);
+	--ui-text-muted: var(--color-palenight-comment);
+	--ui-text-toned: var(--color-palenight-fg);
+	--ui-text: var(--color-palenight-fg);
+	--ui-text-highlighted: var(--color-palenight-bright);
+	--ui-text-inverted: var(--color-palenight-bg);
+
+	--ui-border: var(--color-palenight-line);
+	--ui-border-muted: var(--color-palenight-selection);
+	--ui-border-accented: var(--color-palenight-comment);
+	--ui-border-inverted: var(--color-palenight-bright);
+
+	--ui-primary: var(--color-palenight-green);
+	--ui-secondary: var(--color-palenight-blue);
+	--ui-success: var(--color-palenight-green);
+	--ui-info: var(--color-palenight-cyan);
+	--ui-warning: var(--color-palenight-yellow);
+	--ui-error: var(--color-palenight-red);
+
+	--ui-radius: 0.375rem;
+}
+
 @layer base {
 	html,
 	body,
@@ -10,6 +77,10 @@
 	}
 
 	body {
+		background-color: var(--color-palenight-bg);
+		color: var(--color-palenight-fg);
+		/* A desktop window, not a web page: no overscroll bounce and no accidental
+		   selection of the chrome. */
 		overscroll-behavior: none;
 		-webkit-user-select: none;
 		user-select: none;
@@ -22,4 +93,27 @@
 		-webkit-user-select: text;
 		user-select: text;
 	}
+
+	/* The Electron app hid its scrollbars; the window keeps that, without also
+	   disabling scrolling the way `display: none` on the track can. */
+	*::-webkit-scrollbar {
+		width: 8px;
+		height: 8px;
+	}
+
+	*::-webkit-scrollbar-thumb {
+		background-color: var(--color-palenight-selection);
+		border-radius: 4px;
+	}
+
+	*::-webkit-scrollbar-track {
+		background: transparent;
+	}
+}
+
+/* The old app's signature: header and footer bands carrying a repeating radial-gradient
+   dot texture. Reproduced with the Palenight foreground instead of black-on-white. */
+@utility dot-texture {
+	background-image: radial-gradient(var(--color-palenight-comment) 1px, transparent 1px);
+	background-size: 10px 10px;
 }

@@ -11,13 +11,14 @@
     "postinstall": "nuxt prepare"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.1.0",
+    "@iconify-json/lucide": "^1.2.136",
     "nuxt": "^4.0.0",
     "tailwindcss": "^4.1.0",
     "vue": "^3.5.0",
     "vue-router": "^4.4.0"
   },
   "dependencies": {
+    "@nuxt/ui": "^4.11.2",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0"
   }

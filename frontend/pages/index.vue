@@ -1,12 +1,15 @@
 <script setup lang="ts">
-// The conversion screen. Every control the Electron app exposed is here, with the same
-// ranges, the same grouping and the same show/hide behaviour — that behaviour is real
-// (the advanced controls only reach the encoder in lossy mode), so hiding them elsewhere
-// is honesty rather than tidiness.
+// The conversion screen, following the Electron app's layout: a full-width dotted header
+// band with a large centred title, dotted-bordered option groups laid out two to a row,
+// and a circular accent FAB bottom-right for the action. Only the palette has moved, to
+// Palenight, and the controls are Nuxt UI components skinned by the tokens in main.css.
 //
-// Help text is taken from `cwebp -longhelp`, i.e. libwebp's own wording. The Electron app
-// was not a source for it: its `-info` spans are live value readouts, and it has exactly
-// one tooltip in the whole UI.
+// The show/hide behaviour is reproduced because it is real encoder behaviour: the advanced
+// controls only reach the encoder in lossy mode, so offering them elsewhere would promise
+// an effect that will not happen.
+//
+// Help text is libwebp's own wording from `cwebp -longhelp`. The Electron app was not a
+// source for it: its `-info` spans are live value readouts and it has one tooltip in total.
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { ConversionReport, EncodeSettings, Mode, Preset } from '~/composables/useSettings'
 import { formatBytes, usesLossyOptions, usesManualFilter } from '~/composables/useSettings'
@@ -31,16 +34,37 @@ interface PathInspection { path: string, supported: boolean, format: string | nu
 
 const MODES: { value: Mode, label: string, help: string }[] = [
 	{ value: 'lossy', label: 'Lossy', help: 'Ordinary WebP. The only mode with the advanced controls.' },
-	{ value: 'lossless', label: 'Lossless', help: 'Exact pixels, larger files. Preserves colour under transparency.' },
-	{ value: 'nearLossless', label: 'Near-lossless', help: 'Lossless with preprocessing; the quality slider sets the level.' },
+	{ value: 'lossless', label: 'Lossless', help: 'Exact pixels, larger files. Keeps colour under transparency.' },
+	{ value: 'nearLossless', label: 'Near-lossless', help: 'Lossless with preprocessing; quality sets the level.' },
 	{ value: 'jpegLike', label: 'JPEG-like', help: 'Roughly match the size a JPEG of this quality would be.' },
 	{ value: 'preset', label: 'Preset', help: 'Use one of libwebp\'s tuned parameter sets.' },
 ]
 
-const PRESETS: Preset[] = ['default', 'photo', 'picture', 'drawing', 'icon', 'text']
+const PRESET_ITEMS = [
+	{ label: 'Select a preset', value: null },
+	{ label: 'Default', value: 'default' },
+	{ label: 'Photo', value: 'photo' },
+	{ label: 'Picture', value: 'picture' },
+	{ label: 'Drawing', value: 'drawing' },
+	{ label: 'Icon', value: 'icon' },
+	{ label: 'Text', value: 'text' },
+] satisfies { label: string, value: Preset | null }[]
+
+const FILTER_ITEMS = [
+	{ label: 'Auto', value: 'auto' },
+	{ label: 'Simple', value: 'simple' },
+	{ label: 'Strong', value: 'strong' },
+]
+
+const TARGET_ITEMS = [
+	{ label: 'Use quality', value: 'none' },
+	{ label: 'Target file size', value: 'size' },
+	{ label: 'Target PSNR', value: 'psnr' },
+]
 
 const lossy = computed(() => (settings.value ? usesLossyOptions(settings.value.mode) : false))
 const manualFilter = computed(() => (settings.value ? usesManualFilter(settings.value.filter) : false))
+const basicOnly = computed(() => settings.value?.mode === 'nearLossless' || settings.value?.mode === 'preset')
 
 // The quality slider is relabelled per mode, because libwebp genuinely reinterprets it.
 const qualityLabel = computed(() => {
@@ -52,7 +76,7 @@ const qualityLabel = computed(() => {
 })
 const qualityHelp = computed(() => {
 	switch (settings.value?.mode) {
-		case 'lossless': return '0 is fastest and largest, 100 is slowest and smallest. Not a fidelity control here.'
+		case 'lossless': return '0 is fastest and largest, 100 slowest and smallest. Not fidelity here.'
 		case 'nearLossless': return '0 is maximum loss, 100 is off.'
 		default: return 'quality factor (0: small .. 100: big)'
 	}
@@ -91,9 +115,9 @@ onMounted(async () => {
 		if (event.payload.type !== 'drop') return
 		dragging.value = false
 
-		// Which files are usable is decided by the Rust core, by reading each file's
-		// leading bytes — never by matching extensions here, which would let the UI accept
-		// something the loader then refuses.
+		// Which files are usable is decided by the Rust core, by reading each file's leading
+		// bytes — never by matching extensions here, which would let the UI accept something
+		// the loader then refuses.
 		const inspected = await invokeCommand<PathInspection[]>('inspect_dropped_paths', { paths: event.payload.paths })
 		const usable = inspected.filter(entry => entry.supported).map(entry => entry.path)
 		dropRejected.value = inspected.length - usable.length
@@ -152,10 +176,11 @@ async function convert() {
 	busy.value = false
 }
 
-function saving(report: ConversionReport): string {
-	if (report.sourceBytes === 0) return ''
-	const percent = ((report.sourceBytes - report.outputBytes) / report.sourceBytes) * 100
-	return `${percent >= 0 ? '-' : '+'}${Math.abs(percent).toFixed(1)}%`
+const converted = computed(() => reports.value.length > 0 && failures.value.length === 0 && !busy.value)
+
+function savingOf(report: ConversionReport): number {
+	if (report.sourceBytes === 0) return 0
+	return ((report.sourceBytes - report.outputBytes) / report.sourceBytes) * 100
 }
 
 function basename(path: string): string {
@@ -164,192 +189,220 @@ function basename(path: string): string {
 </script>
 
 <template>
-	<main class="relative mx-auto flex min-h-full max-w-5xl flex-col gap-5 p-6 text-slate-900 dark:text-slate-100">
-		<div v-if="dragging" class="pointer-events-none fixed inset-3 z-50 flex items-center justify-center rounded-xl border-2 border-dashed border-sky-500 bg-sky-50/80 text-lg font-semibold text-sky-700 dark:bg-sky-950/80 dark:text-sky-300">
-			Drop images to convert
-		</div>
-		<header class="flex items-baseline justify-between gap-4">
-			<div>
-				<h1 class="text-2xl font-semibold tracking-tight">
-					Skidbladnir
-				</h1>
-				<p class="text-sm text-slate-600 dark:text-slate-400">
-					Convert images to WebP, with the whole encoder exposed.
-				</p>
-			</div>
-			<p v-if="backendVersion" class="font-mono text-xs text-slate-500" data-selectable>
-				{{ backendVersion }}
+	<div class="flex min-h-full flex-col bg-palenight-bg">
+		<!-- The old app's header: a full-width band with a dot texture and a large centred
+		     title. White-on-black there; the Palenight surface here. -->
+		<header class="dot-texture w-full border-b border-palenight-line bg-palenight-selection/60">
+			<h1 class="py-10 text-center text-3xl font-extrabold tracking-tight text-palenight-bright">
+				Skidbladnir
+			</h1>
+			<p class="-mt-6 pb-8 text-center text-sm text-palenight-fg">
+				Convert images to next-generation formats, with the whole encoder exposed.
 			</p>
 		</header>
 
-		<p v-if="startupError" class="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-			{{ startupError }}
-		</p>
+		<div
+			v-if="dragging"
+			class="pointer-events-none fixed inset-4 z-50 flex items-center justify-center rounded-lg border-2 border-dashed border-palenight-green bg-palenight-bg/85 text-lg font-semibold text-palenight-green"
+		>
+			Drop images to convert
+		</div>
 
-		<template v-if="settings">
-			<ControlPanel title="Files">
-				<div class="flex flex-wrap items-center gap-3">
-					<button type="button" class="rounded border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800" :disabled="!isTauri()" @click="chooseInputs">
-						Choose images&hellip;
-					</button>
-					<span class="text-sm text-slate-600 dark:text-slate-400">
-						{{ inputPaths.length === 0 ? 'No files selected' : `${inputPaths.length} file${inputPaths.length === 1 ? '' : 's'} selected` }}
-					</span>
-				</div>
-				<div class="flex flex-wrap items-center gap-3">
-					<button type="button" class="rounded border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800" :disabled="!isTauri()" @click="chooseOutput">
-						Choose destination&hellip;
-					</button>
-					<span class="truncate text-sm text-slate-600 dark:text-slate-400" data-selectable>
-						{{ outputDirectory || 'No destination selected' }}
-					</span>
-				</div>
-				<p v-if="dropRejected > 0" class="text-xs text-amber-600 dark:text-amber-400">
-					{{ dropRejected }} dropped {{ dropRejected === 1 ? 'file was' : 'files were' }} not a
-					PNG, JPEG, TIFF or WebP and {{ dropRejected === 1 ? 'was' : 'were' }} skipped.
-				</p>
-				<p class="text-xs text-slate-500 dark:text-slate-400">
-					PNG, JPEG, TIFF and WebP &mdash; drop them anywhere on the window, or use the
-					button. Converted files are written as <code>&lt;name&gt;.webp</code> in the
-					destination. Your originals are never written over.
-				</p>
-			</ControlPanel>
+		<main class="mx-auto w-full max-w-5xl grow px-5 pt-8 pb-36">
+			<UAlert
+				v-if="startupError"
+				color="warning"
+				variant="subtle"
+				title="Not connected to the encoder"
+				:description="startupError"
+				class="mb-6"
+			/>
 
-			<ControlPanel title="Mode">
-				<div class="grid gap-2 sm:grid-cols-2">
-					<label v-for="mode in MODES" :key="mode.value" class="flex gap-2 rounded border border-transparent p-1 hover:border-slate-200 dark:hover:border-slate-800">
-						<input v-model="settings.mode" type="radio" name="mode" :value="mode.value" class="mt-0.5 size-4 shrink-0 accent-sky-600">
-						<span>
-							<span class="text-sm font-medium">{{ mode.label }}</span>
-							<span class="block text-xs text-slate-500 dark:text-slate-400">{{ mode.help }}</span>
-						</span>
-					</label>
-				</div>
-
-				<label v-if="settings.mode === 'preset'" class="block">
-					<span class="text-sm font-medium">Preset</span>
-					<select v-model="settings.preset" class="mt-1 block w-full rounded border border-slate-300 bg-white p-1.5 text-sm dark:border-slate-700 dark:bg-slate-900">
-						<option :value="null">Select a preset</option>
-						<option v-for="preset in PRESETS" :key="preset" :value="preset">{{ preset }}</option>
-					</select>
-					<span v-if="!settings.preset" class="mt-0.5 block text-xs text-amber-600 dark:text-amber-400">Pick a preset before converting.</span>
-				</label>
-			</ControlPanel>
-
-			<ControlPanel title="Quality">
-				<ControlSlider v-model="settings.quality" :label="qualityLabel" :min="0" :max="100" :help="qualityHelp" />
-				<ControlSlider v-model="settings.alphaQuality" label="Alpha quality" :min="0" :max="100" help="transparency-compression quality (0..100)" :disabled="settings.mode === 'nearLossless' || settings.mode === 'preset'" />
-				<ControlSlider v-model="settings.method" label="Compression method" :min="0" :max="6" help="0 = fast, 6 = slowest and smallest" :disabled="settings.mode === 'nearLossless' || settings.mode === 'preset'" />
-				<div class="grid grid-cols-2 gap-3">
-					<label class="block">
-						<span class="text-sm font-medium">Resize width</span>
-						<input v-model.number="settings.resize.width" type="number" min="0" step="1" class="mt-1 w-full rounded border border-slate-300 bg-white p-1.5 text-sm dark:border-slate-700 dark:bg-slate-900">
-					</label>
-					<label class="block">
-						<span class="text-sm font-medium">Resize height</span>
-						<input v-model.number="settings.resize.height" type="number" min="0" step="1" class="mt-1 w-full rounded border border-slate-300 bg-white p-1.5 text-sm dark:border-slate-700 dark:bg-slate-900">
-					</label>
-				</div>
-				<p class="text-xs text-slate-500 dark:text-slate-400">
-					Resize is applied before encoding. Leave both at 0 for no resize; set one to 0
-					to derive it from the other and keep the aspect ratio.
-				</p>
-			</ControlPanel>
-
-			<details v-if="lossy" class="rounded-lg border border-slate-200 dark:border-slate-800" open>
-				<summary class="cursor-pointer p-4 text-xs font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-400">
-					Advanced options
-				</summary>
-				<div class="flex flex-col gap-5 border-t border-slate-200 p-4 dark:border-slate-800">
-					<div class="flex flex-col gap-4">
-						<ControlSlider v-model="settings.sns" label="Spatial noise shaping" :min="0" :max="100" help="0 = off, 100 = maximum" />
-						<ControlSlider v-model="settings.segments" label="Segments" :min="1" :max="4" help="number of segments to use (1..4)" />
-						<ControlSlider v-model="settings.partitionLimit" label="Partition limit" :min="0" :max="100" help="quality degradation allowed to fit the 512k limit on prediction modes" />
-						<ControlSlider v-model="settings.passes" label="Analysis passes" :min="1" :max="10" help="analysis pass number (1..10)" />
-					</div>
-
-					<div class="flex flex-col gap-3 border-t border-slate-200 pt-4 dark:border-slate-800">
-						<span class="text-sm font-medium">Deblocking filter</span>
-						<div class="flex flex-wrap gap-4">
-							<label v-for="option in (['auto', 'simple', 'strong'] as const)" :key="option" class="flex items-center gap-1.5">
-								<input v-model="settings.filter" type="radio" name="filter" :value="option" class="size-4 accent-sky-600">
-								<span class="text-sm capitalize">{{ option }}</span>
-							</label>
+			<template v-if="settings">
+				<div class="flex flex-col gap-5">
+					<ControlPanel title="Files">
+						<div class="grid gap-4 sm:grid-cols-2">
+							<div class="text-left">
+								<UButton color="neutral" variant="subtle" block :disabled="!isTauri()" @click="chooseInputs">
+									Choose images…
+								</UButton>
+								<p class="mt-2 truncate text-xs text-palenight-fg" data-selectable>
+									{{ inputPaths.length === 0 ? 'No files selected' : inputPaths.length === 1 ? basename(inputPaths[0]!) : `${inputPaths.length} files selected` }}
+								</p>
+							</div>
+							<div class="text-left">
+								<UButton color="neutral" variant="subtle" block :disabled="!isTauri()" @click="chooseOutput">
+									Choose destination…
+								</UButton>
+								<p class="mt-2 truncate text-xs text-palenight-fg" data-selectable>
+									{{ outputDirectory || 'No destination selected' }}
+								</p>
+							</div>
 						</div>
-						<p class="text-xs text-slate-500 dark:text-slate-400">
-							Auto lets the encoder pick the strength, so the two sliders below do not apply.
+						<p v-if="dropRejected > 0" class="text-center text-xs text-palenight-yellow">
+							{{ dropRejected }} dropped {{ dropRejected === 1 ? 'file was' : 'files were' }} not a
+							PNG, JPEG, TIFF or WebP and {{ dropRejected === 1 ? 'was' : 'were' }} skipped.
 						</p>
-						<ControlSlider v-model="settings.filterStrength" label="Filter strength" :min="0" :max="100" help="0 = off .. 100 = strongest" :disabled="!manualFilter" />
-						<ControlSlider v-model="settings.filterSharpness" label="Filter sharpness" :min="0" :max="7" help="0 = most sharp .. 7 = least sharp" :disabled="!manualFilter" />
-					</div>
+						<p class="text-center text-xs text-palenight-comment">
+							PNG, JPEG, TIFF and WebP — drop them anywhere on the window, or use the button.
+							Converted files are written as <code class="text-palenight-cyan">&lt;name&gt;.webp</code>
+							in the destination. Your originals are never written over.
+						</p>
+					</ControlPanel>
 
-					<div class="flex flex-col gap-3 border-t border-slate-200 pt-4 dark:border-slate-800">
-						<span class="text-sm font-medium">Compression target</span>
-						<div class="flex flex-wrap gap-4">
-							<label v-for="option in (['none', 'size', 'psnr'] as const)" :key="option" class="flex items-center gap-1.5">
-								<input v-model="targetKind" type="radio" name="target" :value="option" class="size-4 accent-sky-600">
-								<span class="text-sm">{{ option === 'none' ? 'Use quality' : option === 'size' ? 'Target file size' : 'Target PSNR' }}</span>
-							</label>
+					<ControlPanel title="Mode">
+						<div class="grid gap-3 sm:grid-cols-2">
+							<button
+								v-for="mode in MODES"
+								:key="mode.value"
+								type="button"
+								class="rounded-md border px-3 py-2 text-left transition-colors"
+								:class="settings.mode === mode.value
+									? 'border-palenight-green bg-palenight-green/10'
+									: 'border-palenight-selection hover:border-palenight-comment'"
+								@click="settings.mode = mode.value"
+							>
+								<span class="block text-sm font-semibold" :class="settings.mode === mode.value ? 'text-palenight-green' : 'text-palenight-bright'">{{ mode.label }}</span>
+								<span class="block text-xs text-palenight-comment">{{ mode.help }}</span>
+							</button>
 						</div>
-						<p class="text-xs text-slate-500 dark:text-slate-400">
-							A size or PSNR target overrides the quality slider.
-						</p>
-						<label v-if="targetKind === 'size'" class="block">
-							<span class="text-sm font-medium">Target size (bytes)</span>
-							<input v-model.number="targetSize" type="number" min="1" step="1" class="mt-1 w-full rounded border border-slate-300 bg-white p-1.5 text-sm dark:border-slate-700 dark:bg-slate-900">
-						</label>
-						<ControlSlider v-if="targetKind === 'psnr'" v-model="targetPsnr" label="Target PSNR (dB)" :min="1" :max="10000" help="typically around 42" />
-					</div>
 
-					<div class="flex flex-col gap-3 border-t border-slate-200 pt-4 dark:border-slate-800">
-						<ControlToggle v-model="settings.sharpYuv" label="Sharp YUV" help="use sharper (and slower) RGB to YUV conversion" />
-						<ControlToggle v-model="settings.lowMemory" label="Low memory" help="reduce memory usage (slower encoding)" />
-						<ControlToggle v-model="settings.multiThreading" label="Multi-threading" help="use multi-threading if available" />
-					</div>
+						<div v-if="settings.mode === 'preset'" class="mx-auto w-full max-w-sm text-left">
+							<span class="text-sm font-medium text-palenight-bright">Preset</span>
+							<USelect v-model="settings.preset" :items="PRESET_ITEMS" class="mt-1 w-full" />
+							<p v-if="!settings.preset" class="mt-1 text-xs text-palenight-yellow">
+								Pick a preset before converting.
+							</p>
+						</div>
+					</ControlPanel>
+
+					<ControlPanel title="Quality">
+						<div class="grid gap-5 sm:grid-cols-2">
+							<ControlSlider v-model="settings.quality" :label="qualityLabel" :min="0" :max="100" :help="qualityHelp" />
+							<ControlSlider v-model="settings.alphaQuality" label="Alpha quality" :min="0" :max="100" help="transparency-compression quality (0..100)" :disabled="basicOnly" />
+							<ControlSlider v-model="settings.method" label="Compression method" :min="0" :max="6" help="0 = fast, 6 = slowest and smallest" :disabled="basicOnly" />
+							<div class="grid grid-cols-2 gap-3 text-left">
+								<div>
+									<span class="text-sm font-medium text-palenight-bright">Resize width</span>
+									<UInput v-model.number="settings.resize.width" type="number" :min="0" class="mt-1 w-full" />
+								</div>
+								<div>
+									<span class="text-sm font-medium text-palenight-bright">Resize height</span>
+									<UInput v-model.number="settings.resize.height" type="number" :min="0" class="mt-1 w-full" />
+								</div>
+								<p class="col-span-2 text-xs text-palenight-comment">
+									Applied before encoding. Both 0 means no resize; set one to 0 to derive it
+									and keep the aspect ratio.
+								</p>
+							</div>
+						</div>
+					</ControlPanel>
+
+					<!-- The Electron app kept the expert controls behind a disclosure. -->
+					<ControlPanel v-if="lossy" title="Advanced options">
+						<div class="grid gap-5 sm:grid-cols-2">
+							<ControlSlider v-model="settings.sns" label="Spatial noise shaping" :min="0" :max="100" help="0 = off, 100 = maximum" />
+							<ControlSlider v-model="settings.segments" label="Segments" :min="1" :max="4" help="number of segments to use (1..4)" />
+							<ControlSlider v-model="settings.partitionLimit" label="Partition limit" :min="0" :max="100" help="degradation allowed to fit the 512k prediction-mode limit" />
+							<ControlSlider v-model="settings.passes" label="Analysis passes" :min="1" :max="10" help="analysis pass number (1..10)" />
+						</div>
+
+						<div class="grid gap-5 border-t border-dotted border-palenight-selection pt-5 sm:grid-cols-2">
+							<div class="text-left">
+								<span class="text-sm font-medium text-palenight-bright">Deblocking filter</span>
+								<URadioGroup v-model="settings.filter" :items="FILTER_ITEMS" orientation="horizontal" class="mt-2" />
+								<p class="mt-1 text-xs text-palenight-comment">
+									Auto lets the encoder pick the strength, so the two sliders do not apply.
+								</p>
+							</div>
+							<div class="flex flex-col gap-5">
+								<ControlSlider v-model="settings.filterStrength" label="Filter strength" :min="0" :max="100" help="0 = off .. 100 = strongest" :disabled="!manualFilter" />
+								<ControlSlider v-model="settings.filterSharpness" label="Filter sharpness" :min="0" :max="7" help="0 = most sharp .. 7 = least sharp" :disabled="!manualFilter" />
+							</div>
+						</div>
+
+						<div class="grid gap-5 border-t border-dotted border-palenight-selection pt-5 sm:grid-cols-2">
+							<div class="text-left">
+								<span class="text-sm font-medium text-palenight-bright">Compression target</span>
+								<URadioGroup v-model="targetKind" :items="TARGET_ITEMS" class="mt-2" />
+								<p class="mt-1 text-xs text-palenight-comment">
+									A size or PSNR target overrides the quality slider.
+								</p>
+							</div>
+							<div class="flex flex-col gap-5">
+								<div v-if="targetKind === 'size'" class="text-left">
+									<span class="text-sm font-medium text-palenight-bright">Target size (bytes)</span>
+									<UInput v-model.number="targetSize" type="number" :min="1" class="mt-1 w-full" />
+								</div>
+								<ControlSlider v-if="targetKind === 'psnr'" v-model="targetPsnr" label="Target PSNR (dB)" :min="1" :max="10000" help="typically around 42" />
+							</div>
+						</div>
+
+						<div class="grid gap-3 border-t border-dotted border-palenight-selection pt-5 sm:grid-cols-3">
+							<ControlToggle v-model="settings.sharpYuv" label="Sharp YUV" help="sharper (and slower) RGB to YUV" />
+							<ControlToggle v-model="settings.lowMemory" label="Low memory" help="less memory, slower encoding" />
+							<ControlToggle v-model="settings.multiThreading" label="Multi-threading" help="use multi-threading if available" />
+						</div>
+					</ControlPanel>
+
+					<UAlert v-if="validationError" color="error" variant="subtle" :description="validationError" />
+
+					<ControlPanel v-if="reports.length || failures.length" title="Results">
+						<table v-if="reports.length" class="w-full text-left text-sm">
+							<thead class="text-xs tracking-wide text-palenight-comment uppercase">
+								<tr>
+									<th class="py-1">File</th>
+									<th class="py-1 text-right">Before</th>
+									<th class="py-1 text-right">After</th>
+									<th class="py-1 text-right">Change</th>
+									<th class="py-1 text-right">Size</th>
+								</tr>
+							</thead>
+							<tbody class="font-mono tabular-nums text-palenight-fg">
+								<tr v-for="report in reports" :key="report.outputPath" class="border-t border-palenight-selection">
+									<td class="py-1 pr-2 font-sans text-palenight-bright" data-selectable>{{ basename(report.outputPath) }}</td>
+									<td class="py-1 text-right">{{ formatBytes(report.sourceBytes) }}</td>
+									<td class="py-1 text-right">{{ formatBytes(report.outputBytes) }}</td>
+									<td class="py-1 text-right" :class="savingOf(report) >= 0 ? 'text-palenight-green' : 'text-palenight-orange'">
+										{{ savingOf(report) >= 0 ? '−' : '+' }}{{ Math.abs(savingOf(report)).toFixed(1) }}%
+									</td>
+									<td class="py-1 text-right">{{ report.width }}×{{ report.height }}</td>
+								</tr>
+							</tbody>
+						</table>
+						<ul v-if="failures.length" class="flex flex-col gap-1 text-left text-sm text-palenight-red">
+							<li v-for="failure in failures" :key="failure.path" data-selectable>
+								<strong class="text-palenight-bright">{{ basename(failure.path) }}</strong>: {{ failure.message }}
+							</li>
+						</ul>
+					</ControlPanel>
 				</div>
-			</details>
+			</template>
+		</main>
 
-			<div class="flex flex-wrap items-center gap-4">
-				<button
-					type="button"
-					class="rounded bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-40"
-					:disabled="!canConvert"
-					@click="convert"
-				>
-					{{ busy ? 'Converting…' : 'Convert' }}
-				</button>
-				<p v-if="validationError" class="text-sm text-red-600 dark:text-red-400">
-					{{ validationError }}
-				</p>
-			</div>
+		<!-- The old app's fixed dot-textured footer band, with the version readout it never
+		     had but which belongs somewhere unobtrusive. -->
+		<footer class="dot-texture pointer-events-none fixed inset-x-0 bottom-0 h-24 border-t border-palenight-line bg-palenight-panel/90">
+			<p v-if="backendVersion" class="px-5 pt-3 font-mono text-[11px] text-palenight-comment" data-selectable>
+				{{ backendVersion }}
+			</p>
+		</footer>
 
-			<ControlPanel v-if="reports.length || failures.length" title="Results">
-				<table v-if="reports.length" class="w-full text-left text-sm">
-					<thead class="text-xs text-slate-500 uppercase dark:text-slate-400">
-						<tr>
-							<th class="py-1">File</th>
-							<th class="py-1 text-right">Before</th>
-							<th class="py-1 text-right">After</th>
-							<th class="py-1 text-right">Change</th>
-							<th class="py-1 text-right">Size</th>
-						</tr>
-					</thead>
-					<tbody class="font-mono tabular-nums">
-						<tr v-for="report in reports" :key="report.outputPath" class="border-t border-slate-200 dark:border-slate-800">
-							<td class="py-1 pr-2 font-sans" data-selectable>{{ basename(report.outputPath) }}</td>
-							<td class="py-1 text-right">{{ formatBytes(report.sourceBytes) }}</td>
-							<td class="py-1 text-right">{{ formatBytes(report.outputBytes) }}</td>
-							<td class="py-1 text-right" :class="report.outputBytes <= report.sourceBytes ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'">{{ saving(report) }}</td>
-							<td class="py-1 text-right">{{ report.width }}&times;{{ report.height }}</td>
-						</tr>
-					</tbody>
-				</table>
-				<ul v-if="failures.length" class="flex flex-col gap-1 text-sm text-red-600 dark:text-red-400">
-					<li v-for="failure in failures" :key="failure.path" data-selectable>
-						<strong class="font-sans">{{ basename(failure.path) }}</strong>: {{ failure.message }}
-					</li>
-				</ul>
-			</ControlPanel>
-		</template>
-	</main>
+		<!-- The circular accent FAB, bottom-right, exactly where the Electron app put it. -->
+		<button
+			type="button"
+			class="fixed right-12 bottom-12 z-[100] flex size-[70px] items-center justify-center rounded-full text-3xl shadow-lg transition-transform"
+			:class="canConvert
+				? 'cursor-pointer bg-palenight-green text-palenight-bg hover:scale-105'
+				: 'cursor-not-allowed bg-palenight-selection text-palenight-comment'"
+			:disabled="!canConvert"
+			:title="canConvert ? 'Convert' : 'Choose images and a destination first'"
+			:aria-label="busy ? 'Converting' : 'Convert'"
+			@click="convert"
+		>
+			<UIcon v-if="busy" name="i-lucide-loader-circle" class="size-8 animate-spin" />
+			<UIcon v-else-if="converted" name="i-lucide-check" class="size-8" />
+			<UIcon v-else name="i-lucide-arrow-right" class="size-8" />
+		</button>
+	</div>
 </template>
