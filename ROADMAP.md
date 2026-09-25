@@ -175,6 +175,12 @@ The Electron app shells out to `cwebp.exe`. The Rust port should not.
       The `image` crate was rejected: it reaches none of the advanced knobs, so it cannot
       reach parity. The **Tauri sidecar remains the documented fallback**, and
       `cwebp_args()` keeps it a working one rather than a paper plan.
+      **No binary is vendored into this repository, and none will be without writing its
+      provenance and update path down first.** libwebp-sys compiles libwebp *from source*
+      as part of the build, so what ships is built here from a pinned crate version, not a
+      downloaded executable of unknown origin. If the sidecar fallback is ever taken, the
+      three `cwebp` binaries, where each came from, how their integrity is checked and who
+      updates them go into this file and the README **before** they are committed.
 - [x] Define the `EncodeSettings` type — `crates/skidbladnir-encode/src/settings.rs`.
       Serializable, camelCase over the wire, `#[serde(default)]` so a partial payload from
       the frontend fills in rather than failing, with every range and default taken from
@@ -403,8 +409,23 @@ prettier subset.
       than uploading nothing.
       **Unverified until a tag exists** — a tag-triggered workflow cannot be exercised
       before the tag it reacts to.
-- [ ] Decide whether the Tauri updater is in scope; if yes, a signing key is required
-      and that is owner-gated (the key never passes through the routine).
+- [x] Decide whether the Tauri updater is in scope. **Not for the 0.x line.** Reasons, in
+      order of weight:
+      1. The updater requires a **signing keypair**, and its private key is owner-gated —
+       it must never pass through this routine. An updater configured without one is not
+       an updater; an updater whose key lives somewhere convenient is a way to push
+       arbitrary code to every install.
+      2. It is an auto-update channel for an app that is **mid-migration and pre-parity**.
+       Shipping a mechanism that silently replaces a user's binary before the binary
+       itself is stable is the wrong order.
+      3. The app has no telemetry and no crash reporting, so a bad auto-update would be
+       invisible to us and unattributable by the user.
+      Revisit when the Tauri app is the shipping app and a tri-platform release has gone
+      out at least once. Until then, releases are downloaded deliberately from the
+      releases page.
+- [ ] (owner-gated, when the updater is revisited) Generate and store an updater signing
+      keypair. `cargo tauri signer generate`. The private key and its password belong in
+      the repository's Actions secrets and nowhere else; the routine must never see them.
 - [ ] First tri-platform release of the Tauri app.
 
 ## Phase 6 — Retire Electron
