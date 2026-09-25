@@ -29,8 +29,9 @@ the Electron app exposes today.
       `tauri::generate_context!` embeds `frontendDist` at **compile** time, so without
       `npm ci && npm run generate` ahead of it the Rust build fails outright with
       "the `frontendDist` configuration is set to ... but this path doesn't exist".
-- [ ] Cache the Nuxt build in CI as well as npm's download cache; today every job
-      regenerates the frontend from scratch.
+- [x] Cache the Nuxt build in CI as well as npm's download cache. `node_modules/.cache`
+      (where Nuxt 4 keeps its build cache) is keyed on the lockfile plus the frontend
+      sources, so an unchanged frontend is not regenerated on all three runners.
 - [x] Add `rustfmt.toml` and a clippy configuration matching the owner's other Rust
       repos (hard tabs, `-D warnings` in CI). `rustfmt.toml` copies `DSP/rustfmt.toml`
       verbatim (hard tabs, `tab_spaces = 8`, `max_width = 10000`, horizontal imports,
@@ -419,9 +420,10 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       alpha mid-migration would be trading a known platform for an unknown one; the app
       stays on Tauri 2.x until 3 is stable and the migration has shipped.
       <https://github.com/tauri-apps/tauri/releases>
-- [ ] **No libwebp upgrade is pending.** 1.6.0 (9 July 2025) is still the newest release,
-      and it is exactly what `libwebp-sys` vendors and what the parity test compares
-      against, so the parity claim is against current upstream.
+- [x] Confirm the encoder is current. **No libwebp upgrade is pending:** 1.6.0
+      (9 July 2025) is still the newest release, and it is exactly what `libwebp-sys`
+      vendors and what the parity test compares against, so the parity claim is against
+      current upstream. Re-check each run.
       <https://github.com/webmproject/libwebp/tags>
 - [x] Strike the JPEG 2000 claim from the README — done; the Status section now lists
       WebP as the only output format rather than promising JPEG 2000.
@@ -446,8 +448,11 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
 
 ## Cross-cutting
 
-- [ ] Every new Rust dependency goes in `[workspace.dependencies]`, consumed with
-      `{ workspace = true }`.
+- [x] Every new Rust dependency goes in `[workspace.dependencies]`, consumed with
+      `{ workspace = true }`. Holds for all of them: `base64`, `image`, `libwebp-sys`,
+      `serde`, `serde_json`, `skidbladnir-encode`, `tauri`, `tauri-build`,
+      `tauri-plugin-dialog`, `thiserror`. A standing rule, not a one-off task — re-check
+      it whenever a dependency is added.
 - [x] Keep dependencies current every run — both `cargo update` and the frontend's
       lockfile. Done this run: `cargo update` found nothing to move (already at the
       highest compatible versions) and `npm update` refreshed the frontend lockfile.
