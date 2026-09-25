@@ -161,10 +161,15 @@ The Electron app shells out to `cwebp.exe`. The Rust port should not.
       The gate was itself mutation-tested: deleting the `near_lossless => lossless = 1`
       line makes 5 cases diverge, and forcing `use_argb = 0` aborts the run, so it
       genuinely catches regressions rather than passing vacuously.
-- [ ] Build a **version-matched** reference `cwebp` in CI, from the same libwebp source
-      `libwebp-sys` vendors, so the parity test can be *enforced* there
-      (`SKIDBLADNIR_REQUIRE_PARITY=1`) instead of skipping whenever apt or brew ships a
-      different libwebp. Today CI reports the parity result but cannot fail on it.
+- [x] Build a **version-matched** reference `cwebp` in CI, so parity is **enforced**
+      there rather than reported. CI asks the linked library its own version
+      (`cargo run --example libwebp-version`), clones libwebp at that exact tag, builds
+      `cwebp` from `makefile.unix` and runs the parity test with
+      `SKIDBLADNIR_REQUIRE_PARITY=1` — so a missing or mismatched reference now fails the
+      build. A `libwebp-sys` bump is followed automatically instead of silently degrading
+      the gate to a skip.
+      Unix only: `makefile.unix` does not build on the Windows runner, so parity is
+      enforced on Linux and macOS and reported on Windows.
 - [x] Port the **mode** surface: lossy · lossless · near-lossless · JPEG-like · preset — all five, parity-tested.
 - [x] Port the **preset** surface: `default`, `photo`, `picture`, `drawing`, `icon`, `text` — all six, and libwebp's own preset table is pinned by test.
 - [x] Port **quality** and **alpha quality** — parity-tested at quality 0/1/50/99/100 and alpha quality 0/50/100.

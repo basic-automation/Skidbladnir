@@ -71,22 +71,12 @@ jobs:
 
       - name: Install the Linux system dependencies Tauri needs
         # Needed from Phase 1 onward, when src-tauri/ joins the workspace: Tauri 2 links
-        # against webkit2gtk-4.1, and patchelf is what bundles the AppImage.
+        # against webkit2gtk-4.1, and patchelf is what bundles the AppImage. The image
+        # libraries are for building the reference cwebp below, which needs a PNG reader.
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev
-
-      - name: Install a reference cwebp for the encoder parity test
-        # The Phase 2 parity gate compares our encoder against the real cwebp. Where it
-        # is installable the test runs for real; where it is not the test skips loudly
-        # rather than passing quietly.
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get install --no-install-recommends -y webp
-
-      - name: Install a reference cwebp for the encoder parity test (macOS)
-        if: matrix.os == 'macos-latest'
-        run: brew install webp
+          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev libpng-dev libjpeg-dev libtiff-dev
 
       - uses: actions/setup-node@v4
         with:
@@ -118,14 +108,31 @@ jobs:
       - name: cargo test
         run: cargo test --workspace --all-features
 
-      - name: encoder parity against the reference cwebp
-        # Run separately with --nocapture so the parity line is always in the log. The
-        # test prints either "PARITY OK: N settings matched" or a loud "PARITY NOT RUN"
-        # with the reason, and a silent skip is exactly what must not happen.
+      - name: Build a version-matched reference cwebp
+        # Byte parity is only meaningful between EQUAL libwebp versions, so the reference
+        # is built from the same upstream tag as the libwebp that libwebp-sys vendors,
+        # rather than whatever apt or brew happens to ship. The version comes from the
+        # linked library itself, so a libwebp-sys bump is followed automatically instead
+        # of silently degrading the gate to a skip.
         #
-        # SKIDBLADNIR_REQUIRE_PARITY is deliberately NOT set: byte parity is only
-        # meaningful between equal libwebp versions, and the version apt or brew ships is
-        # not ours to pin, so making that a hard failure would be a false one. See the
-        # ROADMAP item about building a version-matched cwebp in CI so this can be
-        # enforced rather than merely reported.
+        # Unix only: libwebp's makefile.unix does not build on the Windows runner. Parity
+        # is reported there and enforced on the other two.
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          version=$(cargo run -q --example libwebp-version --package skidbladnir-encode)
+          echo "linked libwebp: $version"
+          git clone --depth 1 --branch "v$version" https://github.com/webmproject/libwebp.git "$RUNNER_TEMP/libwebp"
+          make -C "$RUNNER_TEMP/libwebp" -f makefile.unix -j4 examples/cwebp
+          echo "SKIDBLADNIR_REFERENCE_CWEBP=$RUNNER_TEMP/libwebp/examples/cwebp" >> "$GITHUB_ENV"
+          echo "SKIDBLADNIR_REQUIRE_PARITY=1" >> "$GITHUB_ENV"
+
+      - name: encoder parity against the reference cwebp
+        # Run separately with --nocapture so the parity verdict is always in the log: the
+        # test prints either "PARITY OK: N settings matched" or a loud "PARITY NOT RUN"
+        # with the reason. A silent skip is exactly what must not happen.
+        #
+        # On Linux and macOS SKIDBLADNIR_REQUIRE_PARITY is set by the step above, so a
+        # missing or mismatched reference FAILS rather than skipping. On Windows it is
+        # unset and the result is reported only.
         run: cargo test --package skidbladnir-encode --test parity -- --nocapture
