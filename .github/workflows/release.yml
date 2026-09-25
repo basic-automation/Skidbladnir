@@ -86,4 +86,14 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ inputs.tag || github.ref_name }}" dist-artifacts/* --clobber
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          # The workflow can be reached two ways: a tag pushed on its own, or a tag created
+          # alongside a release. In the first case there is no release to upload to yet, and
+          # `gh release upload` would simply fail — so create a draft prerelease to hold the
+          # artifacts rather than losing a green build to an ordering accident.
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "no release for $TAG yet; creating a draft prerelease to hold the artifacts"
+            gh release create "$TAG" --draft --prerelease --title "$TAG" --notes "Artifacts attached by CI. Notes pending."
+          fi
+          gh release upload "$TAG" dist-artifacts/* --clobber
