@@ -74,6 +74,24 @@ frontend is only enabled by the former.
 The encoder is libwebp itself, linked into the binary — there is no `cwebp` to
 download and no subprocess.
 
+### Checking a build
+
+```bash
+cargo test --workspace     # includes the encoder-parity tests
+scripts/smoke-test.sh      # drives the built window: renders, IPC, a real conversion
+scripts/a11y-audit.sh      # axe-core against the live window
+```
+
+The parity tests compare this encoder against a real `cwebp` and require one: point
+`SKIDBLADNIR_REFERENCE_CWEBP` at a build of the **same libwebp version** the binary links
+(`cargo run --example libwebp-version -p skidbladnir-encode` prints it), or they will say
+so and skip rather than pass quietly. Set `SKIDBLADNIR_REQUIRE_PARITY=1` to turn a skip
+into a failure.
+
+The two scripts need `tauri-driver` (`cargo install tauri-driver`) and `WebKitWebDriver`
+(`webkit2gtk-driver` on Debian/Ubuntu, `webkitgtk-6.0` on Arch). They skip, loudly, when
+those are missing.
+
 ### The Electron app (shipping today)
 
 Requires Node.js and npm.
