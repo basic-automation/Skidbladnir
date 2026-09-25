@@ -1,6 +1,6 @@
 {
   "name": "ba-nextgenimg",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "description": "Convert images to next generation open-source formats.",
   "main": "main.js",
   "scripts": {

@@ -66,3 +66,15 @@ typings/
 # routine transient output
 scratch/
 documentation/planning-implementation.docx
+
+# Rust / Tauri build output. Cargo.lock is deliberately NOT ignored: this repo ships
+# an application, so the lockfile is committed for reproducible builds.
+target/
+src-tauri/target/
+src-tauri/gen/
+rustc-ice-*.txt
+
+# Nuxt build output
+.nuxt/
+.output/
+.nitro/

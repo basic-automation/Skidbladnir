@@ -1,0 +1,207 @@
+# CI for the Rust + Tauri 2 workspace. The Electron app at the repo root is not built
+# here: it is Windows-only, unbuildable on a Linux runner without its downloaded cwebp,
+# and is being retired in Phase 6 of ROADMAP.md.
+#
+# Rust is pinned to **stable**. The dev host defaults to nightly only because its global
+# cargo config sets a nightly-only rustflag; nothing in this tree may need nightly, and
+# this job is what proves it.
+name: CI
+
+on:
+  push:
+    # `routine/**` is included so the scheduled dev routine gets a real CI result on
+    # each increment it pushes, instead of only finding out when it opens the PR.
+    branches: [master, "routine/**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  # Formatting gets its own job on **nightly rustfmt**, deliberately, while everything
+  # that compiles stays on stable below.
+  #
+  # rustfmt.toml uses `imports_layout`, `imports_granularity` and `group_imports`, which
+  # rustfmt still gates behind nightly. Stable rustfmt does not error on them, it silently
+  # ignores them and formats the file differently — so a stable `cargo fmt --check` fails
+  # against a tree formatted by a nightly rustfmt, which is exactly what happened the first
+  # time this workflow ran. Using nightly here keeps the owner's import style (which needs
+  # nightly rustfmt by design) without letting nightly anywhere near the build.
+  fmt:
+    name: rustfmt (nightly)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  # Supply chain: advisories, licences, duplicate pressure and source allow-listing.
+  # Its own job because it is platform-independent and should not wait on three builds.
+  deny:
+    name: cargo deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - run: cargo deny check
+
+  rust:
+    name: rust / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Every platform's result is wanted on every run: a Windows-only or macOS-only
+      # break is exactly what the dev host cannot see, so do not cancel its siblings.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install the Linux system dependencies Tauri needs
+        # Needed from Phase 1 onward, when src-tauri/ joins the workspace: Tauri 2 links
+        # against webkit2gtk-4.1, and patchelf is what bundles the AppImage. The image
+        # libraries are for building the reference cwebp below, which needs a PNG reader.
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev libpng-dev libjpeg-dev libtiff-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Cache the Nuxt build
+        # npm's own cache (above) only covers downloads. Nuxt 4 keeps its build cache in
+        # node_modules/.cache, so this is what stops all three runners regenerating an
+        # unchanged frontend from scratch. Keyed on the lockfile and the frontend sources.
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules/.cache
+          key: nuxt-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}-${{ hashFiles('frontend/**/*.vue', 'frontend/**/*.ts', 'frontend/**/*.css') }}
+          restore-keys: |
+            nuxt-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}-
+            nuxt-${{ runner.os }}-
+
+      - name: Build the frontend
+        # This is NOT optional and NOT merely "the frontend job". `tauri::generate_context!`
+        # embeds `frontendDist` at COMPILE time, so without these two steps the Rust build
+        # fails with "the frontendDist configuration is set to ... but this path doesn't
+        # exist" — a proc-macro panic, not a missing-asset warning.
+        run: |
+          npm --prefix frontend ci
+          npm --prefix frontend run generate
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: cargo build
+        run: cargo build --workspace --all-targets
+
+      - name: cargo test
+        run: cargo test --workspace --all-features
+
+      - name: Build a version-matched reference cwebp
+        # Byte parity is only meaningful between EQUAL libwebp versions, so the reference
+        # is built from the same upstream tag as the libwebp that libwebp-sys vendors,
+        # rather than whatever apt or brew happens to ship. The version comes from the
+        # linked library itself, so a libwebp-sys bump is followed automatically instead
+        # of silently degrading the gate to a skip.
+        #
+        # Unix only: libwebp's makefile.unix does not build on the Windows runner. Parity
+        # is reported there and enforced on the other two.
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          # cwebp's makefile.unix compiles its PNG/JPEG/TIFF readers unconditionally and,
+          # on macOS, looks for their headers in /opt/local (MacPorts) which the runner
+          # does not have. CPATH and LIBRARY_PATH are honoured by the compiler directly,
+          # so the Homebrew prefix is added without overriding the makefile's own
+          # variables — passing EXTRA_FLAGS on the command line would replace them.
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            brew install jpeg-turbo libpng libtiff
+            prefix=$(brew --prefix)
+            export CPATH="$prefix/include${CPATH:+:$CPATH}"
+            export LIBRARY_PATH="$prefix/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+          fi
+          version=$(cargo run -q --example libwebp-version --package skidbladnir-encode)
+          echo "linked libwebp: $version"
+          git clone --depth 1 --branch "v$version" https://github.com/webmproject/libwebp.git "$RUNNER_TEMP/libwebp"
+          make -C "$RUNNER_TEMP/libwebp" -f makefile.unix -j4 examples/cwebp
+          echo "SKIDBLADNIR_REFERENCE_CWEBP=$RUNNER_TEMP/libwebp/examples/cwebp" >> "$GITHUB_ENV"
+          echo "SKIDBLADNIR_REQUIRE_PARITY=1" >> "$GITHUB_ENV"
+
+      - name: encoder parity against the reference cwebp
+        # Run separately with --nocapture so the parity verdict is always in the log: the
+        # test prints either "PARITY OK: N settings matched" or a loud "PARITY NOT RUN"
+        # with the reason. A silent skip is exactly what must not happen.
+        #
+        # On Linux and macOS SKIDBLADNIR_REQUIRE_PARITY is set by the step above, so a
+        # missing or mismatched reference FAILS rather than skipping. On Windows it is
+        # unset and the result is reported only.
+        run: cargo test --package skidbladnir-encode --test parity -- --nocapture
+
+  # Drives the real window over WebDriver. Separate from the compile matrix because it
+  # needs a display, a WebKit driver and a full release build, and because a flaky display
+  # must not be able to mask a genuine compile failure on another platform.
+  window:
+    name: window smoke + accessibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install the system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev \
+            webkit2gtk-driver xvfb
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install the Tauri CLI and WebDriver shim
+        run: cargo install tauri-cli --locked --version '^2' && cargo install tauri-driver --locked
+
+      - name: Build the app
+        # `cargo tauri build` rather than `cargo build --release`: only the former enables
+        # the custom-protocol feature that makes the binary serve the embedded frontend.
+        # A binary built the other way opens showing "Connection refused" and every check
+        # below would fail for the wrong reason.
+        run: |
+          npm --prefix frontend ci
+          cd src-tauri && cargo tauri build --no-bundle
+
+      - name: Smoke test the window
+        # xvfb-run because there is no display on the runner. The harness forces the X11
+        # backend, which is what WebKitWebDriver needs.
+        run: xvfb-run -a scripts/smoke-test.sh
+
+      - name: Accessibility audit
+        run: xvfb-run -a scripts/a11y-audit.sh

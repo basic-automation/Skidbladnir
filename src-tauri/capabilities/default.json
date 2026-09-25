@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The permissions the Skidbladnir window needs. Deliberately minimal: it can ask the user to pick files and a destination, and nothing else. There is no dialog:allow-save because the output name is derived, and no filesystem permission at all because every read and write happens in Rust against a path the user chose.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "dialog:allow-open"
+  ]
+}

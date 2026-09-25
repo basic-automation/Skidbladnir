@@ -1,0 +1,26 @@
+{
+  "name": "skidbladnir",
+  "private": true,
+  "type": "module",
+  "description": "The Nuxt + Tailwind frontend for Skidbladnir.",
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare"
+  },
+  "devDependencies": {
+    "@iconify-json/lucide": "^1.2.136",
+    "axe-core": "^4.13.0",
+    "nuxt": "^4.0.0",
+    "tailwindcss": "^4.1.0",
+    "vue": "^3.5.0",
+    "vue-router": "^4.4.0"
+  },
+  "dependencies": {
+    "@nuxt/ui": "^4.11.2",
+    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.0.0"
+  }
+}

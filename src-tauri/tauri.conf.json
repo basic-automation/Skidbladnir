@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Skidbladnir",
+  "identifier": "com.basicautomation.skidbladnir",
+  "build": {
+    "beforeDevCommand": "npm --prefix frontend run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm --prefix frontend run generate",
+    "frontendDist": "../frontend/.output/public"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Skidbladnir",
+        "width": 1000,
+        "height": 780,
+        "minWidth": 720,
+        "minHeight": 560,
+        "resizable": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; frame-src 'none'; frame-ancestors 'none'; form-action 'none'; worker-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "deb",
+      "appimage",
+      "nsis",
+      "dmg"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Graphics and Design",
+    "shortDescription": "Convert images to next-generation formats.",
+    "longDescription": "Skidbladnir converts images to WebP while exposing the encoder's full control surface: modes, quality, alpha quality, compression method, segments, spatial noise shaping, filtering, target size and PSNR, multi-pass, partition limit, sharp YUV, low memory, resize and multi-threading."
+  }
+}

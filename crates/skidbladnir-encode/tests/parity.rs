@@ -1,0 +1,373 @@
+//! The Phase 2 parity gate: our encoder against the real `cwebp`, byte for byte.
+//!
+//! This is the test the whole migration rests on. Skidbladnir's reason to exist is that
+//! it drives `cwebp`'s full control surface, so a port that quietly changes what comes
+//! out of the encoder has failed even if every button still works. Reading the code and
+//! concluding it looks right is not evidence; this is.
+//!
+//! # How it isolates the encoder
+//!
+//! The fixture is written as a **PAM** file (`P7`, `TUPLTYPE RGB_ALPHA`), which `cwebp`
+//! reads with its own built-in PNM reader — no libpng, no libjpeg, no decoder of ours.
+//! The bytes `cwebp` encodes are therefore bit-identical to the ones handed to
+//! [`encode_rgba`], so any difference in the output is the encoder configuration and
+//! nothing else. A PNG fixture would have left two independent decoders in the
+//! comparison and made a mismatch ambiguous.
+//!
+//! # When it runs
+//!
+//! It needs a reference `cwebp`, found via `SKIDBLADNIR_REFERENCE_CWEBP` or on `PATH`.
+//! Byte parity is only meaningful between equal libwebp versions, so it also compares the
+//! reference's version against the version of the libwebp this crate is linked to and
+//! declines to compare across a mismatch rather than reporting a false failure. In both
+//! of those cases it prints loudly and returns. Set `SKIDBLADNIR_REQUIRE_PARITY=1` to
+//! turn "could not run" into a failure, which is what CI does on the platforms where a
+//! reference encoder is installed.
+
+use std::{
+	env, ffi::OsString, fs, path::{Path, PathBuf}, process::Command
+};
+
+use skidbladnir_encode::{
+	RgbaImage, cwebp_args, encode_rgba, settings::{AlphaFiltering, EncodeSettings, FilterType, Mode, Preset, Resize, TargetMetric}
+};
+
+/// Locate a reference `cwebp`, preferring an explicitly configured one.
+fn reference_cwebp() -> Option<PathBuf> {
+	if let Some(path) = env::var_os("SKIDBLADNIR_REFERENCE_CWEBP") {
+		let path = PathBuf::from(path);
+		return path.is_file().then_some(path);
+	}
+	// Fall back to PATH. Running it is the only portable test that it works.
+	Command::new("cwebp").arg("-version").output().ok().filter(|out| out.status.success()).map(|_| PathBuf::from("cwebp"))
+}
+
+/// Parse the version `cwebp -version` prints on its first line, e.g. `1.6.0`.
+fn reference_version(cwebp: &Path) -> Option<(i32, i32, i32)> {
+	let out = Command::new(cwebp).arg("-version").output().ok()?;
+	let text = String::from_utf8_lossy(&out.stdout);
+	let first = text.lines().next()?.trim();
+	let mut parts = first.split('.').map(str::parse::<i32>);
+	match (parts.next(), parts.next(), parts.next()) {
+		(Some(Ok(major)), Some(Ok(minor)), Some(Ok(revision))) => Some((major, minor, revision)),
+		_ => None,
+	}
+}
+
+/// A fixture with smooth colour ramps, high-frequency detail and a real alpha pattern, so
+/// SNS, the deblocking filter and the alpha controls all have something to act on. A flat
+/// image would make most of the control surface untestable.
+fn fixture(width: u32, height: u32) -> Vec<u8> {
+	let mut pixels = Vec::with_capacity((width as usize) * (height as usize) * 4);
+	for y in 0..height {
+		for x in 0..width {
+			// A diagonal ripple: enough local detail that the filter controls matter.
+			let ripple = ((x * 13 + y * 7) % 97) * 255 / 97;
+			pixels.push(u8::try_from(ripple).expect("ripple is under 256"));
+			pixels.push(u8::try_from(x * 255 / width.max(1)).expect("ramp is under 256"));
+			pixels.push(u8::try_from(y * 255 / height.max(1)).expect("ramp is under 256"));
+			// Blocks of full transparency, a ramp, and opacity.
+			pixels.push(match (x / 8 + y / 8) % 3 {
+				0 => 0,
+				1 => u8::try_from(x * 255 / width.max(1)).expect("ramp is under 256"),
+				_ => 255,
+			});
+		}
+	}
+	pixels
+}
+
+/// Write the fixture as a PAM file, the format `cwebp` reads without any image library.
+fn write_pam(path: &Path, pixels: &[u8], width: u32, height: u32) {
+	let mut out = format!("P7\nWIDTH {width}\nHEIGHT {height}\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n").into_bytes();
+	out.extend_from_slice(pixels);
+	fs::write(path, out).expect("write the PAM fixture");
+}
+
+/// Every setting combination worth comparing: the whole control surface, one case per
+/// control, plus the mode-specific paths.
+fn cases() -> Vec<(String, EncodeSettings)> {
+	let mut cases: Vec<(String, EncodeSettings)> = Vec::new();
+	let mut add = |name: &str, settings: EncodeSettings| cases.push((name.to_owned(), settings));
+
+	add("default lossy", EncodeSettings::default());
+
+	for quality in [0_u8, 1, 50, 99, 100] {
+		add(&format!("quality {quality}"), EncodeSettings { quality, ..Default::default() });
+	}
+	for alpha_quality in [0_u8, 50, 100] {
+		add(&format!("alpha quality {alpha_quality}"), EncodeSettings { alpha_quality, ..Default::default() });
+	}
+	for method in 0..=6_u8 {
+		add(&format!("method {method}"), EncodeSettings { method, ..Default::default() });
+	}
+	for segments in 1..=4_u8 {
+		add(&format!("segments {segments}"), EncodeSettings { segments, ..Default::default() });
+	}
+	for sns in [0_u8, 25, 50, 100] {
+		add(&format!("sns {sns}"), EncodeSettings { sns, ..Default::default() });
+	}
+	for passes in [1_u8, 6, 10] {
+		add(&format!("passes {passes}"), EncodeSettings { passes, ..Default::default() });
+	}
+	for partition_limit in [0_u8, 50, 100] {
+		add(&format!("partition limit {partition_limit}"), EncodeSettings { partition_limit, ..Default::default() });
+	}
+
+	add("auto filter", EncodeSettings { filter: FilterType::Auto, ..Default::default() });
+	for (strength, sharpness) in [(0_u8, 0_u8), (20, 3), (100, 7)] {
+		add(&format!("strong filter {strength}/{sharpness}"), EncodeSettings { filter: FilterType::Strong, filter_strength: strength, filter_sharpness: sharpness, ..Default::default() });
+		add(&format!("simple filter {strength}/{sharpness}"), EncodeSettings { filter: FilterType::Simple, filter_strength: strength, filter_sharpness: sharpness, ..Default::default() });
+	}
+
+	for bytes in [512_u32, 2_048, 16_384] {
+		add(&format!("target size {bytes}"), EncodeSettings { target: Some(TargetMetric::Size(bytes)), ..Default::default() });
+	}
+	for psnr in [30_u32, 42, 50] {
+		add(&format!("target psnr {psnr}"), EncodeSettings { target: Some(TargetMetric::Psnr(psnr)), ..Default::default() });
+	}
+
+	add("sharp yuv", EncodeSettings { sharp_yuv: true, ..Default::default() });
+	add("low memory", EncodeSettings { low_memory: true, ..Default::default() });
+	add("no multi-threading", EncodeSettings { multi_threading: false, ..Default::default() });
+	add("sharp yuv + low memory + no mt", EncodeSettings { sharp_yuv: true, low_memory: true, multi_threading: false, ..Default::default() });
+
+	for alpha_filtering in [AlphaFiltering::Off, AlphaFiltering::Fast, AlphaFiltering::Best] {
+		add(&format!("alpha filter {}", alpha_filtering.as_cwebp_str()), EncodeSettings { alpha_filtering: Some(alpha_filtering), ..Default::default() });
+	}
+	add("no alpha filter flag", EncodeSettings { alpha_filtering: None, ..Default::default() });
+
+	add("lossless", EncodeSettings { mode: Mode::Lossless, ..Default::default() });
+	for quality in [0_u8, 50, 100] {
+		add(&format!("lossless effort {quality}"), EncodeSettings { mode: Mode::Lossless, quality, ..Default::default() });
+	}
+	for quality in [0_u8, 40, 60, 80, 100] {
+		add(&format!("near-lossless {quality}"), EncodeSettings { mode: Mode::NearLossless, quality, ..Default::default() });
+	}
+	add("jpeg-like", EncodeSettings { mode: Mode::JpegLike, ..Default::default() });
+	for preset in [Preset::Default, Preset::Photo, Preset::Picture, Preset::Drawing, Preset::Icon, Preset::Text] {
+		add(&format!("preset {}", preset.as_cwebp_str()), EncodeSettings { mode: Mode::Preset, preset: Some(preset), ..Default::default() });
+	}
+
+	// Resize, including the -exact path that lossless takes.
+	for resize in [Resize { width: 32, height: 24 }, Resize { width: 32, height: 0 }, Resize { width: 0, height: 24 }, Resize { width: 128, height: 96 }] {
+		add(&format!("resize {}x{}", resize.width, resize.height), EncodeSettings { resize, ..Default::default() });
+		add(&format!("lossless resize {}x{}", resize.width, resize.height), EncodeSettings { mode: Mode::Lossless, resize, ..Default::default() });
+	}
+
+	// A few combinations, because controls interact: target size with a manual filter,
+	// sharp YUV with a preset-free lossy encode, and the full advanced set at once.
+	add("everything at once", EncodeSettings { mode: Mode::Lossy, quality: 61, alpha_quality: 77, alpha_filtering: Some(AlphaFiltering::Fast), method: 5, segments: 3, partition_limit: 22, sns: 66, passes: 4, filter: FilterType::Strong, filter_strength: 44, filter_sharpness: 2, target: Some(TargetMetric::Size(4_096)), sharp_yuv: true, low_memory: true, multi_threading: true, resize: Resize { width: 40, height: 0 }, preset: None });
+
+	cases
+}
+
+#[test]
+fn matches_reference_cwebp_across_the_whole_control_surface() {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+
+	let Some(cwebp) = reference_cwebp() else {
+		let message = "PARITY NOT RUN: no reference cwebp found. Set SKIDBLADNIR_REFERENCE_CWEBP or put cwebp on PATH. The encode path is therefore UNVERIFIED in this run.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+
+	let linked = skidbladnir_encode::encoder::linked_encoder_version();
+	let Some(reference) = reference_version(&cwebp) else {
+		let message = format!("PARITY NOT RUN: could not read a version from `{} -version`.", cwebp.display());
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+	if reference != linked {
+		// Two different libwebp versions can legitimately produce different bytes for the
+		// same configuration, so comparing across them would report a false failure.
+		let message = format!("PARITY NOT RUN: reference cwebp is {}.{}.{} but this crate links libwebp {}.{}.{}. Byte parity is only meaningful between equal versions, so the comparison was skipped rather than reported as a failure. The encode path is UNVERIFIED in this run.", reference.0, reference.1, reference.2, linked.0, linked.1, linked.2);
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	}
+
+	let (width, height) = (64_u32, 48_u32);
+	let pixels = fixture(width, height);
+	let dir = env::temp_dir().join(format!("skidbladnir-parity-{}", std::process::id()));
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+	let input = dir.join("fixture.pam");
+	write_pam(&input, &pixels, width, height);
+
+	let image = RgbaImage { width, height, pixels: &pixels };
+	let mut mismatches: Vec<String> = Vec::new();
+	let cases = cases();
+	let total = cases.len();
+
+	for (index, (name, settings)) in cases.into_iter().enumerate() {
+		let output = dir.join(format!("case-{index}.webp"));
+		let args: Vec<OsString> = cwebp_args(&settings, &input, &output);
+		let run = Command::new(&cwebp).args(&args).output().expect("run the reference cwebp");
+		assert!(run.status.success(), "reference cwebp failed for `{name}`: {}", String::from_utf8_lossy(&run.stderr));
+		let expected = fs::read(&output).expect("read the reference output");
+
+		let actual = match encode_rgba(&settings, &image) {
+			Ok(bytes) => bytes,
+			Err(error) => {
+				mismatches.push(format!("`{name}`: our encoder failed: {error}"));
+				continue;
+			}
+		};
+
+		if actual != expected {
+			let first_difference = actual.iter().zip(&expected).position(|(a, b)| a != b).map_or_else(|| "length only".to_owned(), |at| format!("byte {at}"));
+			mismatches.push(format!("`{name}`: ours {} bytes, cwebp {} bytes, first difference at {first_difference}\n    cwebp {} {}", actual.len(), expected.len(), cwebp.display(), args.iter().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>().join(" ")));
+		}
+
+		let _ = fs::remove_file(&output);
+	}
+
+	let _ = fs::remove_dir_all(&dir);
+
+	assert!(mismatches.is_empty(), "{} of {total} settings diverged from the reference cwebp {}.{}.{}:\n  {}", mismatches.len(), linked.0, linked.1, linked.2, mismatches.join("\n  "));
+	eprintln!("PARITY OK: {total} settings matched the reference cwebp {}.{}.{} byte for byte.", linked.0, linked.1, linked.2);
+}
+
+/// The same comparison, but through a **PNG file** rather than raw pixels.
+///
+/// The main test deliberately removes the image decoder from the comparison so a mismatch
+/// can only be the encoder. This one puts it back: our pipeline decodes the PNG with the
+/// `image` crate, `cwebp` decodes it with libpng, and both then encode. Passing means the
+/// whole file path agrees, not just the encoder — which is what a user actually exercises.
+///
+/// A failure here is therefore a *decoder* difference, not an encoder one, and the message
+/// says so; the two are worth telling apart.
+#[test]
+fn matches_reference_cwebp_through_a_png_file() {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let Some(cwebp) = reference_cwebp() else {
+		let message = "PNG PARITY NOT RUN: no reference cwebp found.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+	let linked = skidbladnir_encode::encoder::linked_encoder_version();
+	if reference_version(&cwebp) != Some(linked) {
+		let message = "PNG PARITY NOT RUN: reference cwebp and the linked libwebp are different versions.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	}
+
+	let (width, height) = (64_u32, 48_u32);
+	let pixels = fixture(width, height);
+	let dir = env::temp_dir().join(format!("skidbladnir-parity-png-{}", std::process::id()));
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+	let png = dir.join("fixture.png");
+	image::RgbaImage::from_raw(width, height, pixels).expect("buffer matches the dimensions").save_with_format(&png, image::ImageFormat::Png).expect("write the PNG fixture");
+
+	let mut mismatches: Vec<String> = Vec::new();
+	// A representative slice rather than all 76: this test is about the decoder agreeing,
+	// and the encoder surface is already covered above.
+	let subset = [("default lossy", EncodeSettings::default()), ("lossless", EncodeSettings { mode: Mode::Lossless, ..Default::default() }), ("near-lossless 60", EncodeSettings { mode: Mode::NearLossless, quality: 60, ..Default::default() }), ("quality 30", EncodeSettings { quality: 30, ..Default::default() }), ("sharp yuv", EncodeSettings { sharp_yuv: true, ..Default::default() }), ("resize 32x0", EncodeSettings { resize: Resize { width: 32, height: 0 }, ..Default::default() })];
+
+	for (name, settings) in &subset {
+		let theirs_path = dir.join(format!("cwebp-{}.webp", name.replace(' ', "-")));
+		let args = cwebp_args(settings, &png, &theirs_path);
+		let run = Command::new(&cwebp).args(&args).output().expect("run the reference cwebp");
+		assert!(run.status.success(), "reference cwebp failed for `{name}`: {}", String::from_utf8_lossy(&run.stderr));
+		let expected = fs::read(&theirs_path).expect("read the reference output");
+
+		let ours_path = dir.join(format!("ours-{}.webp", name.replace(' ', "-")));
+		skidbladnir_encode::source::encode_file(settings, &png, &ours_path).expect("our pipeline encodes");
+		let actual = fs::read(&ours_path).expect("read our output");
+
+		if actual != expected {
+			mismatches.push(format!("`{name}`: ours {} bytes, cwebp {} bytes", actual.len(), expected.len()));
+		}
+	}
+
+	let _ = fs::remove_dir_all(&dir);
+	assert!(mismatches.is_empty(), "{} of {} PNG-file conversions diverged. The raw-pixel parity test covers the encoder, so this is a DECODER difference between the `image` crate and libpng:\n  {}", mismatches.len(), subset.len(), mismatches.join("\n  "));
+	eprintln!("PNG PARITY OK: {} PNG-file conversions matched the reference cwebp end to end.", subset.len());
+}
+
+/// Parity across PNG **colour types and bit depths**, not just 8-bit RGBA.
+///
+/// This exists because a real divergence hid here. `cwebp` reads PNGs through libpng with
+/// `png_set_strip_16`, which discards the low byte of a 16-bit sample, while the `image`
+/// crate scales it — so 16-bit input encoded to different bytes on the two paths (216 vs
+/// 212 for RGBA, 168 vs 166 for RGB) while every 8-bit type matched. The reduction was
+/// changed to truncate; this test is what stops it drifting back.
+#[test]
+fn matches_reference_cwebp_across_png_colour_types() {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let Some(cwebp) = reference_cwebp() else {
+		let message = "COLOUR-TYPE PARITY NOT RUN: no reference cwebp found.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+	if reference_version(&cwebp) != Some(skidbladnir_encode::encoder::linked_encoder_version()) {
+		let message = "COLOUR-TYPE PARITY NOT RUN: reference cwebp and the linked libwebp are different versions.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	}
+
+	let dir = env::temp_dir().join(format!("skidbladnir-parity-colour-{}", std::process::id()));
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+	let (width, height) = (48_u32, 32_u32);
+
+	// One fixture per colour type the `image` crate can write.
+	let mut fixtures: Vec<(&str, PathBuf)> = Vec::new();
+
+	let path = dir.join("rgba16.png");
+	let mut buffer = image::ImageBuffer::<image::Rgba<u16>, Vec<u16>>::new(width, height);
+	for (x, y, pixel) in buffer.enumerate_pixels_mut() {
+		*pixel = image::Rgba([u16::try_from((x * 1300) % 65536).unwrap_or(0), u16::try_from((y * 2000) % 65536).unwrap_or(0), 30_000, if x % 3 == 0 { 20_000 } else { u16::MAX }]);
+	}
+	buffer.save_with_format(&path, image::ImageFormat::Png).expect("write rgba16");
+	fixtures.push(("16-bit RGBA", path));
+
+	let path = dir.join("rgb16.png");
+	let mut buffer = image::ImageBuffer::<image::Rgb<u16>, Vec<u16>>::new(width, height);
+	for (x, y, pixel) in buffer.enumerate_pixels_mut() {
+		*pixel = image::Rgb([u16::try_from((x * 1300) % 65536).unwrap_or(0), u16::try_from((y * 2000) % 65536).unwrap_or(0), 30_000]);
+	}
+	buffer.save_with_format(&path, image::ImageFormat::Png).expect("write rgb16");
+	fixtures.push(("16-bit RGB", path));
+
+	let path = dir.join("gray8.png");
+	let mut buffer = image::GrayImage::new(width, height);
+	for (x, y, pixel) in buffer.enumerate_pixels_mut() {
+		*pixel = image::Luma([u8::try_from((x * 5 + y * 3) % 256).unwrap_or(0)]);
+	}
+	buffer.save_with_format(&path, image::ImageFormat::Png).expect("write gray8");
+	fixtures.push(("8-bit grayscale", path));
+
+	let path = dir.join("graya8.png");
+	let mut buffer = image::GrayAlphaImage::new(width, height);
+	for (x, y, pixel) in buffer.enumerate_pixels_mut() {
+		*pixel = image::LumaA([u8::try_from((x * 7 + y) % 256).unwrap_or(0), if x % 4 == 0 { 60 } else { 255 }]);
+	}
+	buffer.save_with_format(&path, image::ImageFormat::Png).expect("write graya8");
+	fixtures.push(("8-bit grayscale + alpha", path));
+
+	let settings = EncodeSettings::default();
+	let mut mismatches: Vec<String> = Vec::new();
+	for (name, input) in &fixtures {
+		let theirs_path = dir.join(format!("cwebp-{}.webp", name.replace([' ', '+', '-'], "_")));
+		let run = Command::new(&cwebp).args(cwebp_args(&settings, input, &theirs_path)).output().expect("run the reference cwebp");
+		assert!(run.status.success(), "reference cwebp failed for `{name}`: {}", String::from_utf8_lossy(&run.stderr));
+
+		let ours_path = dir.join(format!("ours-{}.webp", name.replace([' ', '+', '-'], "_")));
+		skidbladnir_encode::source::encode_file(&settings, input, &ours_path).expect("our pipeline encodes");
+
+		let (expected, actual) = (fs::read(&theirs_path).expect("read reference"), fs::read(&ours_path).expect("read ours"));
+		if actual != expected {
+			mismatches.push(format!("`{name}`: ours {} bytes, cwebp {} bytes", actual.len(), expected.len()));
+		}
+	}
+
+	let _ = fs::remove_dir_all(&dir);
+	assert!(mismatches.is_empty(), "{} of {} PNG colour types diverged. This is a DECODER difference — check how `image` reduces the sample depth against what libpng does:\n  {}", mismatches.len(), fixtures.len(), mismatches.join("\n  "));
+	eprintln!("COLOUR-TYPE PARITY OK: {} PNG colour types matched the reference cwebp.", fixtures.len());
+}

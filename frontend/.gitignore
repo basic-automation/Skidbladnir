@@ -1,0 +1,8 @@
+.nuxt/
+# `nuxt generate` leaves this as a SYMLINK to .output/public, and the root
+# .gitignore's `dist/` pattern only matches real directories.
+dist
+.output/
+.nitro/
+.data/
+node_modules/

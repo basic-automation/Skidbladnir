@@ -1,0 +1,38 @@
+# Dependabot is enabled on the repository but had no config file in-tree, so its coverage
+# was whatever the GitHub UI was set to and was not reviewable here. This makes it explicit
+# and adds the ecosystems the Tauri migration introduced.
+#
+# Until CI existed, Dependabot PRs had nothing gating them. They are now gated by the same
+# workflow as everything else.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Tauri's crates move together; separate PRs for each would conflict with each other.
+      tauri:
+        patterns: ["tauri", "tauri-*"]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      nuxt:
+        patterns: ["nuxt", "@nuxt/*"]
+
+  # The Electron app still ships, so its dependencies still matter until Phase 6 retires it.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

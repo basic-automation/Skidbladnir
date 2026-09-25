@@ -1,0 +1,22 @@
+[package]
+name = "skidbladnir-encode"
+version = "0.1.0"
+description = "The encode core for Skidbladnir: the settings model and WebP encoder behind the GUI."
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+image = { workspace = true }
+libwebp-sys = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# The parity test writes PNG fixtures; integration tests do not inherit [dependencies].
+image = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
