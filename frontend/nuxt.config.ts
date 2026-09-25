@@ -33,6 +33,6 @@ export default defineNuxtConfig({
 		// only renames Nuxt's default `_nuxt` directory: a leading underscore is awkward to
 		// reason about in a bundled app and some packagers skip such paths.
 		buildAssetsDir: 'assets',
-		head: { title: 'Skidbladnir', meta: [{ name: 'color-scheme', content: 'dark' }] },
+		head: { title: 'Skidbladnir', htmlAttrs: { lang: 'en' }, meta: [{ name: 'color-scheme', content: 'dark' }] },
 	},
 })

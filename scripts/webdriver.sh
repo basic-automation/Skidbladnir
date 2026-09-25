@@ -28,6 +28,9 @@ while [ $# -gt 0 ]; do
 	case "$1" in
 		--app) APP="$2"; shift 2;;
 		--script) SCRIPT="$2"; shift 2;;
+		# A file, for scripts too large to pass as an argument — injecting axe-core is
+		# half a megabyte and blows the argv limit.
+		--script-file) SCRIPT="$(cat "$2")"; shift 2;;
 		--out) OUT="$2"; shift 2;;
 		*) echo "unknown argument: $1" >&2; exit 2;;
 	esac
@@ -79,13 +82,19 @@ print(d.get("value", {}).get("sessionId") or d.get("sessionId") or "")' 2>/dev/n
 exec)
 	[ -f "$STATE" ] || { echo "no session; run start first" >&2; exit 2; }
 	session=$(json_field session < "$STATE")
-	payload=$(python3 -c 'import json,sys; print(json.dumps({"script": sys.argv[1], "args": []}))' "$SCRIPT")
+	script_file=$(mktemp)
+	printf '%s' "$SCRIPT" > "$script_file"
+	payload_file=$(mktemp)
+	python3 -c 'import json,sys
+script = open(sys.argv[1], encoding="utf-8").read()
+json.dump({"script": script, "args": []}, open(sys.argv[2], "w", encoding="utf-8"))' "$script_file" "$payload_file"
 	# execute/sync, not execute/async: the async endpoint waits for the script to invoke
 	# a completion callback, so a script that simply returns hangs until the driver gives
 	# up. WebKitWebDriver resolves a returned promise on the sync endpoint, which is what
 	# lets these scripts use `await`.
-	response=$(curl -s --max-time 60 -X POST -H 'Content-Type: application/json' -d "$payload" \
+	response=$(curl -s --max-time 120 -X POST -H 'Content-Type: application/json' --data-binary "@$payload_file" \
 		"http://127.0.0.1:$PORT/session/$session/execute/sync")
+	rm -f "$script_file" "$payload_file"
 	# Unwrap WebDriver's {"value": ...} envelope, so callers compare against what the
 	# script actually returned rather than against JSON scaffolding.
 	printf '%s' "$response" | python3 -c 'import json,sys

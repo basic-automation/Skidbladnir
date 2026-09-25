@@ -14,10 +14,16 @@ defineProps<{
 </script>
 
 <template>
-	<div class="text-left" :class="disabled && 'opacity-40'">
+	<!-- A disabled control dims the SLIDER, not its text. Fading the whole block to 40%
+	     took the label and help text to 2.6:1 and 2.0:1 against the panel, which axe-core
+	     flagged and which is simply unreadable; the affordance is carried by the greyed
+	     track and the "not in use" note instead. -->
+	<div class="text-left">
 		<div class="flex items-baseline justify-between gap-3">
-			<span class="text-sm font-medium text-palenight-bright">{{ label }}</span>
-			<output class="font-mono text-sm tabular-nums text-palenight-green" aria-live="off">{{ model }}</output>
+			<span class="text-sm font-medium" :class="disabled ? 'text-palenight-muted' : 'text-palenight-bright'">
+				{{ label }}<span v-if="disabled" class="font-normal"> · not in use</span>
+			</span>
+			<output class="font-mono text-sm tabular-nums" :class="disabled ? 'text-palenight-muted' : 'text-palenight-green'" aria-live="off">{{ model }}</output>
 		</div>
 		<USlider
 			v-model="model"
@@ -28,8 +34,9 @@ defineProps<{
 			:disabled="disabled"
 			size="sm"
 			:aria-label="label"
+			:class="disabled && 'opacity-50'"
 		/>
-		<p v-if="help" class="mt-1 text-xs text-palenight-comment">
+		<p v-if="help" class="mt-1 text-xs text-palenight-muted">
 			{{ help }}
 		</p>
 	</div>

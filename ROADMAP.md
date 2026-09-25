@@ -365,9 +365,23 @@ prettier subset.
       regions so progress is announced rather than only drawn; validation failures are
       `role="alert"`. A `:focus-visible` ring was added because a keyboard-navigable app
       whose focused control is invisible against a dark palette is not usable.
-- [ ] Run a real accessibility audit tool (axe-core in the WebDriver harness) rather than
-      the hand-written check used here — it covers contrast, ordering and ARIA misuse,
-      which a name-presence check does not.
+- [x] Run a real accessibility audit. `scripts/a11y-audit.sh` injects **axe-core** into the
+      live window and reports violations; the window is now **clean at the `minor`
+      threshold**. It found two things the hand-written name check could not:
+      - **Colour contrast on 25 nodes.** Palenight's own comment colour `#676e95` is
+        2.76:1 against the background, far under WCAG AA's 4.5:1. It is kept for borders
+        and the dot texture, and a new `--color-palenight-muted` (`#9099bd`, 4.86:1) now
+        carries the same muted role for anything a person reads. The error red was
+        4.37:1 — just under — and was lightened to `#ff6b85` (5.00:1).
+      - **A missing `lang` attribute** on `<html>`.
+      Six failures survived the first fix and were worth understanding rather than
+      suppressing: five were the *disabled* filter sliders, where `opacity-40` on the whole
+      block took their labels to 2.6:1 and their help text to 2.0:1. Dimming now applies to
+      the slider track alone and the label reads "· not in use", which is both accessible
+      and clearer. The sixth was the selected mode card, whose tinted background lifts to
+      `#373d42` where the muted token is 3.92:1; its description uses the brighter token.
+- [ ] Run `scripts/a11y-audit.sh` in CI alongside the smoke test — same runner setup, and
+      it needs `frontend/node_modules` present for axe-core.
 
 ## Phase 5 — Tri-platform packaging and release
 

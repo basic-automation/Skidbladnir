@@ -20,10 +20,18 @@
 	--color-palenight-selection: #444267;
 	--color-palenight-line: #4e5579;
 	--color-palenight-comment: #676e95;
+	/* Palenight's own comment colour is #676e95, which is 2.76:1 against the background —
+	   well under WCAG AA's 4.5:1 for text. axe-core flagged it on 25 nodes. It is kept for
+	   non-text use (borders, the dot texture) and this lightened variant carries the same
+	   muted role for anything a person has to read: 4.86:1 on the background, 5.34:1 on a
+	   panel. */
+	--color-palenight-muted: #9099bd;
 	--color-palenight-fg: #a6accd;
 	--color-palenight-bright: #bfc7d5;
 
-	--color-palenight-red: #ff5370;
+	/* #ff5370 is Palenight's red but only 4.37:1 here, just under AA; lightened to clear
+	   it while staying the same hue. */
+	--color-palenight-red: #ff6b85;
 	--color-palenight-orange: #f78c6c;
 	--color-palenight-yellow: #ffcb6b;
 	--color-palenight-green: #c3e88d;
@@ -47,8 +55,8 @@
 	--ui-bg-accented: var(--color-palenight-selection);
 	--ui-bg-inverted: var(--color-palenight-bright);
 
-	--ui-text-dimmed: var(--color-palenight-comment);
-	--ui-text-muted: var(--color-palenight-comment);
+	--ui-text-dimmed: var(--color-palenight-muted);
+	--ui-text-muted: var(--color-palenight-muted);
 	--ui-text-toned: var(--color-palenight-fg);
 	--ui-text: var(--color-palenight-fg);
 	--ui-text-highlighted: var(--color-palenight-bright);

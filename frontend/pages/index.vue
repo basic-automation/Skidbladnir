@@ -414,7 +414,7 @@ function basename(path: string): string {
 							{{ dropRejected }} dropped {{ dropRejected === 1 ? 'file was' : 'files were' }} not a
 							PNG, JPEG, TIFF or WebP and {{ dropRejected === 1 ? 'was' : 'were' }} skipped.
 						</p>
-						<p class="text-center text-xs text-palenight-comment">
+						<p class="text-center text-xs text-palenight-muted">
 							PNG, JPEG, TIFF and WebP — drop them anywhere on the window, or use the button.
 							Converted files are written as <code class="text-palenight-cyan">&lt;name&gt;.webp</code>
 							in the destination. Your originals are never written over.
@@ -436,7 +436,7 @@ function basename(path: string): string {
 								@click="settings.mode = mode.value"
 							>
 								<span class="block text-sm font-semibold" :class="settings.mode === mode.value ? 'text-palenight-green' : 'text-palenight-bright'">{{ mode.label }}</span>
-								<span class="block text-xs text-palenight-comment">{{ mode.help }}</span>
+								<span class="block text-xs text-palenight-fg">{{ mode.help }}</span>
 							</button>
 						</div>
 
@@ -455,12 +455,12 @@ function basename(path: string): string {
 								<button type="button" class="py-1 text-sm text-palenight-cyan hover:text-palenight-bright" @click="applyPreset(preset)">
 									{{ preset.name }}
 								</button>
-								<button type="button" class="px-2 py-1 text-palenight-comment hover:text-palenight-red" :aria-label="`Delete preset ${preset.name}`" @click="deletePreset(preset.name)">
+								<button type="button" class="px-2 py-1 text-palenight-muted hover:text-palenight-red" :aria-label="`Delete preset ${preset.name}`" @click="deletePreset(preset.name)">
 									<UIcon name="i-lucide-x" class="size-3.5" />
 								</button>
 							</div>
 						</div>
-						<p v-else class="text-center text-xs text-palenight-comment">
+						<p v-else class="text-center text-xs text-palenight-muted">
 							No saved presets yet. Set the controls how you like them and give them a name.
 						</p>
 						<div class="mx-auto flex w-full max-w-md gap-2">
@@ -488,7 +488,7 @@ function basename(path: string): string {
 									<span class="text-sm font-medium text-palenight-bright">Resize height</span>
 									<UInput v-model.number="settings.resize.height" type="number" :min="0" aria-label="Resize height in pixels" class="mt-1 w-full" />
 								</div>
-								<p class="col-span-2 text-xs text-palenight-comment">
+								<p class="col-span-2 text-xs text-palenight-muted">
 									Applied before encoding. Both 0 means no resize; set one to 0 to derive it
 									and keep the aspect ratio.
 								</p>
@@ -509,7 +509,7 @@ function basename(path: string): string {
 							<div class="text-left">
 								<span class="text-sm font-medium text-palenight-bright">Deblocking filter</span>
 								<URadioGroup v-model="settings.filter" :items="FILTER_ITEMS" orientation="horizontal" class="mt-2" />
-								<p class="mt-1 text-xs text-palenight-comment">
+								<p class="mt-1 text-xs text-palenight-muted">
 									Auto lets the encoder pick the strength, so the two sliders do not apply.
 								</p>
 							</div>
@@ -523,7 +523,7 @@ function basename(path: string): string {
 							<div class="text-left">
 								<span class="text-sm font-medium text-palenight-bright">Compression target</span>
 								<URadioGroup v-model="targetKind" :items="TARGET_ITEMS" class="mt-2" />
-								<p class="mt-1 text-xs text-palenight-comment">
+								<p class="mt-1 text-xs text-palenight-muted">
 									A size or PSNR target overrides the quality slider.
 								</p>
 							</div>
@@ -554,7 +554,7 @@ function basename(path: string): string {
 								</span>
 							</div>
 							<UProgress v-model="currentPercent" :max="100" class="mt-2" />
-							<p class="mt-1 text-xs text-palenight-comment">
+							<p class="mt-1 text-xs text-palenight-muted">
 								libwebp does not always report a final 100%, so the bar can stop short of
 								the end before a file finishes.
 							</p>
@@ -573,7 +573,7 @@ function basename(path: string): string {
 							{{ reports.length }} converted, {{ failures.length }} failed.
 						</p>
 						<table v-if="reports.length" class="w-full text-left text-sm">
-							<thead class="text-xs tracking-wide text-palenight-comment uppercase">
+							<thead class="text-xs tracking-wide text-palenight-muted uppercase">
 								<tr>
 									<th class="py-1">File</th>
 									<th class="py-1 text-right">Before</th>
@@ -607,7 +607,7 @@ function basename(path: string): string {
 		<!-- The old app's fixed dot-textured footer band, with the version readout it never
 		     had but which belongs somewhere unobtrusive. -->
 		<footer class="dot-texture pointer-events-none fixed inset-x-0 bottom-0 h-24 border-t border-palenight-line bg-palenight-panel/90">
-			<p v-if="backendVersion" class="px-5 pt-3 font-mono text-[11px] text-palenight-comment" data-selectable>
+			<p v-if="backendVersion" class="px-5 pt-3 font-mono text-[11px] text-palenight-muted" data-selectable>
 				{{ backendVersion }}
 			</p>
 		</footer>
@@ -618,7 +618,7 @@ function basename(path: string): string {
 			class="fixed right-12 bottom-12 z-[100] flex size-[70px] items-center justify-center rounded-full text-3xl shadow-lg transition-transform"
 			:class="canConvert
 				? 'cursor-pointer bg-palenight-green text-palenight-bg hover:scale-105'
-				: 'cursor-not-allowed bg-palenight-selection text-palenight-comment'"
+				: 'cursor-not-allowed bg-palenight-selection text-palenight-muted'"
 			:disabled="!canConvert"
 			:title="canConvert ? 'Convert' : 'Choose images and a destination first'"
 			:aria-label="busy ? 'Converting' : 'Convert'"
