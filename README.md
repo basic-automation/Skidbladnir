@@ -152,13 +152,17 @@ What the new app can already do:
 
 Known gaps:
 
-- The released build is Windows only; no Linux or macOS release has been cut yet.
-- No installer or AppImage is produced on Linux yet; bundling needs `patchelf`.
+- Only a Linux `.deb` is released for the Tauri app. Windows and macOS installers are
+  built by CI for a tagged release; if a release does not list them, they did not build.
+- No AppImage is produced on the maintainer's machine, because bundling one needs
+  `patchelf`, which is not installed there. CI has it.
+- The app is not code-signed on any platform, and there is no auto-updater.
 - The Electron app still requires a manually downloaded `cwebp.exe`, and it will
   silently overwrite your original if you convert a WebP into the folder it already
   lives in. The Tauri app refuses that conversion instead.
-- WebP is the only output format. JPEG 2000 has been listed as "coming soon" since
-  2019 and has not been implemented.
+- WebP is the only output format. The long-promised JPEG 2000 was dropped as a goal —
+  it has no momentum outside medical and archival imaging. **AVIF** is the decided next
+  format; JPEG XL is being watched until browsers enable it without a flag.
 - The Electron app looks different from the screenshot above, which is the Tauri app.
 
 ## License
