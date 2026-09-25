@@ -415,6 +415,13 @@ prettier subset.
 
 Only once Phase 3 parity is `[x]` and a Tauri release has shipped.
 
+**The Electron app still resolves its dependencies** on Node 26 / npm 11: a dry-run install
+adds 267 packages including electron 9.4.4 and electron-builder 20.44.4, with no resolution
+failure. Its sources parse (`node --check main.js`, and the single inline `<script>` block
+in `index.html`). That is as far as this host can verify it — actually *running* it needs
+Windows and a downloaded `cwebp.exe`. So "master still has a working app" holds to the level
+that can be checked here, and no further claim is made.
+
 - [ ] Remove `main.js`, `index.html`, `index.css` and the Electron dependencies.
 - [ ] Remove the `resources/win/bin` cwebp-download step from the README.
 - [ ] Final Electron release tagged as the last of its line, so users on it have a
