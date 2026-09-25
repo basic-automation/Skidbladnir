@@ -43,6 +43,19 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
+  # Supply chain: advisories, licences, duplicate pressure and source allow-listing.
+  # Its own job because it is platform-independent and should not wait on three builds.
+  deny:
+    name: cargo deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - run: cargo deny check
+
   rust:
     name: rust / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

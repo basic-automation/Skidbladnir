@@ -28,7 +28,9 @@ repository = "https://github.com/basic-automation/Skidbladnir"
 # features are off so the binary carries the four formats the app accepts and no more.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tiff"] }
 libwebp-sys = "0.14"
-skidbladnir-encode = { path = "crates/skidbladnir-encode" }
+# The version is not redundant with the path: a path dependency without one resolves as a
+# wildcard `*`, which `cargo deny` rejects and which would publish as an unbounded range.
+skidbladnir-encode = { path = "crates/skidbladnir-encode", version = "0.1" }
 tauri = { version = "2", features = [] }
 # The native file and directory pickers. The app never browses the filesystem itself —
 # the user picks, and the app writes only where they pointed.

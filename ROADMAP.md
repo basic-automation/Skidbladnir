@@ -31,9 +31,6 @@ the Electron app exposes today.
       "the `frontendDist` configuration is set to ... but this path doesn't exist".
 - [ ] Cache the Nuxt build in CI as well as npm's download cache; today every job
       regenerates the frontend from scratch.
-- [ ] Add `.github/dependabot.yml` covering the `cargo`, `npm` and `github-actions`
-      ecosystems. Dependabot is enabled on the repo but there is no config file in-tree,
-      so its coverage is whatever the GitHub UI was set to and is not reviewable here.
 - [x] Add `rustfmt.toml` and a clippy configuration matching the owner's other Rust
       repos (hard tabs, `-D warnings` in CI). `rustfmt.toml` copies `DSP/rustfmt.toml`
       verbatim (hard tabs, `tab_spaces = 8`, `max_width = 10000`, horizontal imports,
@@ -334,9 +331,22 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       `{ workspace = true }`.
 - [ ] Keep dependencies current every run — both `cargo update` and the frontend's
       lockfile — not only when an advisory forces it.
-- [ ] `cargo deny` (advisories + licenses + bans) once the workspace exists.
+- [x] `cargo deny` (advisories + licences + bans + sources), as `deny.toml` and its own
+      CI job. All four checks pass. Two things it found on its first run:
+      - **A wildcard dependency of our own making.** `skidbladnir-encode` was declared as a
+        bare `{ path = ... }`, which resolves as `*`. Now carries `version = "0.1"`.
+      - Six **unmaintained** advisories reaching the tree transitively through Tauri —
+        `proc-macro-error` (RUSTSEC-2024-0370) and five `unic-*` crates
+        (RUSTSEC-2025-0075/0080/0081/0098/0100), each reporting "No safe upgrade is
+        available". These are unmaintained notices, not vulnerabilities. `unmaintained` is
+        therefore scoped to `workspace`, so an unmaintained crate *we* chose still fails
+        while Tauri's transitive tree does not produce an ignore-list that never shrinks.
+        Vulnerabilities and yanked crates still fail unconditionally.
+      The graph is checked against the Windows and macOS target triples as well as Linux,
+      so a Windows-only crate's licence or advisory is not invisible from this host.
 - [ ] Keep the screenshot in the README current as the UI changes; the one in the
       README today is the Electron app.
-- [ ] The repo has Dependabot enabled but no CI — Dependabot PRs currently have
-      nothing gating them. Phase 0's CI item fixes that; until then, review them
-      by hand rather than trusting green.
+- [x] Dependabot now has an in-tree config (`.github/dependabot.yml`) covering cargo,
+      the Nuxt frontend's npm tree, the Electron app's npm tree and github-actions, with
+      the Tauri and Nuxt crates/packages grouped so they update together instead of
+      opening mutually-conflicting PRs. Its PRs are gated by CI, which now exists.
