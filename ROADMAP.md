@@ -530,6 +530,13 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
 
 ## Cross-cutting
 
+- [ ] The saving percentage is computed **twice** — `Conversion::saving_percent()` in Rust
+      and `savingOf()` in `pages/index.vue`. Exactly the duplication this project avoids
+      for defaults and validation, and the two can disagree at the rounding edges. Fix by
+      serializing the computed value on `Conversion` and deleting the TypeScript copy;
+      note that adds an `f64` field, so `Conversion` loses its `Eq` derive. Left for the
+      next run rather than churned in during a release.
+
 - [x] Every new Rust dependency goes in `[workspace.dependencies]`, consumed with
       `{ workspace = true }`. Holds for all of them: `base64`, `image`, `libwebp-sys`,
       `serde`, `serde_json`, `skidbladnir-encode`, `tauri`, `tauri-build`,
