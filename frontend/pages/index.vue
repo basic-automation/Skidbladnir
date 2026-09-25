@@ -10,7 +10,7 @@
 //
 // Help text is libwebp's own wording from `cwebp -longhelp`. The Electron app was not a
 // source for it: its `-info` spans are live value readouts and it has one tooltip in total.
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, toRaw, watch } from 'vue'
 import type { ConversionReport, EncodeSettings, Mode, Preset } from '~/composables/useSettings'
 import { formatBytes, usesLossyOptions, usesManualFilter } from '~/composables/useSettings'
 import { invokeCommand, isTauri } from '~/composables/useTauri'
@@ -41,6 +41,9 @@ const currentFile = ref('')
 const currentPercent = ref(0)
 const doneCount = ref(0)
 const cancelling = ref(false)
+const presets = ref<{ name: string, settings: EncodeSettings }[]>([])
+const presetName = ref('')
+const presetError = ref('')
 let unlistenProgress: (() => void) | null = null
 const FALLBACK_MESSAGES: Record<string, string> = {
 	unreadable: 'Your saved settings could not be read, so the defaults were loaded.',
@@ -120,6 +123,7 @@ onMounted(async () => {
 		settings.value = loaded.preferences.settings
 		outputDirectory.value = loaded.preferences.outputDirectory ?? ''
 		// 'noFile' is a first launch, which is not worth telling anyone about.
+		presets.value = await invokeCommand<{ name: string, settings: EncodeSettings }[]>('list_presets')
 		if (loaded.fellBack && loaded.fellBack !== 'noFile') {
 			preferencesNotice.value = FALLBACK_MESSAGES[loaded.fellBack] ?? 'Your saved settings could not be used, so the defaults were loaded.'
 		}
@@ -226,6 +230,38 @@ async function convert() {
 		// Preferences are a convenience. Failing to store them must not look like a failed
 		// conversion, which is what the user actually asked for and which succeeded.
 	}
+}
+
+async function savePreset() {
+	if (!settings.value) return
+	presetError.value = ''
+	try {
+		presets.value = await invokeCommand('save_preset', { name: presetName.value, settings: settings.value })
+		presetName.value = ''
+	}
+	catch (error) {
+		presetError.value = error instanceof Error ? error.message : String(error)
+	}
+}
+
+async function deletePreset(name: string) {
+	presetError.value = ''
+	try {
+		presets.value = await invokeCommand('delete_preset', { name })
+	}
+	catch (error) {
+		presetError.value = error instanceof Error ? error.message : String(error)
+	}
+}
+
+function applyPreset(preset: { name: string, settings: EncodeSettings }) {
+	// Copied, not aliased: editing the controls afterwards must not silently rewrite the
+	// stored preset.
+	settings.value = structuredClone(toRaw(preset.settings))
+	// The target radio is UI state derived from settings.target, so bring it back in step.
+	targetKind.value = settings.value.target?.kind ?? 'none'
+	if (settings.value.target?.kind === 'size') targetSize.value = settings.value.target.value
+	if (settings.value.target?.kind === 'psnr') targetPsnr.value = settings.value.target.value
 }
 
 async function cancel() {
@@ -346,6 +382,31 @@ function basename(path: string): string {
 								Pick a preset before converting.
 							</p>
 						</div>
+					</ControlPanel>
+
+					<ControlPanel title="My presets">
+						<div v-if="presets.length" class="flex flex-wrap justify-center gap-2">
+							<div v-for="preset in presets" :key="preset.name" class="flex items-center gap-1 rounded border border-palenight-selection pl-3">
+								<button type="button" class="py-1 text-sm text-palenight-cyan hover:text-palenight-bright" @click="applyPreset(preset)">
+									{{ preset.name }}
+								</button>
+								<button type="button" class="px-2 py-1 text-palenight-comment hover:text-palenight-red" :aria-label="`Delete preset ${preset.name}`" @click="deletePreset(preset.name)">
+									<UIcon name="i-lucide-x" class="size-3.5" />
+								</button>
+							</div>
+						</div>
+						<p v-else class="text-center text-xs text-palenight-comment">
+							No saved presets yet. Set the controls how you like them and give them a name.
+						</p>
+						<div class="mx-auto flex w-full max-w-md gap-2">
+							<UInput v-model="presetName" placeholder="Name these settings…" class="flex-1" @keyup.enter="savePreset" />
+							<UButton color="neutral" variant="subtle" :disabled="!presetName.trim()" @click="savePreset">
+								Save
+							</UButton>
+						</div>
+						<p v-if="presetError" class="text-center text-xs text-palenight-red">
+							{{ presetError }}
+						</p>
 					</ControlPanel>
 
 					<ControlPanel title="Quality">

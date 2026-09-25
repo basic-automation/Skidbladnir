@@ -16,7 +16,9 @@ use skidbladnir_encode::{
 };
 use tauri::{Emitter as _, Manager as _};
 
-use crate::preferences::{self, LoadedPreferences, Preferences};
+use crate::{
+	preferences::{self, LoadedPreferences, Preferences}, presets::{self, Preset}
+};
 
 /// A human-readable description of the encode core, for the UI's about/diagnostics view.
 ///
@@ -149,6 +151,41 @@ pub struct ConversionProgress {
 	/// libwebp does not guarantee a final call at 100, so this reaching 100 is not how
 	/// completion is detected — the command returning is.
 	pub percent: u32,
+}
+
+/// The user's saved presets, sorted by name.
+///
+/// Returns an empty list rather than an error for a missing or damaged file: presets are a
+/// convenience and must not stop the window opening.
+#[tauri::command]
+#[must_use]
+#[expect(clippy::needless_pass_by_value, reason = "Tauri injects AppHandle by value; there is no by-reference form of a command argument")]
+pub fn list_presets(app: tauri::AppHandle) -> Vec<Preset> {
+	presets::load_from(&config_directory(&app))
+}
+
+/// Save the current settings under `name`, replacing any preset already called that.
+///
+/// Returns the full list afterwards so the UI does not have to re-fetch it.
+///
+/// # Errors
+///
+/// Returns the failure as a string for display.
+#[tauri::command]
+#[expect(clippy::needless_pass_by_value, reason = "Tauri injects AppHandle and deserializes arguments by value; the store borrows them")]
+pub fn save_preset(app: tauri::AppHandle, name: String, settings: EncodeSettings) -> Result<Vec<Preset>, String> {
+	presets::save_to(&config_directory(&app), &name, &settings).map_err(|error| error.to_string())
+}
+
+/// Delete the preset called `name`. Deleting one that is not there is not an error.
+///
+/// # Errors
+///
+/// Returns the failure as a string for display.
+#[tauri::command]
+#[expect(clippy::needless_pass_by_value, reason = "Tauri injects AppHandle and deserializes arguments by value; the store borrows them")]
+pub fn delete_preset(app: tauri::AppHandle, name: String) -> Result<Vec<Preset>, String> {
+	presets::delete_from(&config_directory(&app), &name).map_err(|error| error.to_string())
 }
 
 /// Convert one image, reporting progress through `on_progress`, which returns `false` to

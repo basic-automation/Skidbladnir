@@ -104,7 +104,8 @@ What the new app can already do:
   at their contents rather than their file extension.
 - Convert a batch of files, showing progress per file, with a Cancel button that stops
   without leaving a half-converted image behind.
-- Remember your settings and destination between launches.
+- Remember your settings and destination between launches, and save named presets of
+  your own.
 - Look like Skidbladnir: the original layout — dot-textured header and footer bands,
   dotted option groups, two-column controls and the circular action button — restyled
   in the Palenight palette.

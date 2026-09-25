@@ -287,7 +287,14 @@ prettier subset.
       which, letting the UI say the saved settings were discarded instead of silently
       losing them. A destination that has since been deleted or unmounted is dropped.
       Writes are staged and renamed, as the image writer is.
-- [ ] Named user presets (save/load an `EncodeSettings`).
+- [x] Named user presets (save/load an `EncodeSettings`), distinct from libwebp's own
+      `-preset` values. Stored in **one** JSON file keyed by name rather than a file per
+      preset, deliberately: a name typed by the user must never become a path component.
+      There is a test that saves a preset called `../../escaped` and asserts the config
+      directory still contains exactly one file and nothing was written outside it.
+      Names are trimmed, must be non-empty and at most 80 characters; settings the encoder
+      would reject are refused on save and hidden on load; a damaged file reads as empty
+      and is left on disk rather than destroyed.
 - [ ] Recursive directory input with an output-structure mirror.
 - [ ] Keyboard-navigable and screen-reader-labelled controls.
 
