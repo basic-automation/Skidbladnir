@@ -159,3 +159,49 @@ jobs:
         # missing or mismatched reference FAILS rather than skipping. On Windows it is
         # unset and the result is reported only.
         run: cargo test --package skidbladnir-encode --test parity -- --nocapture
+
+  # Drives the real window over WebDriver. Separate from the compile matrix because it
+  # needs a display, a WebKit driver and a full release build, and because a flaky display
+  # must not be able to mask a genuine compile failure on another platform.
+  window:
+    name: window smoke + accessibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install the system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev \
+            webkit2gtk-driver xvfb
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install the Tauri CLI and WebDriver shim
+        run: cargo install tauri-cli --locked --version '^2' && cargo install tauri-driver --locked
+
+      - name: Build the app
+        # `cargo tauri build` rather than `cargo build --release`: only the former enables
+        # the custom-protocol feature that makes the binary serve the embedded frontend.
+        # A binary built the other way opens showing "Connection refused" and every check
+        # below would fail for the wrong reason.
+        run: |
+          npm --prefix frontend ci
+          cd src-tauri && cargo tauri build --no-bundle
+
+      - name: Smoke test the window
+        # xvfb-run because there is no display on the runner. The harness forces the X11
+        # backend, which is what WebKitWebDriver needs.
+        run: xvfb-run -a scripts/smoke-test.sh
+
+      - name: Accessibility audit
+        run: xvfb-run -a scripts/a11y-audit.sh
