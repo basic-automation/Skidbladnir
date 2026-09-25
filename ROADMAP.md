@@ -230,12 +230,22 @@ The Electron app shells out to `cwebp.exe`. The Rust port should not.
       WebP into its own folder silently overwrites the original.
 - [x] A `convert_image` IPC command over the above, returning the input path, the output
       path and the sizes — enough for a batch UI to attach each result to its row.
-- [ ] Support the remaining input formats the Electron app's file filter lists but which
-      are only aliases today (`.jpe`, `.jif`, `.jfif`, `.jfi`) — content sniffing already
-      handles them, but confirm against real files from each producer.
-- [ ] Decide what to do about 16-bit PNG and CMYK JPEG input. The `image` crate reduces
-      both to 8-bit RGBA, and whether that matches libpng/libjpeg as `cwebp` drives them
-      is **untested** — the PNG parity test covers 8-bit RGBA only.
+- [x] The Electron file filter's JPEG aliases (`.jpe`, `.jif`, `.jfif`, `.jfi`) need no
+      special handling: input is identified by **content**, not extension, so they are all
+      simply JPEG. The picker still lists them so the dialog does not hide the user's
+      files.
+- [x] 16-bit PNG input. **This was a real divergence, found by testing it.** `cwebp`
+      reads PNGs through libpng with `png_set_strip_16`, which **discards the low byte** of
+      a 16-bit sample, while the `image` crate *scales* the value — so 16-bit input encoded
+      differently on the two paths (216 bytes vs `cwebp`'s 212 for RGBA, 168 vs 166 for
+      RGB) while every 8-bit colour type already matched exactly. The reduction now
+      truncates to match, and `matches_reference_cwebp_across_png_colour_types` pins
+      16-bit RGBA, 16-bit RGB, 8-bit grayscale and 8-bit grayscale+alpha so it cannot drift
+      back. 8-bit palette was verified identical by hand (the `image` crate cannot write
+      one, so it is not in the test).
+- [ ] CMYK JPEG input is still **untested** against libjpeg as `cwebp` drives it. The same
+      class of bug as the 16-bit PNG one above, in a decoder path nothing has exercised —
+      it needs a real CMYK JPEG fixture, which the `image` crate cannot write.
 
 ## Phase 3 — Frontend parity (Nuxt + Tailwind)
 

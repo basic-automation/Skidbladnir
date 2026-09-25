@@ -288,3 +288,86 @@ fn matches_reference_cwebp_through_a_png_file() {
 	assert!(mismatches.is_empty(), "{} of {} PNG-file conversions diverged. The raw-pixel parity test covers the encoder, so this is a DECODER difference between the `image` crate and libpng:\n  {}", mismatches.len(), subset.len(), mismatches.join("\n  "));
 	eprintln!("PNG PARITY OK: {} PNG-file conversions matched the reference cwebp end to end.", subset.len());
 }
+
+/// Parity across PNG **colour types and bit depths**, not just 8-bit RGBA.
+///
+/// This exists because a real divergence hid here. `cwebp` reads PNGs through libpng with
+/// `png_set_strip_16`, which discards the low byte of a 16-bit sample, while the `image`
+/// crate scales it — so 16-bit input encoded to different bytes on the two paths (216 vs
+/// 212 for RGBA, 168 vs 166 for RGB) while every 8-bit type matched. The reduction was
+/// changed to truncate; this test is what stops it drifting back.
+#[test]
+fn matches_reference_cwebp_across_png_colour_types() {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let Some(cwebp) = reference_cwebp() else {
+		let message = "COLOUR-TYPE PARITY NOT RUN: no reference cwebp found.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+	if reference_version(&cwebp) != Some(skidbladnir_encode::encoder::linked_encoder_version()) {
+		let message = "COLOUR-TYPE PARITY NOT RUN: reference cwebp and the linked libwebp are different versions.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	}
+
+	let dir = env::temp_dir().join(format!("skidbladnir-parity-colour-{}", std::process::id()));
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+	let (width, height) = (48_u32, 32_u32);
+
+	// One fixture per colour type the `image` crate can write.
+	let mut fixtures: Vec<(&str, PathBuf)> = Vec::new();
+
+	let path = dir.join("rgba16.png");
+	let mut buffer = image::ImageBuffer::<image::Rgba<u16>, Vec<u16>>::new(width, height);
+	for (x, y, pixel) in buffer.enumerate_pixels_mut() {
+		*pixel = image::Rgba([u16::try_from((x * 1300) % 65536).unwrap_or(0), u16::try_from((y * 2000) % 65536).unwrap_or(0), 30_000, if x % 3 == 0 { 20_000 } else { u16::MAX }]);
+	}
+	buffer.save_with_format(&path, image::ImageFormat::Png).expect("write rgba16");
+	fixtures.push(("16-bit RGBA", path));
+
+	let path = dir.join("rgb16.png");
+	let mut buffer = image::ImageBuffer::<image::Rgb<u16>, Vec<u16>>::new(width, height);
+	for (x, y, pixel) in buffer.enumerate_pixels_mut() {
+		*pixel = image::Rgb([u16::try_from((x * 1300) % 65536).unwrap_or(0), u16::try_from((y * 2000) % 65536).unwrap_or(0), 30_000]);
+	}
+	buffer.save_with_format(&path, image::ImageFormat::Png).expect("write rgb16");
+	fixtures.push(("16-bit RGB", path));
+
+	let path = dir.join("gray8.png");
+	let mut buffer = image::GrayImage::new(width, height);
+	for (x, y, pixel) in buffer.enumerate_pixels_mut() {
+		*pixel = image::Luma([u8::try_from((x * 5 + y * 3) % 256).unwrap_or(0)]);
+	}
+	buffer.save_with_format(&path, image::ImageFormat::Png).expect("write gray8");
+	fixtures.push(("8-bit grayscale", path));
+
+	let path = dir.join("graya8.png");
+	let mut buffer = image::GrayAlphaImage::new(width, height);
+	for (x, y, pixel) in buffer.enumerate_pixels_mut() {
+		*pixel = image::LumaA([u8::try_from((x * 7 + y) % 256).unwrap_or(0), if x % 4 == 0 { 60 } else { 255 }]);
+	}
+	buffer.save_with_format(&path, image::ImageFormat::Png).expect("write graya8");
+	fixtures.push(("8-bit grayscale + alpha", path));
+
+	let settings = EncodeSettings::default();
+	let mut mismatches: Vec<String> = Vec::new();
+	for (name, input) in &fixtures {
+		let theirs_path = dir.join(format!("cwebp-{}.webp", name.replace([' ', '+', '-'], "_")));
+		let run = Command::new(&cwebp).args(cwebp_args(&settings, input, &theirs_path)).output().expect("run the reference cwebp");
+		assert!(run.status.success(), "reference cwebp failed for `{name}`: {}", String::from_utf8_lossy(&run.stderr));
+
+		let ours_path = dir.join(format!("ours-{}.webp", name.replace([' ', '+', '-'], "_")));
+		skidbladnir_encode::source::encode_file(&settings, input, &ours_path).expect("our pipeline encodes");
+
+		let (expected, actual) = (fs::read(&theirs_path).expect("read reference"), fs::read(&ours_path).expect("read ours"));
+		if actual != expected {
+			mismatches.push(format!("`{name}`: ours {} bytes, cwebp {} bytes", actual.len(), expected.len()));
+		}
+	}
+
+	let _ = fs::remove_dir_all(&dir);
+	assert!(mismatches.is_empty(), "{} of {} PNG colour types diverged. This is a DECODER difference — check how `image` reduces the sample depth against what libpng does:\n  {}", mismatches.len(), fixtures.len(), mismatches.join("\n  "));
+	eprintln!("COLOUR-TYPE PARITY OK: {} PNG colour types matched the reference cwebp.", fixtures.len());
+}

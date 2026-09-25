@@ -155,12 +155,37 @@ pub fn load(path: &Path) -> Result<SourceImage, SourceError> {
 		}
 		SourceFormat::Png | SourceFormat::Jpeg | SourceFormat::Tiff => {
 			let decoded = image::load_from_memory(&bytes).map_err(|error| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: error.to_string() })?;
-			let rgba = decoded.into_rgba8();
+			let rgba = to_rgba8(decoded);
 			(rgba.width(), rgba.height(), rgba.into_raw())
 		}
 	};
 
 	Ok(SourceImage { width, height, pixels, format })
+}
+
+/// Reduce a decoded image to 8-bit RGBA the way `cwebp` does.
+///
+/// For 8-bit sources this is just `into_rgba8`. For **16-bit** sources it is not, and the
+/// difference is visible in the encoder's output: `cwebp` reads PNGs through libpng with
+/// `png_set_strip_16`, which **discards the low byte** of each sample, while the `image`
+/// crate scales the value into 8 bits, which rounds differently. Measured, not assumed —
+/// before this, a 16-bit RGBA fixture encoded to 216 bytes here against `cwebp`'s 212, and
+/// 16-bit RGB to 168 against 166. Truncating to match makes them identical.
+///
+/// 8-bit grayscale, grayscale+alpha and palette PNGs were already byte-identical and are
+/// left to `into_rgba8`.
+fn to_rgba8(decoded: image::DynamicImage) -> image::RgbaImage {
+	use image::DynamicImage::{ImageLuma16, ImageLumaA16, ImageRgb16, ImageRgba16};
+
+	if !matches!(decoded, ImageLuma16(_) | ImageLumaA16(_) | ImageRgb16(_) | ImageRgba16(_)) {
+		return decoded.into_rgba8();
+	}
+
+	let wide = decoded.into_rgba16();
+	let (width, height) = (wide.width(), wide.height());
+	// `sample >> 8` of a u16 is always within u8, so this cannot lose anything further.
+	let narrowed: Vec<u8> = wide.into_raw().into_iter().map(|sample| u8::try_from(sample >> 8).unwrap_or(u8::MAX)).collect();
+	image::RgbaImage::from_raw(width, height, narrowed).unwrap_or_else(|| image::RgbaImage::new(width, height))
 }
 
 /// Decode a WebP file with libwebp, returning `(width, height, rgba)`.
