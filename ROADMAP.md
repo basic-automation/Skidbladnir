@@ -484,6 +484,10 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       An animation is now detected before decoding and refused as
       `SourceError::Animated`, whose message says what the file is and why it cannot be
       converted. The UI warning was corrected to match.
+      The test **builds its own two-frame animation** with libwebp's `WebPAnimEncoder`
+      rather than reading one from an environment variable, so it always runs — a test
+      that skips unless someone remembered to set a variable is a test that never runs in
+      CI, and this one guards a refusal users depend on.
 - [ ] Re-encode animated WebP rather than refusing it, using libwebp's `WebPAnimEncoder`.
       This needs a per-frame settings story (do the advanced controls apply to every
       frame?) and a demuxer for the input, so it is a real piece of work, not a flag.

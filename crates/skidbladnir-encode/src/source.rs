@@ -819,12 +819,8 @@ mod tests {
 	/// it reported "libwebp rejected the file", which tells the user nothing.
 	#[test]
 	fn an_animated_webp_is_refused_by_name() {
-		let Some(animated) = animated_fixture() else {
-			// Building one needs a multi-frame encoder this crate does not link, so the
-			// fixture is supplied by the environment when available.
-			eprintln!("SKIPPED: set SKIDBLADNIR_ANIMATED_WEBP to an animated WebP to run this");
-			return;
-		};
+		let animated = animated_fixture().expect("libwebp built the animated fixture");
+		assert!(crate::inspect::inspect_webp(&animated).is_some_and(|info| info.has_animation), "the fixture must really be an animation");
 		let scratch = Scratch::new("animated");
 		let path = scratch.join("animation.webp");
 		fs::write(&path, &animated).expect("write the fixture");
@@ -838,9 +834,66 @@ mod tests {
 		assert!(inspected[0].webp.expect("webp details").has_animation);
 	}
 
-	/// An animated WebP fixture from the environment, if one was provided.
+	/// Build a real two-frame animated WebP with libwebp's own animation encoder.
+	///
+	/// Built rather than taken from the environment, so the test always runs. A test that
+	/// skips unless someone remembered to set a variable is a test that never runs in CI,
+	/// and this one guards a refusal a user actually depends on.
 	fn animated_fixture() -> Option<Vec<u8>> {
-		fs::read(std::env::var_os("SKIDBLADNIR_ANIMATED_WEBP")?).ok()
+		use libwebp_sys::{WEBP_ENCODER_ABI_VERSION, WEBP_MUX_ABI_VERSION, WebPAnimEncoderAdd, WebPAnimEncoderAssemble, WebPAnimEncoderDelete, WebPAnimEncoderNewInternal, WebPAnimEncoderOptions, WebPAnimEncoderOptionsInitInternal, WebPConfig, WebPConfigInitInternal, WebPData, WebPDataClear, WebPPicture, WebPPictureFree, WebPPictureImportRGBA, WebPPictureInitInternal, WebPPreset};
+
+		let (width, height) = (32_i32, 24_i32);
+
+		// SAFETY: every out-parameter below is a live local for the duration of the call,
+		// each picture is freed after it is added, and the encoder and WebPData are released
+		// before returning.
+		unsafe {
+			let mut options = std::mem::zeroed::<WebPAnimEncoderOptions>();
+			if WebPAnimEncoderOptionsInitInternal(&raw mut options, WEBP_MUX_ABI_VERSION.cast_signed()) == 0 {
+				return None;
+			}
+			let encoder = WebPAnimEncoderNewInternal(width, height, &raw const options, WEBP_MUX_ABI_VERSION.cast_signed());
+			if encoder.is_null() {
+				return None;
+			}
+
+			let mut config = std::mem::zeroed::<WebPConfig>();
+			if WebPConfigInitInternal(&raw mut config, WebPPreset::WEBP_PRESET_DEFAULT, 75.0, WEBP_ENCODER_ABI_VERSION.cast_signed()) == 0 {
+				WebPAnimEncoderDelete(encoder);
+				return None;
+			}
+
+			for (index, timestamp) in [(0_u8, 0_i32), (1, 100)] {
+				let pixels: Vec<u8> = (0..width * height).flat_map(|i| [u8::try_from(i % 256).unwrap_or(0), index.wrapping_mul(90), 60, 255]).collect();
+				let mut picture = std::mem::zeroed::<WebPPicture>();
+				if WebPPictureInitInternal(&raw mut picture, WEBP_ENCODER_ABI_VERSION.cast_signed()) == 0 {
+					WebPAnimEncoderDelete(encoder);
+					return None;
+				}
+				picture.use_argb = 1;
+				picture.width = width;
+				picture.height = height;
+				let imported = WebPPictureImportRGBA(&raw mut picture, pixels.as_ptr(), width * 4) != 0;
+				let added = imported && WebPAnimEncoderAdd(encoder, &raw mut picture, timestamp, &raw const config) != 0;
+				WebPPictureFree(&raw mut picture);
+				if !added {
+					WebPAnimEncoderDelete(encoder);
+					return None;
+				}
+			}
+			// A final null frame closes the last frame's duration.
+			WebPAnimEncoderAdd(encoder, std::ptr::null_mut(), 200, std::ptr::null());
+
+			let mut data = std::mem::zeroed::<WebPData>();
+			let assembled = WebPAnimEncoderAssemble(encoder, &raw mut data) != 0;
+			WebPAnimEncoderDelete(encoder);
+			if !assembled || data.bytes.is_null() {
+				return None;
+			}
+			let bytes = std::slice::from_raw_parts(data.bytes, data.size).to_vec();
+			WebPDataClear(&mut data);
+			Some(bytes)
+		}
 	}
 
 	#[test]
