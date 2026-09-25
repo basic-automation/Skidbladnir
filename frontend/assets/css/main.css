@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+/* Skidbladnir is a desktop window, not a web page: no document scroll, no text
+   selection on chrome, and no overscroll bounce. */
+@layer base {
+	html,
+	body,
+	#__nuxt {
+		height: 100%;
+	}
+
+	body {
+		overscroll-behavior: none;
+		-webkit-user-select: none;
+		user-select: none;
+	}
+
+	/* Anything the user needs to read or copy opts back in. */
+	input,
+	textarea,
+	[data-selectable] {
+		-webkit-user-select: text;
+		user-select: text;
+	}
+}

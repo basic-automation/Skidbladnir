@@ -37,6 +37,12 @@ the Electron app exposes today.
       with `all` and `pedantic` at warn, consumed by members via `lints.workspace = true`.
       `clippy::nursery` is deliberately excluded — its lints move between toolchains and
       the dev host (nightly) and CI (stable) would disagree.
+      **Formatting is checked by a separate CI job on nightly rustfmt.**
+      `imports_layout`, `imports_granularity` and `group_imports` are still nightly-gated;
+      stable rustfmt does not reject them, it silently ignores them and formats
+      differently, so a stable `cargo fmt --check` fails against a nightly-formatted tree.
+      Do not "fix" that by deleting the options — everything that *compiles* stays on
+      stable, and only rustfmt runs on nightly.
 - [x] Decide and record the app's product identity. **The answer:** the product is
       **Skidbladnir** — the repo name, the name every released tag carries, and the
       only one of the four candidates a user has ever seen. Concretely:
@@ -84,38 +90,66 @@ building and running the Electron app until Phase 6 retires it.
       `RUSTFLAGS= cargo +stable install tauri-cli --locked --version '^2'`.
       This is a host/toolchain quirk, not an in-tree nightly dependency — the workspace
       itself must keep building on stable.
-- [ ] Scaffold the Tauri 2 app: `src-tauri/` with `tauri.conf.json`, an appId, the
-      window config, and the existing `build/icon.png` wired as the app icon.
-- [ ] Scaffold the Nuxt frontend in `frontend/` with Tailwind, configured for
-      static generation (`ssr: false`) so Tauri can serve it from `dist/`.
-- [ ] Wire `beforeDevCommand` / `beforeBuildCommand` / `frontendDist` so
-      `cargo tauri dev` and `cargo tauri build` drive Nuxt correctly.
-- [ ] First green `cargo tauri build` on Linux producing a runnable binary.
-- [ ] First green `cargo tauri dev` window that renders the Nuxt shell.
+- [x] Scaffold the Tauri 2 app: `src-tauri/` with `tauri.conf.json`, the appId
+      `com.basicautomation.skidbladnir`, a 1000x780 window, a minimal capability set, and
+      a generated icon set. The shipped `build/icon.png` is 2363x2364, one pixel off
+      square, which `cargo tauri icon` rejects; it was cropped to 2363x2363 with
+      `cwebp -crop` + `dwebp` in the run's scratch dir. The mobile (android/ios) icon sets
+      `cargo tauri icon` also emits were deleted — this is a desktop-only product.
+      `tauri.conf.json` deliberately omits `version` so it inherits from
+      `src-tauri/Cargo.toml` and there is no third copy of the version to drift.
+- [x] Scaffold the Nuxt frontend in `frontend/` — Nuxt 4 + Tailwind 4 via
+      `@tailwindcss/vite`, `ssr: false`, the static Nitro preset, output in
+      `.output/public`. `package-lock.json` is committed.
+- [x] Wire `beforeDevCommand` / `beforeBuildCommand` / `frontendDist`. Two traps worth
+      recording, both found by running the app rather than reading the config:
+      - The before-commands run from the **repo root**, not from `src-tauri/`, so they are
+        `npm --prefix frontend run ...`. With `../frontend` they resolve outside the repo.
+      - The `custom-protocol` Cargo feature is what makes a binary serve the embedded
+        frontend. Without it — and a bare `cargo build --release` does not set it — the
+        release binary still points at `devUrl` and opens showing
+        "Could not connect to 127.0.0.1: Connection refused". **Release builds must go
+        through `cargo tauri build`**, which enables the feature.
+- [x] First green `cargo tauri build` on Linux producing a runnable binary.
+      `cargo tauri build --no-bundle` produces a 12 MB `skidbladnir`. Driven over
+      WebDriver with no dev server running, it loads `tauri://localhost/`, renders the
+      Nuxt shell, and its IPC commands return live data from the Rust core. `--no-bundle`
+      because the AppImage target needs `patchelf`, which is owner-gated; **no installer
+      or AppImage has been built.**
+- [x] First green dev window that renders the Nuxt shell — verified over WebDriver
+      against the Nuxt dev server on 127.0.0.1:1420: `document.title` is "Skidbladnir",
+      the shell renders, and `encoder_version` / `default_settings` return real values.
+      The shared harness at `~/.claude/scheduled-tasks/_shared/tauri-webdriver.sh` drives
+      this app correctly; its first green run against Skidbladnir is this one.
 - [ ] (owner-gated) `patchelf` is not installed on the dev host and AppImage bundling
       needs it — `sudo pacman -S patchelf`. Until then, verify the bare binary and
       report the AppImage as not built.
+
+- [ ] Decide the CSP properly. The window currently runs with
+      `script-src 'self' 'unsafe-inline'` because Nuxt emits an inline `<script
+      type="importmap">`. That is weaker than a desktop app needs; either make Nuxt drop
+      the importmap or move to hashes/nonces, and re-verify over WebDriver — a CSP that
+      silently blocks the bundle shows up as a blank window, not an error.
+- [ ] Add a WebDriver smoke test to CI or to a committed script, so "the window renders
+      and IPC answers" is a repeatable check rather than something each run redoes by
+      hand.
 
 ## Phase 2 — Encode core in Rust (the real work)
 
 The Electron app shells out to `cwebp.exe`. The Rust port should not.
 
-- [ ] **Decide the encode backend and record the decision here.** The options, with
-      the trade-off that actually matters — can it reproduce every control the
-      Electron UI exposes?
-      - `webp` / `libwebp-sys` crate: binds libwebp's `WebPConfig`, which carries
-        1:1 fields for every flag the current UI sets. Full parity, but it is a C
-        dependency compiled per platform.
-      - `image` crate: pure Rust, but its WebP encoder does not expose the advanced
-        knobs (segments, SNS, filter strength, partition limit, passes, target
-        size/PSNR) — it cannot reach parity.
-      - Tauri **sidecar**: ship the real `cwebp` binary per platform and keep shelling
-        out. Guaranteed parity and guaranteed behavioural identity, at the cost of
-        bundling three binaries and keeping them updated.
-      Recommended default unless research overturns it: **`libwebp-sys` via `WebPConfig`**,
-      with the sidecar kept as the documented fallback.
-- [ ] Define the `EncodeSettings` type — one Rust struct that is the single
-      representation of an encode job, serializable across the Tauri IPC boundary.
+- [x] **Decide the encode backend. The answer: `libwebp-sys`, binding libwebp's
+      `WebPConfig`.** It carries a 1:1 field for every control the Electron UI exposes, and
+      byte-for-byte parity with `cwebp` is now demonstrated rather than assumed (see the
+      parity item below). It vendors and statically links libwebp, so there is no system
+      library to locate on Windows or macOS — CI builds it green on all three platforms.
+      The `image` crate was rejected: it reaches none of the advanced knobs, so it cannot
+      reach parity. The **Tauri sidecar remains the documented fallback**, and
+      `cwebp_args()` keeps it a working one rather than a paper plan.
+- [x] Define the `EncodeSettings` type — `crates/skidbladnir-encode/src/settings.rs`.
+      Serializable, camelCase over the wire, `#[serde(default)]` so a partial payload from
+      the frontend fills in rather than failing, with every range and default taken from
+      the Electron UI's own `<input>` attributes and pinned by test.
 - [x] Implement the encoder and prove **parity against `cwebp` itself**.
       `crates/skidbladnir-encode/tests/parity.rs` encodes the same pixels through
       `encode_rgba` and through a real `cwebp` and compares the output byte for byte.

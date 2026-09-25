@@ -202,6 +202,30 @@ fn build_config(settings: &EncodeSettings) -> Result<WebPConfig, EncodeError> {
 	Ok(config)
 }
 
+/// The libwebp **encoder** version this binary is linked against, as
+/// `(major, minor, revision)`.
+///
+/// Worth surfacing rather than hardcoding: encoder output depends on it, so a parity
+/// claim or a bug report is only meaningful alongside the version that produced it.
+#[must_use]
+pub fn linked_encoder_version() -> (i32, i32, i32) {
+	// SAFETY: takes no arguments and reads a compile-time constant.
+	unpack_version(unsafe { libwebp_sys::WebPGetEncoderVersion() })
+}
+
+/// The libwebp **decoder** version this binary is linked against, as
+/// `(major, minor, revision)`.
+#[must_use]
+pub fn linked_decoder_version() -> (i32, i32, i32) {
+	// SAFETY: takes no arguments and reads a compile-time constant.
+	unpack_version(unsafe { libwebp_sys::WebPGetDecoderVersion() })
+}
+
+/// Split libwebp's packed version integer into its three components.
+const fn unpack_version(packed: c_int) -> (i32, i32, i32) {
+	((packed >> 16) & 0xff, (packed >> 8) & 0xff, packed & 0xff)
+}
+
 /// libwebp's encoder ABI version as the `c_int` its `*Internal` entry points expect.
 ///
 /// The `*Internal` functions take this so a binary built against one libwebp cannot
@@ -503,6 +527,16 @@ mod tests {
 	fn invalid_settings_are_rejected_before_libwebp_sees_them() {
 		let err = build_config(&EncodeSettings { method: 9, ..Default::default() }).expect_err("method 9 is out of range");
 		assert!(matches!(err, EncodeError::Settings(_)), "got {err:?}");
+	}
+
+	/// The version helpers are shown to users and used to gate the parity test, so a
+	/// zeroed or nonsense value must not pass unnoticed.
+	#[test]
+	fn linked_versions_are_plausible() {
+		for (label, (major, minor, revision)) in [("encoder", super::linked_encoder_version()), ("decoder", super::linked_decoder_version())] {
+			assert!(major >= 1, "{label} major version was {major}");
+			assert!((0..=255).contains(&minor) && (0..=255).contains(&revision), "{label} version {major}.{minor}.{revision}");
+		}
 	}
 
 	#[test]

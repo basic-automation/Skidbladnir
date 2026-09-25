@@ -42,14 +42,6 @@ fn reference_cwebp() -> Option<PathBuf> {
 	Command::new("cwebp").arg("-version").output().ok().filter(|out| out.status.success()).map(|_| PathBuf::from("cwebp"))
 }
 
-/// The version of the libwebp this crate is linked against, as `(major, minor, revision)`.
-fn linked_libwebp_version() -> (i32, i32, i32) {
-	// SAFETY: WebPGetEncoderVersion takes no arguments and only reads a compile-time
-	// constant.
-	let packed = unsafe { libwebp_sys::WebPGetEncoderVersion() };
-	((packed >> 16) & 0xff, (packed >> 8) & 0xff, packed & 0xff)
-}
-
 /// Parse the version `cwebp -version` prints on its first line, e.g. `1.6.0`.
 fn reference_version(cwebp: &Path) -> Option<(i32, i32, i32)> {
 	let out = Command::new(cwebp).arg("-version").output().ok()?;
@@ -181,7 +173,7 @@ fn matches_reference_cwebp_across_the_whole_control_surface() {
 		return;
 	};
 
-	let linked = linked_libwebp_version();
+	let linked = skidbladnir_encode::encoder::linked_encoder_version();
 	let Some(reference) = reference_version(&cwebp) else {
 		let message = format!("PARITY NOT RUN: could not read a version from `{} -version`.", cwebp.display());
 		assert!(!require, "{message}");

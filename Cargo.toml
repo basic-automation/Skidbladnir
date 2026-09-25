@@ -9,7 +9,7 @@
 #   frontend/   the Nuxt + Tailwind frontend (added in Phase 1)
 [workspace]
 resolver = "2"
-members = ["crates/skidbladnir-encode"]
+members = ["crates/skidbladnir-encode", "src-tauri"]
 
 [workspace.package]
 edition = "2024"
@@ -24,6 +24,9 @@ repository = "https://github.com/basic-automation/Skidbladnir"
 # Vendored and statically linked by default, so there is no system libwebp to find on
 # Windows or macOS.
 libwebp-sys = "0.14"
+skidbladnir-encode = { path = "crates/skidbladnir-encode" }
+tauri = { version = "2", features = [] }
+tauri-build = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

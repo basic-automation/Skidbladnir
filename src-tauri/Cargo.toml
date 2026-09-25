@@ -1,0 +1,38 @@
+[package]
+# The product identity decided in Phase 0: name, binary and appId are all Skidbladnir.
+name = "skidbladnir"
+# The product version, kept in lockstep with the root package.json. tauri.conf.json
+# deliberately omits `version` so it reads this one and there is no third copy to drift.
+version = "0.4.3"
+description = "Convert images to next-generation formats, with the whole encoder exposed."
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+# Tauri 2 builds the app as a library so the mobile targets can link it; the binary below
+# is a thin wrapper. Keeping the logic in the lib is also what makes it testable.
+name = "skidbladnir_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+# How Tauri decides where the frontend comes from. WITHOUT this feature the binary loads
+# `devUrl` (the Nuxt dev server); WITH it, the frontend is served from the assets embedded
+# at compile time from `frontendDist`. `cargo tauri build` enables it; a bare
+# `cargo build --release` does not, so such a binary starts up showing
+# "Connection refused" rather than the app. Release builds must go through
+# `cargo tauri build`.
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+skidbladnir-encode = { workspace = true }
+tauri = { workspace = true }
+
+[lints]
+workspace = true

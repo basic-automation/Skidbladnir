@@ -24,6 +24,25 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
+  # Formatting gets its own job on **nightly rustfmt**, deliberately, while everything
+  # that compiles stays on stable below.
+  #
+  # rustfmt.toml uses `imports_layout`, `imports_granularity` and `group_imports`, which
+  # rustfmt still gates behind nightly. Stable rustfmt does not error on them, it silently
+  # ignores them and formats the file differently — so a stable `cargo fmt --check` fails
+  # against a tree formatted by a nightly rustfmt, which is exactly what happened the first
+  # time this workflow ran. Using nightly here keeps the owner's import style (which needs
+  # nightly rustfmt by design) without letting nightly anywhere near the build.
+  fmt:
+    name: rustfmt (nightly)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
   rust:
     name: rust / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -61,11 +80,6 @@ jobs:
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
-
-      - name: cargo fmt
-        # Formatting is platform-independent, so checking it once is enough.
-        if: matrix.os == 'ubuntu-latest'
-        run: cargo fmt --all -- --check
 
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings

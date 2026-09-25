@@ -42,16 +42,38 @@ Builds are currently **Windows only**.
 
 ## Build from source
 
+The repository currently holds two applications: the Electron app that ships today,
+and the Rust + Tauri 2 app replacing it. Both build from a clean checkout.
+
+### The Tauri app (in progress)
+
+Requires a stable Rust toolchain, Node.js and npm. On Linux you also need
+`webkit2gtk-4.1` and its development headers.
+
+```bash
+cargo install tauri-cli --locked --version '^2'
+npm --prefix frontend install
+cargo tauri build --no-bundle
+```
+
+Run it from the workspace root with `cargo tauri dev`, which starts the Nuxt dev
+server and the window together. Release builds must go through `cargo tauri build`
+rather than `cargo build --release`: the `custom-protocol` feature that embeds the
+frontend is only enabled by the former.
+
+The encoder is libwebp itself, linked into the binary — there is no `cwebp` to
+download and no subprocess.
+
+### The Electron app (shipping today)
+
 Requires Node.js and npm.
 
 ```bash
-git clone https://github.com/basic-automation/Skidbladnir.git
-cd Skidbladnir
 npm install
 ```
 
-Skidbladnir shells out to the `cwebp` binary, which is not vendored in this
-repository. Download the [WebP precompiled
+It shells out to the `cwebp` binary, which is not vendored in this repository.
+Download the [WebP precompiled
 binaries](https://developers.google.com/speed/webp/docs/precompiled) and place
 `cwebp.exe` at `./resources/win/bin/cwebp.exe`.
 
@@ -64,18 +86,31 @@ npm run dist       # build a distributable into ./dist
 
 ## Status
 
-Skidbladnir is an Electron application. A rewrite onto **Rust + Tauri 2** with a
-**Nuxt + Tailwind** frontend — targeting Windows, Linux and macOS — is in progress;
-the work queue lives in [ROADMAP.md](ROADMAP.md). The Electron app remains the
-shipping application until that port reaches feature parity.
+The Electron app remains the shipping application. The **Rust + Tauri 2** rewrite,
+with a **Nuxt + Tailwind** frontend and targeting Windows, Linux and macOS, now has a
+working window and a complete encode core; the work queue lives in
+[ROADMAP.md](ROADMAP.md).
 
-Known gaps in the current release:
+What the new app can already do:
 
-- Windows only; no Linux or macOS build.
-- The `cwebp` binary is not bundled and must be downloaded manually.
+- Encode with libwebp linked directly into the binary, exposing every control listed
+  above — and its output is **byte-for-byte identical to `cwebp`** across 76 settings
+  spanning the whole control surface, verified by a test that runs both encoders on the
+  same pixels and compares the result.
+- Open a window that renders the frontend and talks to the Rust encode core.
+- Build and pass its tests on Windows, Linux and macOS in CI.
+
+Known gaps:
+
+- **The new app has no encoder UI yet.** The controls are implemented and tested in the
+  Rust core, but the window is still a shell — file selection and the control surface
+  land in Phase 3. Use the Electron app for real work.
+- The released build is Windows only; no Linux or macOS release has been cut yet.
+- No installer or AppImage is produced on Linux yet; bundling needs `patchelf`.
+- The Electron app still requires a manually downloaded `cwebp.exe`.
 - WebP is the only output format. JPEG 2000 has been listed as "coming soon" since
   2019 and has not been implemented.
-- No automated tests and no CI.
+- The screenshot above is the Electron app.
 
 ## License
 
