@@ -20,9 +20,16 @@ the Electron app exposes today.
 - [x] Remove `yarn.lock` / `package-lock.json` from `.gitignore` — a lockfile-less
       JS project cannot have reproducible builds, and the Tauri frontend will need one
       committed.
-- [ ] Add a CI workflow (`.github/workflows/ci.yml`): build + test the Rust workspace
-      and the frontend on `ubuntu-latest`, `windows-latest`, `macos-latest`. CI pins
-      **stable** Rust even though the dev host defaults to nightly.
+- [x] Add a CI workflow (`.github/workflows/ci.yml`): fmt, clippy `-D warnings`, build
+      and test the Rust workspace on `ubuntu-latest`, `windows-latest`, `macos-latest`,
+      on stable Rust, with `fail-fast: false` so a Windows- or macOS-only break is not
+      hidden. It installs the Linux Tauri system dependencies and a reference `cwebp`
+      (apt on Linux, brew on macOS) ahead of the phases that need them.
+- [ ] Add the **frontend** job to `ci.yml` once `frontend/` exists — the Rust job is
+      green but nothing yet builds Nuxt in CI.
+- [ ] Add `.github/dependabot.yml` covering the `cargo`, `npm` and `github-actions`
+      ecosystems. Dependabot is enabled on the repo but there is no config file in-tree,
+      so its coverage is whatever the GitHub UI was set to and is not reviewable here.
 - [x] Add `rustfmt.toml` and a clippy configuration matching the owner's other Rust
       repos (hard tabs, `-D warnings` in CI). `rustfmt.toml` copies `DSP/rustfmt.toml`
       verbatim (hard tabs, `tab_spaces = 8`, `max_width = 10000`, horizontal imports,

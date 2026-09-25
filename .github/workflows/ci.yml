@@ -1,0 +1,77 @@
+# CI for the Rust + Tauri 2 workspace. The Electron app at the repo root is not built
+# here: it is Windows-only, unbuildable on a Linux runner without its downloaded cwebp,
+# and is being retired in Phase 6 of ROADMAP.md.
+#
+# Rust is pinned to **stable**. The dev host defaults to nightly only because its global
+# cargo config sets a nightly-only rustflag; nothing in this tree may need nightly, and
+# this job is what proves it.
+name: CI
+
+on:
+  push:
+    # `routine/**` is included so the scheduled dev routine gets a real CI result on
+    # each increment it pushes, instead of only finding out when it opens the PR.
+    branches: [master, "routine/**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  rust:
+    name: rust / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Every platform's result is wanted on every run: a Windows-only or macOS-only
+      # break is exactly what the dev host cannot see, so do not cancel its siblings.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install the Linux system dependencies Tauri needs
+        # Needed from Phase 1 onward, when src-tauri/ joins the workspace: Tauri 2 links
+        # against webkit2gtk-4.1, and patchelf is what bundles the AppImage.
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev
+
+      - name: Install a reference cwebp for the encoder parity test
+        # The Phase 2 parity gate compares our encoder against the real cwebp. Where it
+        # is installable the test runs for real; where it is not the test skips loudly
+        # rather than passing quietly.
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get install --no-install-recommends -y webp
+
+      - name: Install a reference cwebp for the encoder parity test (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install webp
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt
+        # Formatting is platform-independent, so checking it once is enough.
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: cargo build
+        run: cargo build --workspace --all-targets
+
+      - name: cargo test
+        run: cargo test --workspace --all-features
