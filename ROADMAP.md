@@ -304,7 +304,18 @@ prettier subset.
       would reject are refused on save and hidden on load; a damaged file reads as empty
       and is left on disk rather than destroyed.
 - [ ] Recursive directory input with an output-structure mirror.
-- [ ] Keyboard-navigable and screen-reader-labelled controls.
+- [x] Keyboard-navigable and screen-reader-labelled controls. Audited in the running
+      window rather than assumed: **all 32 focusable controls now have an accessible name**
+      (3 did not — the preset-name and resize/target number fields, whose labels were
+      sibling spans rather than associated labels). Sliders carry an explicit `aria-label`
+      instead of relying on proximity; the mode, filter and target groups are real
+      `radiogroup`s with `aria-checked`; conversion status and results are `aria-live`
+      regions so progress is announced rather than only drawn; validation failures are
+      `role="alert"`. A `:focus-visible` ring was added because a keyboard-navigable app
+      whose focused control is invisible against a dark palette is not usable.
+- [ ] Run a real accessibility audit tool (axe-core in the WebDriver harness) rather than
+      the hand-written check used here — it covers contrast, ordering and ARIA misuse,
+      which a name-presence check does not.
 
 ## Phase 5 — Tri-platform packaging and release
 

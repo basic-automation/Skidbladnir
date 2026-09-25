@@ -388,11 +388,13 @@ function basename(path: string): string {
 					</ControlPanel>
 
 					<ControlPanel title="Mode">
-						<div class="grid gap-3 sm:grid-cols-2">
+						<div class="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Encoding mode">
 							<button
 								v-for="mode in MODES"
 								:key="mode.value"
 								type="button"
+								role="radio"
+								:aria-checked="settings.mode === mode.value"
 								class="rounded-md border px-3 py-2 text-left transition-colors"
 								:class="settings.mode === mode.value
 									? 'border-palenight-green bg-palenight-green/10'
@@ -428,7 +430,7 @@ function basename(path: string): string {
 							No saved presets yet. Set the controls how you like them and give them a name.
 						</p>
 						<div class="mx-auto flex w-full max-w-md gap-2">
-							<UInput v-model="presetName" placeholder="Name these settings…" class="flex-1" @keyup.enter="savePreset" />
+							<UInput v-model="presetName" placeholder="Name these settings…" aria-label="Name for the preset" class="flex-1" @keyup.enter="savePreset" />
 							<UButton color="neutral" variant="subtle" :disabled="!presetName.trim()" @click="savePreset">
 								Save
 							</UButton>
@@ -446,11 +448,11 @@ function basename(path: string): string {
 							<div class="grid grid-cols-2 gap-3 text-left">
 								<div>
 									<span class="text-sm font-medium text-palenight-bright">Resize width</span>
-									<UInput v-model.number="settings.resize.width" type="number" :min="0" class="mt-1 w-full" />
+									<UInput v-model.number="settings.resize.width" type="number" :min="0" aria-label="Resize width in pixels" class="mt-1 w-full" />
 								</div>
 								<div>
 									<span class="text-sm font-medium text-palenight-bright">Resize height</span>
-									<UInput v-model.number="settings.resize.height" type="number" :min="0" class="mt-1 w-full" />
+									<UInput v-model.number="settings.resize.height" type="number" :min="0" aria-label="Resize height in pixels" class="mt-1 w-full" />
 								</div>
 								<p class="col-span-2 text-xs text-palenight-comment">
 									Applied before encoding. Both 0 means no resize; set one to 0 to derive it
@@ -494,7 +496,7 @@ function basename(path: string): string {
 							<div class="flex flex-col gap-5">
 								<div v-if="targetKind === 'size'" class="text-left">
 									<span class="text-sm font-medium text-palenight-bright">Target size (bytes)</span>
-									<UInput v-model.number="targetSize" type="number" :min="1" class="mt-1 w-full" />
+									<UInput v-model.number="targetSize" type="number" :min="1" aria-label="Target size in bytes" class="mt-1 w-full" />
 								</div>
 								<ControlSlider v-if="targetKind === 'psnr'" v-model="targetPsnr" label="Target PSNR (dB)" :min="1" :max="10000" help="typically around 42" />
 							</div>
@@ -508,7 +510,7 @@ function basename(path: string): string {
 					</ControlPanel>
 
 					<ControlPanel v-if="busy" title="Converting">
-						<div class="text-left">
+						<div class="text-left" role="status" aria-live="polite">
 							<div class="flex items-baseline justify-between gap-3">
 								<span class="truncate text-sm text-palenight-bright" data-selectable>
 									{{ currentFile ? basename(currentFile) : 'Starting…' }}
@@ -530,9 +532,12 @@ function basename(path: string): string {
 						</div>
 					</ControlPanel>
 
-					<UAlert v-if="validationError" color="error" variant="subtle" :description="validationError" />
+					<UAlert v-if="validationError" color="error" variant="subtle" role="alert" :description="validationError" />
 
 					<ControlPanel v-if="reports.length || failures.length" title="Results">
+						<p class="sr-only" role="status" aria-live="polite">
+							{{ reports.length }} converted, {{ failures.length }} failed.
+						</p>
 						<table v-if="reports.length" class="w-full text-left text-sm">
 							<thead class="text-xs tracking-wide text-palenight-comment uppercase">
 								<tr>

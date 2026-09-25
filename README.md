@@ -109,6 +109,7 @@ What the new app can already do:
   when a file is an animation it cannot re-encode.
 - Remember your settings and destination between launches, and save named presets of
   your own.
+- Be driven entirely from the keyboard, with every control labelled for a screen reader.
 - Look like Skidbladnir: the original layout — dot-textured header and footer bands,
   dotted option groups, two-column controls and the circular action button — restyled
   in the Palenight palette.

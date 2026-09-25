@@ -17,7 +17,7 @@ defineProps<{
 	<div class="text-left" :class="disabled && 'opacity-40'">
 		<div class="flex items-baseline justify-between gap-3">
 			<span class="text-sm font-medium text-palenight-bright">{{ label }}</span>
-			<output class="font-mono text-sm tabular-nums text-palenight-green">{{ model }}</output>
+			<output class="font-mono text-sm tabular-nums text-palenight-green" aria-live="off">{{ model }}</output>
 		</div>
 		<USlider
 			v-model="model"
@@ -27,6 +27,7 @@ defineProps<{
 			:step="step ?? 1"
 			:disabled="disabled"
 			size="sm"
+			:aria-label="label"
 		/>
 		<p v-if="help" class="mt-1 text-xs text-palenight-comment">
 			{{ help }}

@@ -86,6 +86,15 @@
 		user-select: none;
 	}
 
+	/* A visible focus ring. The app is keyboard-navigable, which is worth nothing if the
+	   focused control cannot be seen — and the dark palette makes a default outline hard to
+	   pick out. `:focus-visible` rather than `:focus`, so it does not fire on mouse clicks. */
+	:focus-visible {
+		outline: 2px solid var(--color-palenight-cyan);
+		outline-offset: 2px;
+		border-radius: 2px;
+	}
+
 	/* Anything the user needs to read or copy opts back in. */
 	input,
 	textarea,
