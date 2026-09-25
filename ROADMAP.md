@@ -126,11 +126,23 @@ building and running the Electron app until Phase 6 retires it.
       needs it — `sudo pacman -S patchelf`. Until then, verify the bare binary and
       report the AppImage as not built.
 
-- [ ] Decide the CSP properly. The window currently runs with
-      `script-src 'self' 'unsafe-inline'` because Nuxt emits an inline `<script
-      type="importmap">`. That is weaker than a desktop app needs; either make Nuxt drop
-      the importmap or move to hashes/nonces, and re-verify over WebDriver — a CSP that
-      silently blocks the bundle shows up as a blank window, not an error.
+- [x] Tighten the CSP. Everything except inline script is now locked down:
+      `default-src 'self'`, `img-src 'self' data:` (the preview's two images and nothing
+      else), `font-src 'self'` (the Inter webfont is bundled, not fetched),
+      `connect-src 'self' ipc: http://ipc.localhost` — the app talks to Rust over the IPC
+      bridge and should never open a socket — plus `object-src`, `frame-src`,
+      `frame-ancestors` and `form-action` all `'none'`, and `base-uri 'self'`.
+- [ ] Remove `script-src 'unsafe-inline'`. Nuxt emits **three** inline scripts of its own
+      (a 44-byte importmap and two runtime bootstraps of 1213 and 154 bytes), so the
+      directive cannot simply be dropped — the window would go blank, and a CSP that
+      blocks the bundle shows up as a blank window rather than an error, so any attempt
+      must be re-verified over WebDriver.
+      The fix is SHA-256 hashes, and the blocker is *when*: `tauri::generate_context!`
+      reads `tauri.conf.json` at **compile** time, while the hashes are only known after
+      `nuxt generate` runs, so it needs a build step that computes them and injects them
+      between the two — and one that does not leave the tracked config file dirty.
+      Worth doing; not a one-line change, and mis-scoping it as one is how it would get
+      half-done.
 - [x] `scripts/smoke-test.sh` — a committed WebDriver smoke test, so "the window renders
       and IPC answers" is a repeatable check rather than something each run redoes by hand.
       Nine checks: the window loads from `tauri://localhost` (**not** a dev server — the
