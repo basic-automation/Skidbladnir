@@ -5,7 +5,9 @@ drives Google's `cwebp` encoder and exposes its full control surface — not jus
 quality slider — so you can tune an encode the way the command-line tool allows,
 without memorising the command line.
 
-![screenshot](https://basicautomation.io/ba-nextGenIMG/images/screenshots/nextgenimg-v0-1-1.webp)
+![The Skidbladnir window: a dot-textured header, the mode selector, and the quality and advanced encoder controls](resources/images/screenshot.webp)
+
+*The Tauri app. The Electron app it replaces looks different; see Status below.*
 
 ## Features
 
@@ -131,7 +133,7 @@ Known gaps:
   lives in. The Tauri app refuses that conversion instead.
 - WebP is the only output format. JPEG 2000 has been listed as "coming soon" since
   2019 and has not been implemented.
-- The screenshot above is the Electron app.
+- The Electron app looks different from the screenshot above, which is the Tauri app.
 
 ## License
 

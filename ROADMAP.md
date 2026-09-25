@@ -416,8 +416,11 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
 
 - [ ] Every new Rust dependency goes in `[workspace.dependencies]`, consumed with
       `{ workspace = true }`.
-- [ ] Keep dependencies current every run — both `cargo update` and the frontend's
-      lockfile — not only when an advisory forces it.
+- [x] Keep dependencies current every run — both `cargo update` and the frontend's
+      lockfile. Done this run: `cargo update` found nothing to move (already at the
+      highest compatible versions) and `npm update` refreshed the frontend lockfile.
+      `vue-router` 5.x is available and deliberately **not** taken: Nuxt 4 is on
+      vue-router 4, so forcing the major would break the framework, not modernise it.
 - [x] `cargo deny` (advisories + licences + bans + sources), as `deny.toml` and its own
       CI job. All four checks pass. Two things it found on its first run:
       - **A wildcard dependency of our own making.** `skidbladnir-encode` was declared as a
@@ -431,8 +434,14 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
         Vulnerabilities and yanked crates still fail unconditionally.
       The graph is checked against the Windows and macOS target triples as well as Linux,
       so a Windows-only crate's licence or advisory is not invisible from this host.
-- [ ] Keep the screenshot in the README current as the UI changes; the one in the
-      README today is the Electron app.
+- [x] The README screenshot is the Tauri app, committed in-tree at
+      `resources/images/screenshot.webp` rather than hot-linked from
+      `basicautomation.io`, so it cannot rot independently of the code. Captured from the
+      running release binary over the WebDriver harness and encoded by `cwebp` at the
+      app's own default settings — 91 KB for 1892x1720.
+- [ ] Re-capture the screenshot whenever the UI changes materially. It is now a scripted
+      step (WebDriver screenshot → crop → encode), so this is cheap; the risk is
+      forgetting, not effort.
 - [x] Dependabot now has an in-tree config (`.github/dependabot.yml`) covering cargo,
       the Nuxt frontend's npm tree, the Electron app's npm tree and github-actions, with
       the Tauri and Nuxt crates/packages grouped so they update together instead of
