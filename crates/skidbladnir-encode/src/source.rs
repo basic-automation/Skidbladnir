@@ -107,6 +107,17 @@ pub enum SourceError {
 		/// The path that failed.
 		path: PathBuf,
 	},
+	/// The file is an animated WebP, which this encoder cannot re-encode.
+	///
+	/// Distinguished from a decode failure because it is not one: the file is perfectly
+	/// valid, it is simply a kind of image the still-image encoder has nothing to do with.
+	/// libwebp's still decoder refuses it anyway, but with a message that tells the user
+	/// nothing about why.
+	#[error("`{path}` is an animated WebP. Skidbladnir encodes still images, so it cannot re-encode an animation.")]
+	Animated {
+		/// The path that failed.
+		path: PathBuf,
+	},
 	/// The file claims a supported format but could not be decoded.
 	#[error("could not decode `{path}` as {format}: {detail}")]
 	Decode {
@@ -133,7 +144,15 @@ pub fn load(path: &Path) -> Result<SourceImage, SourceError> {
 		// libwebp decodes its own format; using a second WebP implementation here would
 		// mean a WebP-to-WebP conversion round-trips through a decoder that is not the
 		// reference one.
-		SourceFormat::Webp => decode_webp(&bytes).ok_or_else(|| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: "libwebp rejected the file".to_owned() })?,
+		SourceFormat::Webp => {
+			// Check before decoding: libwebp's still decoder refuses an animation, but the
+			// failure it reports says nothing about why, and "libwebp rejected the file" is
+			// not something a user can act on.
+			if crate::inspect::inspect_webp(&bytes).is_some_and(|info| info.has_animation) {
+				return Err(SourceError::Animated { path: path.to_path_buf() });
+			}
+			decode_webp(&bytes).ok_or_else(|| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: "libwebp rejected the file".to_owned() })?
+		}
 		SourceFormat::Png | SourceFormat::Jpeg | SourceFormat::Tiff => {
 			let decoded = image::load_from_memory(&bytes).map_err(|error| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: error.to_string() })?;
 			let rgba = decoded.into_rgba8();
@@ -767,6 +786,36 @@ mod tests {
 		assert_eq!(super::mirrored_output_path(out, Path::new("../escaped.png")), None);
 		assert_eq!(super::mirrored_output_path(out, Path::new("nested/../../escaped.png")), None);
 		assert_eq!(super::mirrored_output_path(out, Path::new("/absolute/escaped.png")), None);
+	}
+
+	/// An animated WebP must be refused with a message that explains itself.
+	///
+	/// libwebp's still decoder already refuses one, so the behaviour was never wrong — but
+	/// it reported "libwebp rejected the file", which tells the user nothing.
+	#[test]
+	fn an_animated_webp_is_refused_by_name() {
+		let Some(animated) = animated_fixture() else {
+			// Building one needs a multi-frame encoder this crate does not link, so the
+			// fixture is supplied by the environment when available.
+			eprintln!("SKIPPED: set SKIDBLADNIR_ANIMATED_WEBP to an animated WebP to run this");
+			return;
+		};
+		let scratch = Scratch::new("animated");
+		let path = scratch.join("animation.webp");
+		fs::write(&path, &animated).expect("write the fixture");
+
+		let error = super::load(&path).expect_err("an animation must be refused");
+		assert!(matches!(error, super::SourceError::Animated { .. }), "got {error}");
+		assert!(error.to_string().contains("animated WebP"), "the message must say why: {error}");
+
+		// And the UI-facing inspection agrees, so the warning and the refusal cannot drift.
+		let inspected = super::inspect_paths(&[path]);
+		assert!(inspected[0].webp.expect("webp details").has_animation);
+	}
+
+	/// An animated WebP fixture from the environment, if one was provided.
+	fn animated_fixture() -> Option<Vec<u8>> {
+		fs::read(std::env::var_os("SKIDBLADNIR_ANIMATED_WEBP")?).ok()
 	}
 
 	#[test]

@@ -418,12 +418,19 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       via libwebp's `WebPGetFeatures`, which does **not** decode the image, so inspecting a
       large file is cheap. Surfaced through path inspection, so selecting a WebP tells the
       user what it already is.
-      It also closes a silent-failure hole: an **animated** WebP cannot be re-encoded by
-      this app, and converting one would keep only the first frame. The window now warns
-      before the conversion instead of the user discovering it afterwards.
-- [ ] Actually handle animated WebP, rather than only warning about it. Either re-encode
-      every frame (libwebp's `WebPAnimEncoder`) or refuse the conversion outright — warning
-      and then silently dropping frames is the worst of the three.
+      The window also warns when a selected file is an **animated** WebP, which this
+      still-image encoder cannot re-encode.
+- [x] Handle animated WebP properly. **Correcting an earlier claim in this file:** it was
+      recorded that converting an animation "would keep only the first frame". That was
+      asserted without testing and is **wrong** — libwebp's still decoder refuses an
+      animated WebP outright, so no frames were ever silently dropped. What was wrong was
+      the *message*: the user got "libwebp rejected the file", which explains nothing.
+      An animation is now detected before decoding and refused as
+      `SourceError::Animated`, whose message says what the file is and why it cannot be
+      converted. The UI warning was corrected to match.
+- [ ] Re-encode animated WebP rather than refusing it, using libwebp's `WebPAnimEncoder`.
+      This needs a per-frame settings story (do the advanced controls apply to every
+      frame?) and a demuxer for the input, so it is a real piece of work, not a flag.
 
 ## Cross-cutting
 

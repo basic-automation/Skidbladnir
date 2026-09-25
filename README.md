@@ -109,8 +109,8 @@ What the new app can already do:
 - Convert a whole folder, including subfolders, recreating its structure in the
   destination.
 - Preview the result beside the original before anything is written to disk.
-- Tell you what an existing WebP already is — size, lossy or lossless, alpha — and warn
-  when a file is an animation it cannot re-encode.
+- Tell you what an existing WebP already is — size, lossy or lossless, alpha — and say
+  plainly when a file is an animation it cannot re-encode, rather than failing obscurely.
 - Remember your settings and destination between launches, and save named presets of
   your own.
 - Be driven entirely from the keyboard, with every control labelled for a screen reader.

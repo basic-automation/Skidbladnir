@@ -407,8 +407,8 @@ function basename(path: string): string {
 						</p>
 						<p v-if="animatedInputs.length > 0" class="text-center text-xs text-palenight-yellow">
 							{{ animatedInputs.length === 1 ? 'One selected file is an animated WebP' : `${animatedInputs.length} selected files are animated WebPs` }}.
-							Skidbladnir encodes still images, so converting {{ animatedInputs.length === 1 ? 'it' : 'them' }}
-							would keep only the first frame.
+							Skidbladnir encodes still images, so {{ animatedInputs.length === 1 ? 'it' : 'they' }} will be
+							skipped with an error rather than converted.
 						</p>
 						<p v-if="dropRejected > 0" class="text-center text-xs text-palenight-yellow">
 							{{ dropRejected }} dropped {{ dropRejected === 1 ? 'file was' : 'files were' }} not a
