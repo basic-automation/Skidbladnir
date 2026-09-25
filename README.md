@@ -40,7 +40,15 @@ without memorising the command line.
 
 Grab a build from the [releases page](https://github.com/basic-automation/Skidbladnir/releases).
 
-Builds are currently **Windows only**.
+Two applications are released from this repository while the migration is under way:
+
+- **The Electron app** — the one to use for production work. Windows only; the last
+  release of it is v0.4.3.
+- **The Tauri app** — the rewrite, released as a **prerelease**. Linux `.deb` today.
+  Windows and macOS installers are not produced yet: those platforms compile and pass
+  their tests in CI, but nothing has bundled an installer for them.
+
+Each release says which of the two it contains.
 
 ## Build from source
 
