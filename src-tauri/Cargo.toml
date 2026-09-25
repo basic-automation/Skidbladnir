@@ -3,7 +3,7 @@
 name = "skidbladnir"
 # The product version, kept in lockstep with the root package.json. tauri.conf.json
 # deliberately omits `version` so it reads this one and there is no third copy to drift.
-version = "0.4.3"
+version = "0.5.0"
 description = "Convert images to next-generation formats, with the whole encoder exposed."
 edition.workspace = true
 license.workspace = true
