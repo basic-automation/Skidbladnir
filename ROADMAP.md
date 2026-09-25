@@ -369,6 +369,11 @@ prettier subset.
       the slider track alone and the label reads "· not in use", which is both accessible
       and clearer. The sixth was the selected mode card, whose tinted background lifts to
       `#373d42` where the muted token is 3.92:1; its description uses the brighter token.
+- [ ] Speed up the `window` CI job. `cargo install tauri-cli --locked` compiles the CLI
+      from source and dominates the job at roughly ten minutes on a cold cache. The Tauri
+      CLI also ships as a **prebuilt npm binary** (`@tauri-apps/cli`, invoked as
+      `npx tauri`), which would turn that into a download. Deliberately not changed during
+      the release run — a slow job that works beats a fast one that might not.
 - [ ] Run `scripts/a11y-audit.sh` in CI alongside the smoke test — same runner setup, and
       it needs `frontend/node_modules` present for axe-core.
 
