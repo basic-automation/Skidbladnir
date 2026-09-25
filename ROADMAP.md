@@ -335,10 +335,43 @@ Only once Phase 3 parity is `[x]` and a Tauri release has shipped.
 
 The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
 
-- [ ] Research and decide the next format. **AVIF** and **JPEG XL** are the formats
-      with current momentum; JPEG 2000 has essentially none outside medical and
-      archival imaging. Record the decision and the evidence here.
-- [ ] Either ship the chosen format, or strike the JPEG 2000 claim from the README.
+- [x] Research and decide the next format. **The answer: AVIF. JPEG XL is a watch item,
+      not a decision.** Evidence, gathered 2026-09-24:
+      - **AVIF is at roughly 90–93% global browser support** as of early 2026, and is the
+        recommended default with a JPEG fallback.
+        <https://orquitool.com/en/blog/avif-browser-support-2026-compatibility-webp-switch>
+      - **JPEG XL is still flag-gated almost everywhere.** Chrome 145 (February 2026) and
+        Firefox 152 (June 2026) restored JXL decoding, but both ship it **disabled behind a
+        flag**; only Safari enables it by default, which is about 16% of users. Chrome is
+        expected to enable it by default in H2 2026, which would take support to ~85–90%.
+        <https://theimagecdn.com/docs/jpeg-xl-explained>
+      - JPEG 2000 has no momentum outside medical and archival imaging. The README's
+        "coming soon" claim has already been struck.
+      Revisit JPEG XL once Chrome ships it unflagged — that single event moves it from
+      16% to usable, and it is the trigger to re-open this item.
+- [ ] Add AVIF output. The Rust options, with the trade-off that matters:
+      - **`ravif` 0.13** (BSD-3-Clause) — pure Rust on top of `rav1e`, no C toolchain, but
+        rav1e is slow and exposes a narrow control surface.
+      - **`libavif-sys` 0.17** (BSD-2-Clause, libavif 1.0.4) — the reference implementation
+        with the full control surface, at the cost of a C dependency per platform, which
+        is the same trade already accepted for libwebp.
+      Parity is not the constraint here (there is no existing AVIF behaviour to preserve),
+      so the question is control surface versus build complexity. **The encode core is
+      already format-agnostic in shape** — `EncodeSettings` is WebP-specific, so this needs
+      a decision on whether settings become an enum over formats or each format gets its
+      own type. Record that decision before writing code.
+- [ ] Watch **Tauri 3**, do not adopt it. `3.0.0-alpha` releases began appearing in
+      September 2026, bringing a CEF runtime option, plugin-API changes
+      (`js_init_script` → `initialization_script`) and removed deprecated APIs. Adopting an
+      alpha mid-migration would be trading a known platform for an unknown one; the app
+      stays on Tauri 2.x until 3 is stable and the migration has shipped.
+      <https://github.com/tauri-apps/tauri/releases>
+- [ ] **No libwebp upgrade is pending.** 1.6.0 (9 July 2025) is still the newest release,
+      and it is exactly what `libwebp-sys` vendors and what the parity test compares
+      against, so the parity claim is against current upstream.
+      <https://github.com/webmproject/libwebp/tags>
+- [x] Strike the JPEG 2000 claim from the README — done; the Status section now lists
+      WebP as the only output format rather than promising JPEG 2000.
 - [ ] Decoding/inspection of existing WebP files (dimensions, mode, alpha), which the
       app cannot do at all today.
 
