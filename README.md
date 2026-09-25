@@ -102,6 +102,8 @@ What the new app can already do:
   disclosure and shown only for the mode that actually uses them.
 - Accept files dropped onto the window, sorting out the ones it cannot read by looking
   at their contents rather than their file extension.
+- Convert a batch of files, showing progress per file, with a Cancel button that stops
+  without leaving a half-converted image behind.
 - Remember your settings and destination between launches.
 - Look like Skidbladnir: the original layout — dot-textured header and footer bands,
   dotted option groups, two-column controls and the circular action button — restyled
@@ -115,8 +117,6 @@ What the new app can already do:
 
 Known gaps:
 
-- The new app shows no per-file progress while a batch runs, and a running batch
-  cannot be cancelled.
 - The released build is Windows only; no Linux or macOS release has been cut yet.
 - No installer or AppImage is produced on Linux yet; bundling needs `patchelf`.
 - The Electron app still requires a manually downloaded `cwebp.exe`, and it will

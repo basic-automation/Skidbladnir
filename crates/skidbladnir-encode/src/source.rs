@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-	encoder::{EncodeError, RgbaImage, encode_rgba}, settings::EncodeSettings
+	encoder::{EncodeError, RgbaImage, encode_rgba_with_progress}, settings::EncodeSettings
 };
 
 /// The input formats Skidbladnir accepts, matching the Electron app's accepted list.
@@ -309,6 +309,20 @@ pub fn output_path_in(directory: PathBuf, input: &Path) -> PathBuf {
 /// are invalid, the output would overwrite the source, the output directory does not
 /// exist, or the write fails.
 pub fn encode_file(settings: &EncodeSettings, input: &Path, output: &Path) -> Result<Conversion, ConvertError> {
+	encode_file_with_progress(settings, input, output, &mut |_| true)
+}
+
+/// Convert an image file, reporting encoder progress and allowing the caller to stop.
+///
+/// `on_progress` receives 0..=100 and returns `false` to cancel. A cancelled conversion
+/// writes nothing at all: the encode fails before the staging file is created, so the
+/// destination is untouched and stopping a batch cannot leave a half-converted image.
+///
+/// # Errors
+///
+/// As [`encode_file`], plus a cancellation surfaced as [`ConvertError::Encode`] wrapping
+/// [`EncodeError::Cancelled`].
+pub fn encode_file_with_progress(settings: &EncodeSettings, input: &Path, output: &Path, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Conversion, ConvertError> {
 	let directory = output.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
 	if !directory.is_dir() {
 		return Err(ConvertError::MissingOutputDirectory { path: directory.to_path_buf() });
@@ -324,7 +338,7 @@ pub fn encode_file(settings: &EncodeSettings, input: &Path, output: &Path) -> Re
 
 	let source_bytes = fs::metadata(input).map(|meta| meta.len()).map_err(|source| SourceError::Read { path: input.to_path_buf(), source })?;
 	let image = load(input)?;
-	let encoded = encode_rgba(settings, &image.as_rgba())?;
+	let encoded = encode_rgba_with_progress(settings, &image.as_rgba(), on_progress)?;
 
 	// A temporary name in the destination directory, so the rename stays on one filesystem
 	// and is therefore atomic.
@@ -521,6 +535,35 @@ mod tests {
 		assert_eq!((loaded.width, loaded.height), (40, 30));
 		let original = load(&png).expect("decode the png");
 		assert_eq!(loaded.pixels, original.pixels, "a lossless round trip must return the exact pixels");
+	}
+
+	/// Cancelling must leave the destination exactly as it was, staging file included.
+	#[test]
+	fn a_cancelled_conversion_writes_nothing() {
+		let scratch = Scratch::new("cancel");
+		let input = scratch.join("source.png");
+		write_png(&input, 64, 64);
+		let output = scratch.join("out.webp");
+
+		let error = super::encode_file_with_progress(&EncodeSettings::default(), &input, &output, &mut |_| false).expect_err("must cancel");
+		assert!(matches!(error, ConvertError::Encode(crate::encoder::EncodeError::Cancelled)), "got {error}");
+		assert!(!output.exists(), "a cancelled conversion must not create the output");
+		let leftovers: Vec<_> = fs::read_dir(&scratch.0).expect("list").filter_map(Result::ok).filter(|e| e.file_name().to_string_lossy().contains(".part")).collect();
+		assert!(leftovers.is_empty(), "staging files left behind: {leftovers:?}");
+	}
+
+	#[test]
+	fn progress_reaches_the_caller_through_the_file_layer() {
+		let scratch = Scratch::new("fileprogress");
+		let input = scratch.join("source.png");
+		write_png(&input, 96, 64);
+		let mut seen = Vec::new();
+		super::encode_file_with_progress(&EncodeSettings::default(), &input, &scratch.join("out.webp"), &mut |percent| {
+			seen.push(percent);
+			true
+		})
+		.expect("converts");
+		assert!(!seen.is_empty(), "no progress reached the caller");
 	}
 
 	#[test]

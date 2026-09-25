@@ -238,10 +238,12 @@ prettier subset.
       destination and (in preset mode) a preset are chosen, and settings are validated by
       the **Rust** `validate_settings` command rather than a second copy of the rules in
       TypeScript. Per-file failures are listed without stopping the run.
-- [ ] Conversion progress. There is a busy state and a per-file result list, but no
-      per-file progress while a batch runs and no indication of which file is in flight.
-      libwebp exposes `WebPPicture::progress_hook`, which is the route to a real
-      percentage.
+- [x] Conversion progress and the completed state. Real per-file progress via libwebp's
+      `WebPPicture::progress_hook`, emitted as a `conversion-progress` event and shown as a
+      bar with a file counter.
+      **libwebp does not guarantee a final call at 100** — a default-quality encode of a
+      96x64 fixture stops reporting at 68 — so completion is signalled by the command
+      returning, not by the bar filling. The UI says so rather than appearing stuck.
 - [x] Original vs converted size readout — a results table with before, after, the
       percentage change and the encoded dimensions, per file.
 - [x] Theming. **Owner directive 2026-09-24: keep the Electron app's design, restyled in
@@ -264,9 +266,17 @@ prettier subset.
 
 ## Phase 4 — Beyond parity
 
-- [ ] Batch conversion: **partly done.** Multi-select and sequential conversion with
-      per-file success/failure rows work today. Still missing: cancel, and a queue that
-      reports progress as it goes rather than only when each file finishes.
+- [x] Batch conversion with a real queue, per-file status, and cancel. Multi-select,
+      sequential conversion with per-file success/failure rows, live progress, and a
+      Cancel button.
+      Cancellation works by the encode's own progress callback refusing to continue —
+      there is no way to interrupt `WebPEncode` from outside — and a cancelled conversion
+      writes nothing at all, so stopping a batch cannot leave a half-converted image.
+      **This is why `convert_image` is `async` with the encode on a blocking thread:** as a
+      synchronous command it held the event loop, and a cancel issued from the frontend
+      could never be delivered. Measured, not assumed — a 1800x1400 encode ran to
+      completion every time before the change, and cancels after 3 progress events with an
+      empty output directory after it.
 - [ ] Preview: original vs encoded, side by side, before committing the write.
 - [x] Persist settings between launches. `src-tauri/src/preferences.rs` stores the last
       used settings and destination as JSON in the OS's per-app config directory, saved

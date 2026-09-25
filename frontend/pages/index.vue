@@ -37,6 +37,11 @@ interface Preferences { settings: EncodeSettings, outputDirectory: string | null
 interface LoadedPreferences { preferences: Preferences, fellBack: string | null }
 
 const preferencesNotice = ref('')
+const currentFile = ref('')
+const currentPercent = ref(0)
+const doneCount = ref(0)
+const cancelling = ref(false)
+let unlistenProgress: (() => void) | null = null
 const FALLBACK_MESSAGES: Record<string, string> = {
 	unreadable: 'Your saved settings could not be read, so the defaults were loaded.',
 	unparseable: 'Your saved settings file was damaged, so the defaults were loaded.',
@@ -124,6 +129,13 @@ onMounted(async () => {
 	}
 
 	if (!isTauri()) return
+
+	const { listen } = await import('@tauri-apps/api/event')
+	unlistenProgress = await listen<{ inputPath: string, percent: number }>('conversion-progress', (event) => {
+		currentFile.value = event.payload.inputPath
+		currentPercent.value = event.payload.percent
+	})
+
 	// Tauri's NATIVE drag-drop, not the HTML5 kind: with the native handler enabled the
 	// webview's own dragover/drop events never fire, so listening for those would look
 	// correct and silently do nothing.
@@ -146,6 +158,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
 	unlistenDrop?.()
+	unlistenProgress?.()
 })
 
 async function chooseInputs() {
@@ -170,9 +183,13 @@ const canConvert = computed(() => {
 async function convert() {
 	if (!settings.value) return
 	busy.value = true
+	cancelling.value = false
 	reports.value = []
 	failures.value = []
 	validationError.value = ''
+	doneCount.value = 0
+	currentPercent.value = 0
+	currentFile.value = ''
 	try {
 		// Validate once against the encoder's own rules rather than a copy of them here.
 		await invokeCommand<EncodeSettings>('validate_settings', { settings: settings.value })
@@ -189,10 +206,16 @@ async function convert() {
 			reports.value.push(await invokeCommand<ConversionReport>('convert_image', { settings: settings.value, input, outputDirectory: outputDirectory.value }))
 		}
 		catch (error) {
-			failures.value.push({ path: input, message: error instanceof Error ? error.message : String(error) })
+			const message = error instanceof Error ? error.message : String(error)
+			// A cancellation is what the user asked for, not a failure to report as one.
+			if (message.includes('cancelled')) break
+			failures.value.push({ path: input, message })
 		}
+		doneCount.value += 1
 	}
 	busy.value = false
+	cancelling.value = false
+	currentFile.value = ''
 
 	// Remember what was used, after the run rather than on every slider drag: these are
 	// settings that demonstrably got as far as the encoder.
@@ -202,6 +225,16 @@ async function convert() {
 	catch {
 		// Preferences are a convenience. Failing to store them must not look like a failed
 		// conversion, which is what the user actually asked for and which succeeded.
+	}
+}
+
+async function cancel() {
+	cancelling.value = true
+	try {
+		await invokeCommand<void>('cancel_conversion')
+	}
+	catch {
+		cancelling.value = false
 	}
 }
 
@@ -381,6 +414,29 @@ function basename(path: string): string {
 							<ControlToggle v-model="settings.sharpYuv" label="Sharp YUV" help="sharper (and slower) RGB to YUV" />
 							<ControlToggle v-model="settings.lowMemory" label="Low memory" help="less memory, slower encoding" />
 							<ControlToggle v-model="settings.multiThreading" label="Multi-threading" help="use multi-threading if available" />
+						</div>
+					</ControlPanel>
+
+					<ControlPanel v-if="busy" title="Converting">
+						<div class="text-left">
+							<div class="flex items-baseline justify-between gap-3">
+								<span class="truncate text-sm text-palenight-bright" data-selectable>
+									{{ currentFile ? basename(currentFile) : 'Starting…' }}
+								</span>
+								<span class="font-mono text-sm tabular-nums text-palenight-green">
+									{{ doneCount }} / {{ inputPaths.length }}
+								</span>
+							</div>
+							<UProgress v-model="currentPercent" :max="100" class="mt-2" />
+							<p class="mt-1 text-xs text-palenight-comment">
+								libwebp does not always report a final 100%, so the bar can stop short of
+								the end before a file finishes.
+							</p>
+						</div>
+						<div class="flex justify-center">
+							<UButton color="error" variant="subtle" :loading="cancelling" @click="cancel">
+								{{ cancelling ? 'Stopping…' : 'Cancel' }}
+							</UButton>
 						</div>
 					</ControlPanel>
 

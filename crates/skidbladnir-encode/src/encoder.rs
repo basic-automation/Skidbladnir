@@ -90,6 +90,12 @@ pub enum EncodeError {
 	/// `WebPEncode` failed, reporting this `error_code` from `WebPEncodingError`.
 	#[error("libwebp encoding failed with error code {0}")]
 	EncodeFailed(c_int),
+	/// The caller's progress callback asked to stop.
+	///
+	/// Distinguished from a failure because it is not one: the user asked for it, and the
+	/// UI should not show it as an error.
+	#[error("the encode was cancelled")]
+	Cancelled,
 }
 
 /// Translate settings into a libwebp `WebPConfig`.
@@ -264,6 +270,36 @@ impl Drop for Writer {
 	}
 }
 
+/// What the caller's progress callback holds while an encode runs.
+///
+/// libwebp only carries a single `void*`, so this is what that pointer points at.
+struct ProgressState<'a> {
+	/// Called with 0..=100. Returning `false` aborts the encode.
+	on_progress: &'a mut dyn FnMut(u32) -> bool,
+	/// Set when the callback asked to stop, so the caller can tell a cancellation from a
+	/// genuine encode failure — libwebp reports both as `WebPEncode` returning 0.
+	cancelled: bool,
+}
+
+/// The `extern "C"` shim libwebp calls, which forwards to the Rust closure.
+///
+/// # Safety
+///
+/// `picture` must be non-null and its `user_data` must point at a live [`ProgressState`],
+/// which holds for the duration of [`encode_rgba_with_progress`] and nowhere else.
+unsafe extern "C" fn progress_trampoline(percent: c_int, picture: *const WebPPicture) -> c_int {
+	let Some(picture) = (unsafe { picture.as_ref() }) else { return 1 };
+	let state = picture.user_data.cast::<ProgressState<'_>>();
+	let Some(state) = (unsafe { state.as_mut() }) else { return 1 };
+	let percent = u32::try_from(percent).unwrap_or(0).min(100);
+	if (state.on_progress)(percent) {
+		1
+	} else {
+		state.cancelled = true;
+		0
+	}
+}
+
 /// Encode an RGBA image to a WebP bitstream.
 ///
 /// # Errors
@@ -271,6 +307,27 @@ impl Drop for Writer {
 /// Returns [`EncodeError`] if the settings are invalid, the image buffer does not match
 /// its stated dimensions, or libwebp fails to allocate, rescale or encode.
 pub fn encode_rgba(settings: &EncodeSettings, image: &RgbaImage<'_>) -> Result<Vec<u8>, EncodeError> {
+	encode_rgba_with_progress(settings, image, &mut |_| true)
+}
+
+/// Encode an RGBA image, reporting progress and allowing the caller to stop.
+///
+/// `on_progress` is called by libwebp with a percentage from 0 to 100. Returning `false`
+/// aborts the encode, which is how cancellation works: there is no way to interrupt
+/// `WebPEncode` from another thread, so stopping has to come from inside its own progress
+/// callback. A cancelled encode returns [`EncodeError::Cancelled`] rather than a failure,
+/// because the user asked for it.
+///
+/// Two things about libwebp's reporting that a progress bar has to allow for, both
+/// observed rather than assumed: it does not call the hook at a fixed cadence, and **it
+/// does not guarantee a final call at 100** — a default-quality encode of a 96x64 image
+/// stops reporting at 68. Completion is signalled by this function returning, so a UI
+/// that waits for 100% will sit at two-thirds forever.
+///
+/// # Errors
+///
+/// As [`encode_rgba`], plus [`EncodeError::Cancelled`] if `on_progress` returned `false`.
+pub fn encode_rgba_with_progress(settings: &EncodeSettings, image: &RgbaImage<'_>, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
 	let config = build_config(settings)?;
 
 	let expected = (image.width as usize).checked_mul(image.height as usize).and_then(|pixels| pixels.checked_mul(4)).ok_or(EncodeError::ImageTooLarge { width: image.width, height: image.height })?;
@@ -316,7 +373,23 @@ pub fn encode_rgba(settings: &EncodeSettings, image: &RgbaImage<'_>) -> Result<V
 	picture.0.writer = Some(WebPMemoryWrite);
 	picture.0.custom_ptr = (&raw mut writer.0).cast();
 
-	if unsafe { WebPEncode(&raw const config, &raw mut picture.0) } == 0 {
+	// `state` lives on this stack frame for the whole of WebPEncode and is unreachable
+	// afterwards, which is exactly the lifetime the trampoline's safety requires.
+	let mut state = ProgressState { on_progress, cancelled: false };
+	picture.0.user_data = (&raw mut state).cast();
+	picture.0.progress_hook = Some(progress_trampoline);
+
+	let encoded = unsafe { WebPEncode(&raw const config, &raw mut picture.0) };
+	// Clear the borrow of `state` from the picture before it goes out of scope.
+	picture.0.progress_hook = None;
+	picture.0.user_data = std::ptr::null_mut();
+
+	if encoded == 0 {
+		// libwebp reports a cancelled encode the same way it reports a failed one, so the
+		// flag the trampoline set is the only way to tell them apart.
+		if state.cancelled {
+			return Err(EncodeError::Cancelled);
+		}
 		return Err(EncodeError::EncodeFailed(picture.0.error_code as c_int));
 	}
 
@@ -606,6 +679,68 @@ mod tests {
 	fn zero_dimensions_are_rejected() {
 		assert!(encode_rgba(&EncodeSettings::default(), &RgbaImage { width: 0, height: 4, pixels: &[] }).is_err());
 		assert!(encode_rgba(&EncodeSettings::default(), &RgbaImage { width: 4, height: 0, pixels: &[] }).is_err());
+	}
+
+	/// The hook must actually fire, with sane percentages, and must not change the output.
+	#[test]
+	fn progress_is_reported_without_changing_the_output() {
+		let pixels = fixture(96, 64);
+		let image = RgbaImage { width: 96, height: 64, pixels: &pixels };
+		let settings = EncodeSettings::default();
+
+		let mut seen: Vec<u32> = Vec::new();
+		let with_hook = super::encode_rgba_with_progress(&settings, &image, &mut |percent| {
+			seen.push(percent);
+			true
+		})
+		.expect("encodes");
+
+		assert!(!seen.is_empty(), "libwebp reported no progress at all");
+		assert!(seen.iter().all(|percent| *percent <= 100), "out-of-range percentages: {seen:?}");
+		assert!(seen.windows(2).all(|pair| pair[0] <= pair[1]), "progress went backwards: {seen:?}");
+		// Deliberately NOT asserting that the last report is 100. libwebp does not guarantee
+		// it: a default-quality encode of this fixture stops reporting at 68. Completion is
+		// signalled by the encode returning, not by the hook reaching 100, and a UI that
+		// waits for 100% would sit at two-thirds forever.
+		assert!(seen.len() > 1, "expected more than one progress report: {seen:?}");
+
+		// Attaching a hook must not perturb the encoder.
+		assert_eq!(with_hook, encode_rgba(&settings, &image).expect("encodes"), "the progress hook changed the output");
+	}
+
+	/// Returning false from the hook is how cancellation works, and it must be reported as
+	/// a cancellation rather than as an encode failure.
+	#[test]
+	fn returning_false_cancels_the_encode() {
+		let pixels = fixture(96, 64);
+		let image = RgbaImage { width: 96, height: 64, pixels: &pixels };
+		let mut calls = 0_u32;
+		let error = super::encode_rgba_with_progress(&EncodeSettings::default(), &image, &mut |_| {
+			calls += 1;
+			false
+		})
+		.expect_err("a cancelled encode must not succeed");
+		assert!(matches!(error, EncodeError::Cancelled), "got {error:?}");
+		assert_eq!(calls, 1, "the encode should stop at the first refusal");
+	}
+
+	/// Cancelling partway through must still be a cancellation, not a corrupt success.
+	#[test]
+	fn cancelling_partway_through_is_still_a_cancellation() {
+		let pixels = fixture(128, 128);
+		let image = RgbaImage { width: 128, height: 128, pixels: &pixels };
+		let mut calls = 0_u32;
+		let result = super::encode_rgba_with_progress(&EncodeSettings { method: 6, ..Default::default() }, &image, &mut |_| {
+			calls += 1;
+			calls < 2
+		});
+		// A small image may complete inside a single callback, in which case there was
+		// nothing left to cancel — both outcomes are correct, a corrupt one is not.
+		match result {
+			Err(EncodeError::Cancelled) => {}
+			Ok(bytes) => assert_eq!(&bytes[0..4], b"RIFF", "if it completed, it must be a valid file"),
+			Err(other) => panic!("unexpected failure: {other}"),
+		}
 	}
 
 	/// Quality must actually move the output size, or the control is decorative.

@@ -4,13 +4,17 @@
 //! behaviour stays testable without a window. Errors cross the boundary as strings
 //! because that is all the frontend can act on; the typed error stays on this side.
 
-use std::path::PathBuf;
+use std::{
+	path::PathBuf, sync::{
+		Arc, atomic::{AtomicBool, Ordering}
+	}
+};
 
 use serde::Serialize;
 use skidbladnir_encode::{
-	encoder::{linked_decoder_version, linked_encoder_version}, settings::EncodeSettings, source::{Conversion, PathInspection, encode_file, inspect_paths, output_path_in}
+	encoder::{linked_decoder_version, linked_encoder_version}, settings::EncodeSettings, source::{Conversion, PathInspection, encode_file_with_progress, inspect_paths, output_path_in}
 };
-use tauri::Manager as _;
+use tauri::{Emitter as _, Manager as _};
 
 use crate::preferences::{self, LoadedPreferences, Preferences};
 
@@ -116,31 +120,100 @@ pub fn save_preferences(app: tauri::AppHandle, preferences: Preferences) -> Resu
 	preferences::save_to(&config_directory(&app), &preferences).map_err(|error| error.to_string())
 }
 
+/// Shared cancellation flag, held in Tauri's managed state.
+///
+/// There is no way to interrupt `WebPEncode` from outside, so cancelling means the encode
+/// noticing this flag from inside its own progress callback and refusing to continue.
+#[derive(Debug, Default)]
+pub struct CancelFlag(pub Arc<AtomicBool>);
+
+/// Ask the running conversion to stop.
+///
+/// Takes effect at the encoder's next progress callback, so it is not instantaneous — a
+/// file already being written finishes or is discarded cleanly rather than being cut off
+/// half-written.
+#[tauri::command]
+#[expect(clippy::needless_pass_by_value, reason = "Tauri injects State by value; there is no by-reference form of a command argument")]
+pub fn cancel_conversion(state: tauri::State<'_, CancelFlag>) {
+	state.0.store(true, Ordering::Relaxed);
+}
+
+/// How far along a conversion is, emitted as the `conversion-progress` event.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversionProgress {
+	/// The file being converted.
+	pub input_path: PathBuf,
+	/// Encoder progress, 0 to 100.
+	///
+	/// libwebp does not guarantee a final call at 100, so this reaching 100 is not how
+	/// completion is detected — the command returning is.
+	pub percent: u32,
+}
+
+/// Convert one image, reporting progress through `on_progress`, which returns `false` to
+/// stop.
+///
+/// Separate from the command so the behaviour can be tested without a Tauri `State` or an
+/// `AppHandle` — the command below is a thin wrapper that supplies the event emitter and
+/// the cancellation flag.
+///
+/// # Errors
+///
+/// Returns the failure as a string for display.
+pub fn convert_one(settings: &EncodeSettings, input: PathBuf, output_directory: PathBuf, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<ConversionReport, String> {
+	let output_path = output_path_in(output_directory, &input);
+	let conversion = encode_file_with_progress(settings, &input, &output_path, on_progress).map_err(|error| error.to_string())?;
+	Ok(ConversionReport { input_path: input, output_path, conversion })
+}
+
 /// Convert one image into `output_directory`, using the Electron app's output naming.
 ///
 /// The destination is a *directory* rather than a file path, matching how the UI asks the
 /// user for it, and the filename is derived the same way the Electron app derives it so
 /// converted files land where people already expect.
 ///
-/// Refusing to overwrite the source is enforced in the encode core rather than here, so
-/// no caller can skip it.
+/// Refusing to overwrite the source is enforced in the encode core rather than here, so no
+/// caller can skip it.
+///
+/// # Why this is `async` with the work on a blocking thread
+///
+/// A **synchronous** Tauri command blocks the event loop for as long as it runs, which for
+/// a large image is seconds. That does not merely make the window unresponsive: it makes
+/// cancellation impossible, because `cancel_conversion` can never be delivered while the
+/// encode holds the thread. Measured, not assumed — with the synchronous version, a
+/// cancel issued from the frontend on the first progress event never arrived and a
+/// 1800x1400 encode ran to completion every time. Moving the encode to a blocking thread
+/// and awaiting it keeps the loop free, so both progress events and the cancel get through.
 ///
 /// # Errors
 ///
-/// Returns the failure as a string for display.
+/// Returns the failure as a string for display, including a cancellation.
 #[tauri::command]
-#[expect(clippy::needless_pass_by_value, reason = "Tauri deserializes command arguments into owned values; the encode core borrows them")]
-pub fn convert_image(settings: EncodeSettings, input: PathBuf, output_directory: PathBuf) -> Result<ConversionReport, String> {
-	let output_path = output_path_in(output_directory, &input);
-	let conversion = encode_file(&settings, &input, &output_path).map_err(|error| error.to_string())?;
-	Ok(ConversionReport { input_path: input, output_path, conversion })
+pub async fn convert_image(app: tauri::AppHandle, state: tauri::State<'_, CancelFlag>, settings: EncodeSettings, input: PathBuf, output_directory: PathBuf) -> Result<ConversionReport, String> {
+	// Each file starts uncancelled, so a cancel left over from a previous batch cannot kill
+	// the next one.
+	let cancelled = Arc::clone(&state.0);
+	cancelled.store(false, Ordering::Relaxed);
+	let reporting_path = input.clone();
+
+	tauri::async_runtime::spawn_blocking(move || {
+		convert_one(&settings, input, output_directory, &mut |percent| {
+			// Emitting is best-effort: a failed event must not abort a conversion the user
+			// asked for.
+			let _ = app.emit("conversion-progress", ConversionProgress { input_path: reporting_path.clone(), percent });
+			!cancelled.load(Ordering::Relaxed)
+		})
+	})
+	.await
+	.map_err(|error| format!("the conversion thread failed: {error}"))?
 }
 
 #[cfg(test)]
 mod tests {
 	use skidbladnir_encode::settings::{EncodeSettings, Mode};
 
-	use super::{convert_image, default_settings, encoder_version, inspect_dropped_paths, validate_settings};
+	use super::{convert_one, default_settings, encoder_version, inspect_dropped_paths, validate_settings};
 
 	/// The version string is shown to users, so it must actually contain versions rather
 	/// than a placeholder.
@@ -214,7 +287,7 @@ mod tests {
 		let bytes = skidbladnir_encode::encoder::encode_rgba(&EncodeSettings { mode: Mode::Lossless, ..Default::default() }, &skidbladnir_encode::encoder::RgbaImage { width: 1, height: 1, pixels: &pixels }).expect("encode the fixture");
 		std::fs::write(&webp, &bytes).expect("write the fixture");
 
-		let error = convert_image(EncodeSettings::default(), webp.clone(), dir.clone()).expect_err("must refuse");
+		let error = convert_one(&EncodeSettings::default(), webp.clone(), dir.clone(), &mut |_| true).expect_err("must refuse");
 		assert!(error.contains("refusing to overwrite the source"), "got {error}");
 		assert_eq!(std::fs::read(&webp).expect("read it back"), bytes, "the source must be untouched");
 
