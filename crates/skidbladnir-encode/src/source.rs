@@ -176,6 +176,11 @@ pub struct PathInspection {
 	pub supported: bool,
 	/// The detected format's display name, or `None` if it is not an accepted image.
 	pub format: Option<&'static str>,
+	/// For a WebP, what its header says. `None` for every other format.
+	///
+	/// Carried here so the UI can warn before converting: an **animated** WebP cannot be
+	/// re-encoded by this app, and converting one would silently keep only the first frame.
+	pub webp: Option<crate::inspect::WebpInfo>,
 }
 
 /// Identify which of these paths are images Skidbladnir can read.
@@ -190,7 +195,10 @@ pub fn inspect_paths(paths: &[PathBuf]) -> Vec<PathInspection> {
 	paths.iter()
 		.map(|path| {
 			let format = read_prefix(path).as_deref().and_then(SourceFormat::sniff);
-			PathInspection { path: path.clone(), supported: format.is_some(), format: format.map(SourceFormat::name) }
+			// Only WebP gets a second read, and only of its header — WebPGetFeatures does not
+			// decode, so this stays cheap even for a large selection.
+			let webp = (format == Some(SourceFormat::Webp)).then(|| fs::read(path).ok().and_then(|bytes| crate::inspect::inspect_webp(&bytes))).flatten();
+			PathInspection { path: path.clone(), supported: format.is_some(), format: format.map(SourceFormat::name), webp }
 		})
 		.collect()
 }
@@ -586,11 +594,29 @@ mod tests {
 		let supported: Vec<bool> = inspected.iter().map(|entry| entry.supported).collect();
 		assert_eq!(supported, vec![true, false, true, false, false, false], "{inspected:#?}");
 		assert_eq!(inspected[0].format, Some("PNG"));
+		assert_eq!(inspected[0].webp, None, "only a WebP carries WebP details");
 		assert_eq!(inspected[2].format, Some("PNG"), "a PNG named .txt is still a PNG");
 		assert_eq!(inspected[3].format, None, "text named .png is still not an image");
 	}
 
 	/// A tiny file must not be mistaken for an image just because it is short.
+	/// A WebP path reports its header details, which is what lets the UI warn before
+	/// converting rather than after.
+	#[test]
+	fn inspect_paths_reports_webp_details() {
+		let scratch = Scratch::new("webpdetails");
+		let png = scratch.join("source.png");
+		write_png(&png, 40, 30);
+		let webp = scratch.join("out.webp");
+		super::encode_file(&EncodeSettings { mode: Mode::Lossless, ..Default::default() }, &png, &webp).expect("encode");
+
+		let inspected = super::inspect_paths(&[webp]);
+		let details = inspected[0].webp.expect("a WebP must report its header");
+		assert_eq!((details.width, details.height), (40, 30));
+		assert_eq!(details.compression, crate::inspect::WebpCompression::Lossless);
+		assert!(!details.has_animation, "a still image is not an animation");
+	}
+
 	#[test]
 	fn inspect_paths_handles_files_shorter_than_a_signature() {
 		let scratch = Scratch::new("shortfile");

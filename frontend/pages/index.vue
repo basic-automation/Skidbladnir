@@ -30,7 +30,11 @@ const dropRejected = ref(0)
 let unlistenDrop: (() => void) | null = null
 
 /** What the Rust core says about a path the user offered. */
-interface PathInspection { path: string, supported: boolean, format: string | null }
+interface WebpInfo { width: number, height: number, hasAlpha: boolean, hasAnimation: boolean, compression: 'lossy' | 'lossless' | 'mixed' }
+interface PathInspection { path: string, supported: boolean, format: string | null, webp: WebpInfo | null }
+
+const inspected = ref<PathInspection[]>([])
+const animatedInputs = computed(() => inspected.value.filter(entry => entry.webp?.hasAnimation))
 
 /** Preferences as the Rust side stores them, plus why it fell back if it did. */
 interface Preferences { settings: EncodeSettings, outputDirectory: string | null }
@@ -153,10 +157,13 @@ onMounted(async () => {
 		// Which files are usable is decided by the Rust core, by reading each file's leading
 		// bytes — never by matching extensions here, which would let the UI accept something
 		// the loader then refuses.
-		const inspected = await invokeCommand<PathInspection[]>('inspect_dropped_paths', { paths: event.payload.paths })
-		const usable = inspected.filter(entry => entry.supported).map(entry => entry.path)
-		dropRejected.value = inspected.length - usable.length
-		if (usable.length > 0) inputPaths.value = usable
+		const dropped = await invokeCommand<PathInspection[]>('inspect_dropped_paths', { paths: event.payload.paths })
+		const usable = dropped.filter(entry => entry.supported)
+		dropRejected.value = dropped.length - usable.length
+		if (usable.length > 0) {
+			inputPaths.value = usable.map(entry => entry.path)
+			inspected.value = usable
+		}
 	})
 })
 
@@ -170,6 +177,19 @@ async function chooseInputs() {
 	const picked = await open({ multiple: true, filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'jpe', 'jif', 'jfif', 'jfi', 'tif', 'tiff', 'webp'] }] })
 	if (Array.isArray(picked)) inputPaths.value = picked
 	else if (typeof picked === 'string') inputPaths.value = [picked]
+	await describeInputs()
+}
+
+/// Ask the core what the chosen files are, so the UI can describe them and warn about the
+/// ones it cannot handle properly.
+async function describeInputs() {
+	if (inputPaths.value.length === 0) { inspected.value = []; return }
+	try {
+		inspected.value = await invokeCommand<PathInspection[]>('inspect_dropped_paths', { paths: inputPaths.value })
+	}
+	catch {
+		inspected.value = []
+	}
 }
 
 async function chooseOutput() {
@@ -347,6 +367,15 @@ function basename(path: string): string {
 								</p>
 							</div>
 						</div>
+						<p v-if="inspected.length === 1 && inspected[0]?.webp" class="text-center text-xs text-palenight-cyan" data-selectable>
+							Already a WebP: {{ inspected[0]!.webp!.width }}&times;{{ inspected[0]!.webp!.height }},
+							{{ inspected[0]!.webp!.compression }}{{ inspected[0]!.webp!.hasAlpha ? ', with alpha' : '' }}.
+						</p>
+						<p v-if="animatedInputs.length > 0" class="text-center text-xs text-palenight-yellow">
+							{{ animatedInputs.length === 1 ? 'One selected file is an animated WebP' : `${animatedInputs.length} selected files are animated WebPs` }}.
+							Skidbladnir encodes still images, so converting {{ animatedInputs.length === 1 ? 'it' : 'them' }}
+							would keep only the first frame.
+						</p>
 						<p v-if="dropRejected > 0" class="text-center text-xs text-palenight-yellow">
 							{{ dropRejected }} dropped {{ dropRejected === 1 ? 'file was' : 'files were' }} not a
 							PNG, JPEG, TIFF or WebP and {{ dropRejected === 1 ? 'was' : 'were' }} skipped.

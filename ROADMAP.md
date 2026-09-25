@@ -380,8 +380,17 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       <https://github.com/webmproject/libwebp/tags>
 - [x] Strike the JPEG 2000 claim from the README — done; the Status section now lists
       WebP as the only output format rather than promising JPEG 2000.
-- [ ] Decoding/inspection of existing WebP files (dimensions, mode, alpha), which the
-      app cannot do at all today.
+- [x] Decoding/inspection of existing WebP files. `crates/skidbladnir-encode/src/inspect.rs`
+      reads dimensions, lossy/lossless/mixed, alpha and animation from the bitstream header
+      via libwebp's `WebPGetFeatures`, which does **not** decode the image, so inspecting a
+      large file is cheap. Surfaced through path inspection, so selecting a WebP tells the
+      user what it already is.
+      It also closes a silent-failure hole: an **animated** WebP cannot be re-encoded by
+      this app, and converting one would keep only the first frame. The window now warns
+      before the conversion instead of the user discovering it afterwards.
+- [ ] Actually handle animated WebP, rather than only warning about it. Either re-encode
+      every frame (libwebp's `WebPAnimEncoder`) or refuse the conversion outright — warning
+      and then silently dropping frames is the worst of the three.
 
 ## Cross-cutting
 
