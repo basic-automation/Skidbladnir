@@ -6,6 +6,7 @@
 //! here, it belongs in a crate under `crates/` instead.
 
 mod commands;
+pub mod preferences;
 
 /// Build and run the application.
 ///
@@ -14,5 +15,5 @@ mod commands;
 /// Panics if Tauri cannot create the window, which is not a recoverable condition: there
 /// is no useful headless mode for an image-conversion GUI.
 pub fn run() {
-	tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![commands::encoder_version, commands::default_settings, commands::validate_settings, commands::convert_image, commands::inspect_dropped_paths]).run(tauri::generate_context!()).expect("Skidbladnir failed to start");
+	tauri::Builder::default().plugin(tauri_plugin_dialog::init()).invoke_handler(tauri::generate_handler![commands::encoder_version, commands::default_settings, commands::validate_settings, commands::convert_image, commands::inspect_dropped_paths, commands::load_preferences, commands::save_preferences]).run(tauri::generate_context!()).expect("Skidbladnir failed to start");
 }

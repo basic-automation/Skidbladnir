@@ -32,6 +32,17 @@ let unlistenDrop: (() => void) | null = null
 /** What the Rust core says about a path the user offered. */
 interface PathInspection { path: string, supported: boolean, format: string | null }
 
+/** Preferences as the Rust side stores them, plus why it fell back if it did. */
+interface Preferences { settings: EncodeSettings, outputDirectory: string | null }
+interface LoadedPreferences { preferences: Preferences, fellBack: string | null }
+
+const preferencesNotice = ref('')
+const FALLBACK_MESSAGES: Record<string, string> = {
+	unreadable: 'Your saved settings could not be read, so the defaults were loaded.',
+	unparseable: 'Your saved settings file was damaged, so the defaults were loaded.',
+	invalidSettings: 'Your saved settings were out of range, so the defaults were loaded.',
+}
+
 const MODES: { value: Mode, label: string, help: string }[] = [
 	{ value: 'lossy', label: 'Lossy', help: 'Ordinary WebP. The only mode with the advanced controls.' },
 	{ value: 'lossless', label: 'Lossless', help: 'Exact pixels, larger files. Keeps colour under transparency.' },
@@ -98,7 +109,15 @@ watch([targetKind, targetSize, targetPsnr], () => {
 onMounted(async () => {
 	try {
 		backendVersion.value = await invokeCommand<string>('encoder_version')
-		settings.value = await invokeCommand<EncodeSettings>('default_settings')
+		// Preferences carry the defaults when there is nothing stored, so this is the only
+		// place startup settings come from.
+		const loaded = await invokeCommand<LoadedPreferences>('load_preferences')
+		settings.value = loaded.preferences.settings
+		outputDirectory.value = loaded.preferences.outputDirectory ?? ''
+		// 'noFile' is a first launch, which is not worth telling anyone about.
+		if (loaded.fellBack && loaded.fellBack !== 'noFile') {
+			preferencesNotice.value = FALLBACK_MESSAGES[loaded.fellBack] ?? 'Your saved settings could not be used, so the defaults were loaded.'
+		}
 	}
 	catch (error) {
 		startupError.value = error instanceof Error ? error.message : String(error)
@@ -174,6 +193,16 @@ async function convert() {
 		}
 	}
 	busy.value = false
+
+	// Remember what was used, after the run rather than on every slider drag: these are
+	// settings that demonstrably got as far as the encoder.
+	try {
+		await invokeCommand<void>('save_preferences', { preferences: { settings: settings.value, outputDirectory: outputDirectory.value || null } })
+	}
+	catch {
+		// Preferences are a convenience. Failing to store them must not look like a failed
+		// conversion, which is what the user actually asked for and which succeeded.
+	}
 }
 
 const converted = computed(() => reports.value.length > 0 && failures.value.length === 0 && !busy.value)
@@ -209,6 +238,16 @@ function basename(path: string): string {
 		</div>
 
 		<main class="mx-auto w-full max-w-5xl grow px-5 pt-8 pb-36">
+			<UAlert
+				v-if="preferencesNotice"
+				color="warning"
+				variant="subtle"
+				:description="preferencesNotice"
+				class="mb-6"
+				close
+				@update:open="preferencesNotice = ''"
+			/>
+
 			<UAlert
 				v-if="startupError"
 				color="warning"

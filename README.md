@@ -102,6 +102,7 @@ What the new app can already do:
   disclosure and shown only for the mode that actually uses them.
 - Accept files dropped onto the window, sorting out the ones it cannot read by looking
   at their contents rather than their file extension.
+- Remember your settings and destination between launches.
 - Look like Skidbladnir: the original layout — dot-textured header and footer bands,
   dotted option groups, two-column controls and the circular action button — restyled
   in the Palenight palette.

@@ -271,7 +271,15 @@ prettier subset.
       per-file success/failure rows work today. Still missing: cancel, and a queue that
       reports progress as it goes rather than only when each file finishes.
 - [ ] Preview: original vs encoded, side by side, before committing the write.
-- [ ] Persist settings between launches.
+- [x] Persist settings between launches. `src-tauri/src/preferences.rs` stores the last
+      used settings and destination as JSON in the OS's per-app config directory, saved
+      after a conversion run rather than on every slider drag.
+      The loader **never fails** — a preferences file is read at startup and is the one
+      file a user can hand-edit or a crash can half-write, so anything unreadable,
+      unparseable or *invalid for the encoder* falls back to the defaults and reports
+      which, letting the UI say the saved settings were discarded instead of silently
+      losing them. A destination that has since been deleted or unmounted is dropped.
+      Writes are staged and renamed, as the image writer is.
 - [ ] Named user presets (save/load an `EncodeSettings`).
 - [ ] Recursive directory input with an output-structure mirror.
 - [ ] Keyboard-navigable and screen-reader-labelled controls.

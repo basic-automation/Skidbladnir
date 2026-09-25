@@ -10,6 +10,9 @@ use serde::Serialize;
 use skidbladnir_encode::{
 	encoder::{linked_decoder_version, linked_encoder_version}, settings::EncodeSettings, source::{Conversion, PathInspection, encode_file, inspect_paths, output_path_in}
 };
+use tauri::Manager as _;
+
+use crate::preferences::{self, LoadedPreferences, Preferences};
 
 /// A human-readable description of the encode core, for the UI's about/diagnostics view.
 ///
@@ -79,6 +82,38 @@ pub struct ConversionReport {
 #[expect(clippy::needless_pass_by_value, reason = "Tauri deserializes command arguments into owned values; the encode core borrows them")]
 pub fn inspect_dropped_paths(paths: Vec<PathBuf>) -> Vec<PathInspection> {
 	inspect_paths(&paths)
+}
+
+/// Where preferences live: the OS's own per-app config location.
+///
+/// Falls back to the current directory only if Tauri cannot resolve one, which should not
+/// happen on a desktop platform; preferences are a convenience, so a failure here must not
+/// stop the app.
+fn config_directory(app: &tauri::AppHandle) -> PathBuf {
+	app.path().app_config_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+/// The settings and destination the app should open with.
+///
+/// Never fails: anything unreadable, unparseable or invalid falls back to the defaults,
+/// and `fellBack` says which so the UI can tell the user their saved settings were
+/// discarded rather than silently losing them.
+#[tauri::command]
+#[must_use]
+#[expect(clippy::needless_pass_by_value, reason = "Tauri injects AppHandle by value; there is no by-reference form of a command argument")]
+pub fn load_preferences(app: tauri::AppHandle) -> LoadedPreferences {
+	preferences::load_from(&config_directory(&app))
+}
+
+/// Remember these settings and destination for the next launch.
+///
+/// # Errors
+///
+/// Returns the failure as a string for display.
+#[tauri::command]
+#[expect(clippy::needless_pass_by_value, reason = "Tauri injects AppHandle and deserializes arguments by value; the store borrows them")]
+pub fn save_preferences(app: tauri::AppHandle, preferences: Preferences) -> Result<(), String> {
+	preferences::save_to(&config_directory(&app), &preferences).map_err(|error| error.to_string())
 }
 
 /// Convert one image into `output_directory`, using the Electron app's output naming.
