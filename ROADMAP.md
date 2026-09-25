@@ -445,17 +445,48 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
         "coming soon" claim has already been struck.
       Revisit JPEG XL once Chrome ships it unflagged — that single event moves it from
       16% to usable, and it is the trigger to re-open this item.
-- [ ] Add AVIF output. The Rust options, with the trade-off that matters:
-      - **`ravif` 0.13** (BSD-3-Clause) — pure Rust on top of `rav1e`, no C toolchain, but
-        rav1e is slow and exposes a narrow control surface.
-      - **`libavif-sys` 0.17** (BSD-2-Clause, libavif 1.0.4) — the reference implementation
-        with the full control surface, at the cost of a C dependency per platform, which
-        is the same trade already accepted for libwebp.
-      Parity is not the constraint here (there is no existing AVIF behaviour to preserve),
-      so the question is control surface versus build complexity. **The encode core is
-      already format-agnostic in shape** — `EncodeSettings` is WebP-specific, so this needs
-      a decision on whether settings become an enum over formats or each format gets its
-      own type. Record that decision before writing code.
+- [ ] Add AVIF output. **Design decided here so the work can start; no code yet.**
+
+      *Which encoder.* **`libavif-sys`** (BSD-2-Clause, libavif 1.0.4), not `ravif`.
+      Parity is not the constraint — there is no existing AVIF behaviour to preserve — so
+      the question is control surface versus build complexity, and Skidbladnir exists to
+      expose the control surface. `ravif` wraps `rav1e` and offers quality, speed and
+      alpha-quality; libavif reaches the encoder's tuning, chroma subsampling, bit depth
+      and range. The C dependency is the same trade already accepted for libwebp, and
+      `libwebp-sys` has shown it builds green on all three platforms.
+
+      *How settings are shaped.* The awkward part, and the reason this is written down
+      before any code: `EncodeSettings` is WebP-specific — `sns`, `partition_limit`,
+      `segments` and the filter surface mean nothing to AV1. Three options were weighed:
+      - An **enum** `EncodeSettings::{Webp(..), Avif(..)}`. Cleanest types, but switching
+        format in the UI throws away the other format's tuning, and every call site gains
+        a match.
+      - A **flat struct with unused fields** per format. No, for the obvious reason: a UI
+        that shows `sns` for AVIF is lying about what the encoder will do, and this project
+        has already fixed that exact class of bug in the mode show/hide logic.
+      - **A job with shared settings plus one sub-struct per format, all kept live.**
+        Chosen:
+        ```
+        struct EncodeJob { format: OutputFormat, resize: Resize, webp: WebpSettings, avif: AvifSettings }
+        ```
+        `resize` is genuinely shared. Each format's own settings persist while the user
+        tries the other, which matches how the app already keeps every mode's settings live
+        rather than resetting them, and it is what presets and the preferences file should
+        store.
+
+      *Migration path, in landable slices:*
+      1. Rename `EncodeSettings` → `WebpSettings`, lift `resize` out into `EncodeJob`, add
+         `OutputFormat` with a single variant. No behaviour change; the parity tests must
+         stay byte-identical through it, which is exactly what makes the refactor safe.
+      2. Add `AvifSettings` and the `libavif-sys` encode path behind the new variant, with
+         its own fixture tests (round-trip and dimension checks, **not** parity — there is
+         no reference CLI contract to hold to).
+      3. UI: a format selector, and the per-format control groups the mode logic already
+         knows how to show and hide.
+      4. Output naming, `SourceFormat` sniffing for `.avif` input, and the preview.
+
+      Do **not** start at step 2. Step 1 is the one that can silently change WebP output,
+      and it is the one the existing parity tests can prove innocent.
 - [ ] Watch **Tauri 3**, do not adopt it. `3.0.0-alpha` releases began appearing in
       September 2026, bringing a CEF runtime option, plugin-API changes
       (`js_init_script` → `initialization_script`) and removed deprecated APIs. Adopting an
