@@ -56,9 +56,8 @@ pub fn preview(settings: &EncodeSettings, input: &Path) -> Result<Preview, Strin
 	let source_bytes = std::fs::metadata(input).map(|meta| meta.len()).map_err(|error| format!("could not read `{}`: {error}", input.display()))?;
 	let image = source::load(input).map_err(|error| error.to_string())?;
 
-	let pixels = u64::from(image.width) * u64::from(image.height);
-	if pixels > MAX_PREVIEW_PIXELS {
-		return Err(format!("{}x{} is too large to preview ({} megapixels; the limit is {}). Convert it and compare the files instead.", image.width, image.height, pixels / 1_000_000, MAX_PREVIEW_PIXELS / 1_000_000));
+	if let Some(refusal) = too_large_to_preview(image.width, image.height) {
+		return Err(refusal);
 	}
 
 	let encoded = encode_rgba(settings, &image.as_rgba()).map_err(|error| error.to_string())?;
@@ -71,6 +70,17 @@ pub fn preview(settings: &EncodeSettings, input: &Path) -> Result<Preview, Strin
 	let (width, height) = dimensions(&encoded).unwrap_or((image.width, image.height));
 
 	Ok(Preview { original: data_url(&original), encoded: data_url(&encoded), source_bytes, encoded_bytes: encoded.len() as u64, width, height })
+}
+
+/// Whether an image is too large to hold two base64 copies of in the webview, and the
+/// message to show if so.
+///
+/// Split out from [`preview`] so the boundary can be tested without allocating a
+/// 24-megapixel fixture — a guard whose only test would cost 96 MB of pixels is a guard
+/// that ends up untested.
+fn too_large_to_preview(width: u32, height: u32) -> Option<String> {
+	let pixels = u64::from(width) * u64::from(height);
+	(pixels > MAX_PREVIEW_PIXELS).then(|| format!("{width}x{height} is too large to preview ({} megapixels; the limit is {}). Convert it and compare the files instead.", pixels / 1_000_000, MAX_PREVIEW_PIXELS / 1_000_000))
 }
 
 /// Wrap WebP bytes as a `data:` URL the webview can put in an `<img src>`.
@@ -168,6 +178,23 @@ mod tests {
 		assert!(low.encoded_bytes < high.encoded_bytes, "q5 {} vs q95 {}", low.encoded_bytes, high.encoded_bytes);
 		// The original side is the same both times: it does not depend on the settings.
 		assert_eq!(low.original, high.original);
+	}
+
+	/// The size guard, at its boundary, without allocating a 24-megapixel image.
+	#[test]
+	fn the_preview_size_guard_is_bounded_where_it_says() {
+		use super::too_large_to_preview;
+
+		// 24 megapixels exactly is allowed; one pixel more is not.
+		assert_eq!(too_large_to_preview(6000, 4000), None, "24.0 MP is at the limit, not over it");
+		assert!(too_large_to_preview(6001, 4000).is_some());
+		assert_eq!(too_large_to_preview(8000, 6000).as_deref().map(|m| m.contains("48 megapixels")), Some(true));
+		// Ordinary camera output must never be refused.
+		for (w, h) in [(6000_u32, 4000_u32), (5472, 3648), (4032, 3024), (1920, 1080)] {
+			assert_eq!(too_large_to_preview(w, h), None, "{w}x{h} is a normal photo and must preview");
+		}
+		// And the multiplication cannot overflow into a false pass.
+		assert!(too_large_to_preview(u32::MAX, u32::MAX).is_some());
 	}
 
 	#[test]
