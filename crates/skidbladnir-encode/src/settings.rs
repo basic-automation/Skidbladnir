@@ -247,16 +247,117 @@ impl Default for WebpSettings {
 }
 
 /// Which format to write.
-///
-/// One variant today. It exists now, before a second format does, so that the settings
-/// files and the wire format already carry it and adding AVIF does not change their shape
-/// a second time.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum OutputFormat {
-	/// WebP, through libwebp.
+	/// WebP, through libwebp. The default, and the format the parity gate covers.
 	#[default]
 	Webp,
+	/// AVIF, through `ravif` (AV1 by rav1e). There is no reference CLI whose output this
+	/// has to match, so it is checked by decoding with libavif's `avifdec` instead.
+	Avif,
+}
+
+impl OutputFormat {
+	/// The file extension written for this format, without the dot.
+	#[must_use]
+	pub const fn extension(self) -> &'static str {
+		match self {
+			Self::Webp => "webp",
+			Self::Avif => "avif",
+		}
+	}
+
+	/// The MIME type of this format's files.
+	#[must_use]
+	pub const fn mime_type(self) -> &'static str {
+		match self {
+			Self::Webp => "image/webp",
+			Self::Avif => "image/avif",
+		}
+	}
+}
+
+/// The precision of the encoded AV1 data, for colour and alpha alike.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AvifBitDepth {
+	/// 8 bits per channel.
+	Eight,
+	/// 10 bits per channel. `ravif`'s default, and better even for 8-bit sources, because
+	/// the colour conversion keeps more precision.
+	#[default]
+	Ten,
+}
+
+/// How colour is stored inside the AV1 stream.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AvifColorModel {
+	/// YCbCr. The default, and what almost every AVIF uses.
+	#[default]
+	#[serde(rename = "ycbcr")]
+	YCbCr,
+	/// RGB (as GBR), which avoids the colour conversion at a large size cost.
+	#[serde(rename = "rgb")]
+	Rgb,
+}
+
+/// What happens to the colour of transparent pixels.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AvifAlphaMode {
+	/// Replace the colour of fully transparent pixels with something cheap to encode.
+	/// The default: invisible pixels cost nothing to change.
+	#[default]
+	Clean,
+	/// Keep the colour of transparent pixels exactly as given — the AVIF counterpart of
+	/// WebP lossless's `-exact`.
+	Dirty,
+	/// Store premultiplied alpha.
+	Premultiplied,
+}
+
+/// Every AVIF control, as `ravif` exposes them. Defaults are `ravif`'s own.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AvifSettings {
+	/// Colour quality, `1..=100`.
+	pub quality: u8,
+	/// Alpha quality, `1..=100`.
+	pub alpha_quality: u8,
+	/// Encoder speed, `1..=10`: 1 is slowest and smallest, 10 fastest and largest.
+	pub speed: u8,
+	/// Precision of the encoded data.
+	pub bit_depth: AvifBitDepth,
+	/// How colour is stored.
+	pub color_model: AvifColorModel,
+	/// What happens to the colour of transparent pixels.
+	pub alpha_mode: AvifAlphaMode,
+	/// Encode on every core, or on one.
+	pub multi_threading: bool,
+}
+
+impl Default for AvifSettings {
+	fn default() -> Self {
+		Self { quality: 80, alpha_quality: 80, speed: 5, bit_depth: AvifBitDepth::Ten, color_model: AvifColorModel::YCbCr, alpha_mode: AvifAlphaMode::Clean, multi_threading: true }
+	}
+}
+
+impl AvifSettings {
+	/// Check every control against the range `ravif` accepts. `ravif` panics outside
+	/// them, so this is what stands between a bad settings file and a crashed encode.
+	///
+	/// # Errors
+	///
+	/// Returns the first [`ValidationError`] found, checking in field order.
+	pub fn validate(&self) -> Result<(), ValidationError> {
+		for (field, value, min, max) in [("avif.quality", self.quality, 1, 100), ("avif.alpha_quality", self.alpha_quality, 1, 100), ("avif.speed", self.speed, 1, 10)] {
+			if value < min || value > max {
+				return Err(ValidationError::OutOfRange { field, value: u32::from(value), min: u32::from(min), max: u32::from(max) });
+			}
+		}
+		Ok(())
+	}
 }
 
 /// A complete encode job: the output format, the shared resize, and each format's own
@@ -277,6 +378,9 @@ pub struct EncodeJob {
 	pub resize: Resize,
 	/// The WebP controls.
 	pub webp: WebpSettings,
+	/// The AVIF controls. Kept alongside the WebP ones rather than replacing them, so
+	/// trying the other format does not throw away this one's tuning.
+	pub avif: AvifSettings,
 }
 
 impl From<WebpSettings> for EncodeJob {
@@ -299,12 +403,14 @@ impl<'de> Deserialize<'de> for EncodeJob {
 			#[serde(default)]
 			resize: Resize,
 			webp: Option<WebpSettings>,
+			#[serde(default)]
+			avif: AvifSettings,
 			#[serde(flatten)]
 			flat: WebpSettings,
 		}
 
 		let wire = Wire::deserialize(deserializer)?;
-		Ok(Self { format: wire.format, resize: wire.resize, webp: wire.webp.unwrap_or(wire.flat) })
+		Ok(Self { format: wire.format, resize: wire.resize, webp: wire.webp.unwrap_or(wire.flat), avif: wire.avif })
 	}
 }
 
@@ -317,6 +423,7 @@ impl EncodeJob {
 	pub fn validate(&self) -> Result<(), ValidationError> {
 		match self.format {
 			OutputFormat::Webp => self.webp.validate(),
+			OutputFormat::Avif => self.avif.validate(),
 		}
 	}
 }
@@ -542,7 +649,7 @@ mod tests {
 	fn the_flat_shape_from_before_the_split_still_loads() {
 		let legacy = r#"{"mode":"lossless","preset":null,"quality":92,"alphaQuality":80,"alphaFiltering":"fast","method":6,"segments":2,"partitionLimit":10,"sns":30,"passes":3,"filter":"strong","filterStrength":40,"filterSharpness":5,"target":{"kind":"size","value":5000},"sharpYuv":true,"lowMemory":true,"multiThreading":false,"resize":{"width":640,"height":0}}"#;
 		let job: EncodeJob = serde_json::from_str(legacy).expect("the legacy shape deserializes");
-		let expected = EncodeJob { format: OutputFormat::Webp, resize: Resize { width: 640, height: 0 }, webp: WebpSettings { mode: Mode::Lossless, preset: None, quality: 92, alpha_quality: 80, alpha_filtering: Some(AlphaFiltering::Fast), method: 6, segments: 2, partition_limit: 10, sns: 30, passes: 3, filter: FilterType::Strong, filter_strength: 40, filter_sharpness: 5, target: Some(TargetMetric::Size(5000)), sharp_yuv: true, low_memory: true, multi_threading: false } };
+		let expected = EncodeJob { format: OutputFormat::Webp, avif: AvifSettings::default(), resize: Resize { width: 640, height: 0 }, webp: WebpSettings { mode: Mode::Lossless, preset: None, quality: 92, alpha_quality: 80, alpha_filtering: Some(AlphaFiltering::Fast), method: 6, segments: 2, partition_limit: 10, sns: 30, passes: 3, filter: FilterType::Strong, filter_strength: 40, filter_sharpness: 5, target: Some(TargetMetric::Size(5000)), sharp_yuv: true, low_memory: true, multi_threading: false } };
 		assert_eq!(job, expected);
 
 		// And it is rewritten in the current shape, which reads back identically.
@@ -570,5 +677,56 @@ mod tests {
 	fn a_job_validates_its_formats_settings() {
 		assert_eq!(EncodeJob::default().validate(), Ok(()));
 		assert_eq!(EncodeJob::from(WebpSettings { mode: Mode::Preset, ..Default::default() }).validate(), Err(ValidationError::MissingPreset));
+	}
+
+	/// `ravif`'s own defaults, which the AVIF controls start from.
+	#[test]
+	fn avif_defaults_are_ravifs() {
+		let a = AvifSettings::default();
+		assert_eq!((a.quality, a.alpha_quality, a.speed), (80, 80, 5));
+		assert_eq!(a.bit_depth, AvifBitDepth::Ten);
+		assert_eq!(a.color_model, AvifColorModel::YCbCr);
+		assert_eq!(a.alpha_mode, AvifAlphaMode::Clean);
+		assert!(a.multi_threading);
+		assert_eq!(a.validate(), Ok(()));
+	}
+
+	/// `ravif` panics outside these ranges, so they must be refused before it is called.
+	#[test]
+	fn avif_ranges_are_checked() {
+		for (settings, field, value, min, max) in [(AvifSettings { quality: 0, ..Default::default() }, "avif.quality", 0, 1, 100), (AvifSettings { quality: 101, ..Default::default() }, "avif.quality", 101, 1, 100), (AvifSettings { alpha_quality: 0, ..Default::default() }, "avif.alpha_quality", 0, 1, 100), (AvifSettings { speed: 0, ..Default::default() }, "avif.speed", 0, 1, 10), (AvifSettings { speed: 11, ..Default::default() }, "avif.speed", 11, 1, 10)] {
+			assert_eq!(settings.validate(), Err(ValidationError::OutOfRange { field, value, min, max }));
+		}
+		assert_eq!(AvifSettings { quality: 1, alpha_quality: 100, speed: 10, ..Default::default() }.validate(), Ok(()));
+	}
+
+	/// A job validates the format it will actually write, and only that one: a user
+	/// with a half-edited WebP preset can still encode AVIF, and the reverse.
+	#[test]
+	fn a_job_validates_only_the_format_it_writes() {
+		let job = EncodeJob { format: OutputFormat::Avif, webp: WebpSettings { mode: Mode::Preset, ..Default::default() }, ..Default::default() };
+		assert_eq!(job.validate(), Ok(()));
+		let job = EncodeJob { format: OutputFormat::Avif, avif: AvifSettings { speed: 0, ..Default::default() }, ..Default::default() };
+		assert!(job.validate().is_err());
+		let job = EncodeJob { format: OutputFormat::Webp, avif: AvifSettings { speed: 0, ..Default::default() }, ..Default::default() };
+		assert_eq!(job.validate(), Ok(()));
+	}
+
+	#[test]
+	fn avif_json_shape() {
+		let json = serde_json::to_value(EncodeJob { format: OutputFormat::Avif, ..Default::default() }).expect("serialize");
+		assert_eq!(json["format"], "avif");
+		assert_eq!(json["avif"]["alphaQuality"], 80);
+		assert_eq!(json["avif"]["bitDepth"], "ten");
+		assert_eq!(json["avif"]["colorModel"], "ycbcr");
+		assert_eq!(json["avif"]["alphaMode"], "clean");
+		let back: EncodeJob = serde_json::from_value(json).expect("deserialize");
+		assert_eq!(back.format, OutputFormat::Avif);
+	}
+
+	#[test]
+	fn formats_name_their_files() {
+		assert_eq!((OutputFormat::Webp.extension(), OutputFormat::Webp.mime_type()), ("webp", "image/webp"));
+		assert_eq!((OutputFormat::Avif.extension(), OutputFormat::Avif.mime_type()), ("avif", "image/avif"));
 	}
 }

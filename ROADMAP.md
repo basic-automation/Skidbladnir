@@ -491,7 +491,9 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       16% to usable, and it is the trigger to re-open this item.
 - [ ] Add AVIF output. **Design decided here so the work can start; no code yet.**
 
-      *Which encoder.* **`libavif-sys`** (BSD-2-Clause, libavif 1.0.4), not `ravif`.
+      *Which encoder.* ~~`libavif-sys`~~ — **superseded 2026-09-26 by `ravif`; see the
+      re-check item below.** The original reasoning, kept for the record:
+      **`libavif-sys`** (BSD-2-Clause, libavif 1.0.4), not `ravif`.
       Parity is not the constraint — there is no existing AVIF behaviour to preserve — so
       the question is control surface versus build complexity, and Skidbladnir exists to
       expose the control surface. `ravif` wraps `rav1e` and offers quality, speed and
@@ -526,22 +528,46 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
          on-disk type; it **reads the old flat shape too**, so preset and preferences files
          saved by 0.5.0 load with every value intact — verified in the running window with
          a hand-written 0.5.0-shape preferences file, not only by unit test.
-      2. Add `AvifSettings` and the `libavif-sys` encode path behind the new variant, with
-         its own fixture tests (round-trip and dimension checks, **not** parity — there is
-         no reference CLI contract to hold to).
+      2. **Done (core only).** `AvifSettings` (quality, alpha quality, speed, bit depth,
+         colour model, alpha mode, multi-threading — `ravif`'s defaults), `OutputFormat::Avif`,
+         and `crates/skidbladnir-encode/src/avif.rs`. The shared resize runs through
+         **libwebp's rescaler**, so a resize gives identical dimensions in either format.
+         Output is named `.avif`, dimensions are read back from the file's `ispe` box, and
+         the preview labels its encoded side `image/avif`.
+         **The gate is a reference decoder, not a reference encoder:**
+         `tests/avif_reference.rs` has libavif's own `avifdec` decode seven of our files
+         and checks size, transparency and PSNR (47.5 dB at the defaults; quality 20 → 40.8
+         dB, 95 → 50.6 dB, so quality demonstrably means something). It was
+         mutation-tested — swapping R and B in the encode path drops it to 16.0 dB and
+         fails it. Enforced in CI's parity step (`libavif-bin` / brew `libavif`).
+         WebP parity was unchanged through it (76/76).
+         **An AVIF encode cannot be cancelled mid-way:** `ravif` has no progress hook, so
+         cancel is honoured before and after the encode only.
       3. UI: a format selector, and the per-format control groups the mode logic already
          knows how to show and hide.
       4. Output naming, `SourceFormat` sniffing for `.avif` input, and the preview.
 
       Do **not** start at step 2. Step 1 is the one that can silently change WebP output,
       and it is the one the existing parity tests can prove innocent.
-- [ ] **Re-check the AVIF encoder choice before slice 2.** `libavif-sys` — the binding
-      chosen above — was last published in July 2024 as `0.17.0+libavif.1.0.4`, while
-      upstream libavif has moved on to **1.4.2** (26 May 2026). Starting a new format on a
-      two-year-old vendored encoder is the wrong baseline. Compare: a maintained binding
-      at a current libavif, linking a system libavif where one exists, or `ravif` after
-      all. Decide before writing the encode path.
-      <https://crates.io/crates/libavif-sys> · <https://github.com/AOMediaCodec/libavif/releases>
+- [x] **Re-check the AVIF encoder choice before slice 2. Decided: `ravif` 0.13**, with
+      `default-features = false, features = ["threading"]`.
+      - `libavif-sys` was last published July 2024 as `0.17.0+libavif.1.0.4`; upstream
+        libavif is at **1.4.2** (26 May 2026). No maintained binding tracks it.
+        <https://crates.io/crates/libavif-sys> · <https://github.com/AOMediaCodec/libavif/releases>
+      - `ravif` 0.13.0 was published January 2026 and is the AVIF encoder under the
+        `image` crate (~15M downloads in 90 days). It is pure Rust over `rav1e`, so
+        there is no C toolchain to stand up on the Windows runner.
+      - What it exposes: quality, alpha quality, speed, bit depth, internal colour model,
+        alpha colour mode and thread count. What it does **not**: chroma subsampling
+        (always 4:4:4 — its docs call subsampling "a bad idea for AVIF anyway"), AV1 tune,
+        or a choice of codec. That is a smaller surface than libavif's, accepted in
+        exchange for a maintained, current encoder.
+        <https://docs.rs/ravif/latest/ravif/struct.Encoder.html>
+      - Default features are off because `asm` needs `nasm` at build time, which the dev
+        host lacks (owner-gated) and would be one more thing for each CI runner.
+- [ ] Turn `rav1e`'s `asm` feature back on for speed once `nasm` is available on the dev
+      host (owner-gated: `sudo pacman -S nasm`) and installed on all three CI runners.
+      The pure-Rust path is correct but slower.
 - [ ] Watch **Tauri 3**, do not adopt it. `3.0.0-alpha` releases began appearing in
       September 2026, bringing a CEF runtime option, plugin-API changes
       (`js_init_script` → `initialization_script`) and removed deprecated APIs. Adopting an

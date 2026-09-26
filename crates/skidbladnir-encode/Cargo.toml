@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 image = { workspace = true }
 libwebp-sys = { workspace = true }
+ravif = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 

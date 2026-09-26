@@ -28,6 +28,12 @@ repository = "https://github.com/basic-automation/Skidbladnir"
 # features are off so the binary carries the four formats the app accepts and no more.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tiff"] }
 base64 = "0.22"
+# The AVIF encoder (ROADMAP.md Phase 7). Pure Rust over rav1e: no C toolchain on any
+# platform, which matters on the Windows runner. Default features are off because they
+# pull in rav1e's `asm`, which needs `nasm` at build time; the pure-Rust path is slower
+# but builds everywhere. `threading` is what lets the multi-threading control mean
+# something.
+ravif = { version = "0.13", default-features = false, features = ["threading"] }
 libwebp-sys = "0.14"
 # The version is not redundant with the path: a path dependency without one resolves as a
 # wildcard `*`, which `cargo deny` rejects and which would publish as an unbounded range.

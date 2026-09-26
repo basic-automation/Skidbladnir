@@ -55,7 +55,7 @@ use std::ffi::c_int;
 use libwebp_sys::{WEBP_ENCODER_ABI_VERSION, WebPConfig, WebPConfigInitInternal, WebPEncode, WebPMemoryWrite, WebPMemoryWriter, WebPMemoryWriterClear, WebPMemoryWriterInit, WebPPicture, WebPPictureCopy, WebPPictureFree, WebPPictureImportRGBA, WebPPictureInitInternal, WebPPictureRescale, WebPPreset, WebPValidateConfig};
 use thiserror::Error;
 
-use crate::settings::{AlphaFiltering, EncodeJob, FilterType, Mode, Preset, Resize, TargetMetric, WebpSettings};
+use crate::settings::{AlphaFiltering, EncodeJob, FilterType, Mode, OutputFormat, Preset, Resize, TargetMetric, WebpSettings};
 
 /// An 8-bit RGBA source image, borrowed.
 ///
@@ -117,6 +117,9 @@ pub enum EncodeError {
 	/// UI should not show it as an error.
 	#[error("the encode was cancelled")]
 	Cancelled,
+	/// The AVIF encoder failed.
+	#[error("AVIF encoding failed: {0}")]
+	Avif(String),
 }
 
 /// Translate settings into a libwebp `WebPConfig`.
@@ -349,18 +352,90 @@ pub fn encode_rgba(job: &EncodeJob, image: &RgbaImage<'_>) -> Result<Vec<u8>, En
 ///
 /// As [`encode_rgba`], plus [`EncodeError::Cancelled`] if `on_progress` returned `false`.
 pub fn encode_rgba_with_progress(job: &EncodeJob, image: &RgbaImage<'_>, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
-	// WebP is the only `OutputFormat`, so the job's WebP settings are the whole story.
-	// When a second format arrives this is where the job is dispatched on it.
-	let config = build_config(&job.webp)?;
+	match job.format {
+		OutputFormat::Webp => encode_webp(job, image, on_progress),
+		OutputFormat::Avif => crate::avif::encode(&job.avif, job.resize, image, on_progress),
+	}
+}
 
+/// Check that an image's buffer matches its dimensions and that libwebp can address it,
+/// returning the dimensions as the `c_int`s libwebp takes.
+fn checked_dimensions(image: &RgbaImage<'_>) -> Result<(c_int, c_int), EncodeError> {
 	let expected = (image.width as usize).checked_mul(image.height as usize).and_then(|pixels| pixels.checked_mul(4)).ok_or(EncodeError::ImageTooLarge { width: image.width, height: image.height })?;
 	if image.width == 0 || image.height == 0 || image.pixels.len() != expected {
 		return Err(EncodeError::MalformedImage { width: image.width, height: image.height, actual: image.pixels.len(), expected });
 	}
-	let (width, height) = (i32::try_from(image.width), i32::try_from(image.height));
-	let (Ok(width), Ok(height)) = (width, height) else {
-		return Err(EncodeError::ImageTooLarge { width: image.width, height: image.height });
+	match (c_int::try_from(image.width), c_int::try_from(image.height)) {
+		(Ok(width), Ok(height)) => Ok((width, height)),
+		_ => Err(EncodeError::ImageTooLarge { width: image.width, height: image.height }),
+	}
+}
+
+/// Import RGBA pixels into a fresh ARGB `WebPPicture`.
+fn argb_picture(image: &RgbaImage<'_>) -> Result<Picture, EncodeError> {
+	let (width, height) = checked_dimensions(image)?;
+	let mut picture = Picture(unsafe {
+		let mut picture = std::mem::zeroed::<WebPPicture>();
+		if WebPPictureInitInternal(&raw mut picture, abi_version()) == 0 {
+			return Err(EncodeError::Libwebp("WebPPictureInit"));
+		}
+		picture
+	});
+	picture.0.use_argb = 1;
+	picture.0.width = width;
+	picture.0.height = height;
+	let stride = width.checked_mul(4).ok_or(EncodeError::ImageTooLarge { width: image.width, height: image.height })?;
+	// SAFETY: checked_dimensions proved `pixels.len()` is exactly `width * height * 4`.
+	if unsafe { WebPPictureImportRGBA(&raw mut picture.0, image.pixels.as_ptr(), stride) } == 0 {
+		return Err(EncodeError::Libwebp("WebPPictureImportRGBA"));
+	}
+	Ok(picture)
+}
+
+/// Apply a [`Resize`] to RGBA pixels with libwebp's rescaler, returning the new width,
+/// height and pixels.
+///
+/// This is the resize for formats other than WebP. Using libwebp's rescaler rather than a
+/// second implementation means a given resize produces the same dimensions for every
+/// format — including how a `0` dimension is derived from the aspect ratio — and the same
+/// filtering. A no-op resize returns the pixels unchanged.
+///
+/// # Errors
+///
+/// Returns [`EncodeError`] if the buffer does not match its dimensions or libwebp fails.
+pub fn rescale_rgba(image: &RgbaImage<'_>, resize: Resize) -> Result<(u32, u32, Vec<u8>), EncodeError> {
+	if resize.is_noop() {
+		checked_dimensions(image)?;
+		return Ok((image.width, image.height, image.pixels.to_vec()));
+	}
+	let mut picture = argb_picture(image)?;
+	let too_large = EncodeError::ImageTooLarge { width: resize.width, height: resize.height };
+	let (Ok(target_w), Ok(target_h)) = (c_int::try_from(resize.width), c_int::try_from(resize.height)) else {
+		return Err(too_large);
 	};
+	if unsafe { WebPPictureRescale(&raw mut picture.0, target_w, target_h) } == 0 {
+		return Err(EncodeError::Libwebp("WebPPictureRescale"));
+	}
+	let (Ok(width), Ok(height), Ok(stride)) = (u32::try_from(picture.0.width), u32::try_from(picture.0.height), usize::try_from(picture.0.argb_stride)) else {
+		return Err(EncodeError::Libwebp("WebPPictureRescale"));
+	};
+	let mut pixels = Vec::with_capacity(width as usize * height as usize * 4);
+	for row in 0..height as usize {
+		// SAFETY: after a successful rescale `argb` holds `height` rows of `argb_stride`
+		// u32s each, of which the first `width` are the row's pixels.
+		let line = unsafe { std::slice::from_raw_parts(picture.0.argb.add(row * stride), width as usize) };
+		for &argb in line {
+			let [a, r, g, b] = argb.to_be_bytes();
+			pixels.extend_from_slice(&[r, g, b, a]);
+		}
+	}
+	Ok((width, height, pixels))
+}
+
+/// The WebP encode, which is the parity-gated path.
+fn encode_webp(job: &EncodeJob, image: &RgbaImage<'_>, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
+	let config = build_config(&job.webp)?;
+	let (width, height) = checked_dimensions(image)?;
 
 	let mut picture = Picture(unsafe {
 		let mut picture = std::mem::zeroed::<WebPPicture>();

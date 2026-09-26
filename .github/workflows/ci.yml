@@ -73,10 +73,11 @@ jobs:
         # Needed from Phase 1 onward, when src-tauri/ joins the workspace: Tauri 2 links
         # against webkit2gtk-4.1, and patchelf is what bundles the AppImage. The image
         # libraries are for building the reference cwebp below, which needs a PNG reader.
+        # libavif-bin is libavif's `avifdec`, the reference decoder for the AVIF gate.
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev libpng-dev libjpeg-dev libtiff-dev
+          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev libpng-dev libjpeg-dev libtiff-dev libavif-bin
 
       - uses: actions/setup-node@v4
         with:
@@ -138,7 +139,8 @@ jobs:
           # so the Homebrew prefix is added without overriding the makefile's own
           # variables — passing EXTRA_FLAGS on the command line would replace them.
           if [ "$RUNNER_OS" = "macOS" ]; then
-            brew install jpeg-turbo libpng libtiff
+            # libavif provides `avifdec` for the AVIF gate.
+            brew install jpeg-turbo libpng libtiff libavif
             prefix=$(brew --prefix)
             export CPATH="$prefix/include${CPATH:+:$CPATH}"
             export LIBRARY_PATH="$prefix/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
@@ -161,7 +163,8 @@ jobs:
         #
         # cmyk_jpeg rides along because it also needs the reference: it checks that cwebp
         # still REFUSES CMYK JPEG, the one input Skidbladnir converts and cwebp does not.
-        run: cargo test --package skidbladnir-encode --test parity --test cmyk_jpeg -- --nocapture
+        # avif_reference is the AVIF gate: libavif's avifdec decodes what we write.
+        run: cargo test --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_reference -- --nocapture
 
   # Drives the real window over WebDriver. Separate from the compile matrix because it
   # needs a display, a WebKit driver and a full release build, and because a flaky display

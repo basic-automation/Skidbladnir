@@ -188,7 +188,7 @@ pub fn scan_folder(directory: PathBuf, recursive: bool) -> Vec<FoundImage> {
 /// would write outside the chosen output directory.
 #[tauri::command]
 pub async fn convert_scanned(app: tauri::AppHandle, state: tauri::State<'_, CancelFlag>, settings: EncodeJob, input: PathBuf, relative: PathBuf, output_root: PathBuf) -> Result<ConversionReport, String> {
-	let Some(output_path) = mirrored_output_path(&output_root, &relative) else {
+	let Some(output_path) = mirrored_output_path(&output_root, &relative, settings.format) else {
 		return Err(format!("refusing to write `{}`: it would land outside the chosen folder", relative.display()));
 	};
 	let Some(parent) = output_path.parent().map(Path::to_path_buf) else {
@@ -276,7 +276,7 @@ pub fn delete_preset(app: tauri::AppHandle, name: String) -> Result<Vec<Preset>,
 ///
 /// Returns the failure as a string for display.
 pub fn convert_one(settings: &EncodeJob, input: PathBuf, output_directory: PathBuf, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<ConversionReport, String> {
-	let output_path = output_path_in(output_directory, &input);
+	let output_path = output_path_in(output_directory, &input, settings.format);
 	let conversion = encode_file_with_progress(settings, &input, &output_path, on_progress).map_err(|error| error.to_string())?;
 	Ok(ConversionReport::new(input, output_path, conversion))
 }

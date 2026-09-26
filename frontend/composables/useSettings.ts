@@ -10,7 +10,7 @@ export type FilterType = 'auto' | 'simple' | 'strong'
 export type AlphaFiltering = 'off' | 'fast' | 'best'
 export type TargetMetric = { kind: 'size', value: number } | { kind: 'psnr', value: number } | null
 
-export type OutputFormat = 'webp'
+export type OutputFormat = 'webp' | 'avif'
 
 export interface Resize { width: number, height: number }
 
@@ -20,6 +20,18 @@ export interface EncodeJob {
 	/** Shared by every output format. */
 	resize: Resize
 	webp: WebpSettings
+	avif: AvifSettings
+}
+
+/** The AVIF controls, as `ravif` exposes them. Defaults come from the Rust core. */
+export interface AvifSettings {
+	quality: number
+	alphaQuality: number
+	speed: number
+	bitDepth: 'eight' | 'ten'
+	colorModel: 'ycbcr' | 'rgb'
+	alphaMode: 'clean' | 'dirty' | 'premultiplied'
+	multiThreading: boolean
 }
 
 /** The WebP controls: the `cwebp` surface less the resize, which belongs to the job. */
