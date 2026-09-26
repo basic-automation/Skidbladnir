@@ -163,6 +163,29 @@ check "refuses to overwrite the source" \
 	 try { await I.invoke('convert_image', { settings: s, input: '$out_dir/smoke.webp', outputDirectory: '$out_dir' }); return 'NOT REFUSED'; }
 	 catch (e) { return String(e); }" 'refusing to overwrite the source'
 
+# AVIF: the format switch, a real conversion checked on disk, and whether this platform's
+# webview can display the AVIF preview at all (WebKitGTK and WebView2 each decide that).
+check "switches to AVIF" \
+	'[...document.querySelectorAll("[aria-label=\"Output format\"] [role=radio]")][1].click();
+	 await new Promise(r => setTimeout(r, 300));
+	 return String(document.querySelectorAll("[role=slider]").length) + " " + String(!!document.querySelector("[aria-label=\"Encoding mode\"]"))' '3 false'
+check "converts an image to AVIF end to end" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const s=await I.invoke('default_settings'); s.format='avif'; s.avif.speed=10;
+	 const r=await I.invoke('convert_image', { settings: s, input: '$in_png', outputDirectory: '$out_dir' });
+	 return r.outputPath.split(/[\\\\/]/).pop() + ' ' + r.width + 'x' + r.height" 'smoke.avif 48x48'
+if [ "$(head -c 12 "$scratch/out/smoke.avif" 2>/dev/null | tail -c 8)" = "ftypavif" ]; then
+	printf 'ok   %s\n' "wrote a real AVIF to disk ($(wc -c < "$scratch/out/smoke.avif") bytes)"
+else
+	printf 'FAIL %s\n' "no AVIF file at $scratch/out/smoke.avif"
+	failures=$((failures + 1))
+fi
+check "the webview displays an AVIF preview" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const s=await I.invoke('default_settings'); s.format='avif'; s.avif.speed=10;
+	 const p=await I.invoke('preview_encode', { settings: s, input: '$in_png' });
+	 return await new Promise(res => { const i=new Image(); i.onload=()=>res(p.encoded.slice(5,15)+' '+i.naturalWidth+'x'+i.naturalHeight); i.onerror=()=>res('cannot display'); i.src=p.encoded; })" 'image/avif 48x48'
+
 echo
 if [ "$failures" -gt 0 ]; then
 	echo "$failures check(s) failed."

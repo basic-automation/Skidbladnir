@@ -13,7 +13,7 @@ use std::path::Path;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::Serialize;
 use skidbladnir_encode::{
-	encoder::encode_rgba, settings::{EncodeJob, Mode, OutputFormat, WebpSettings}, source
+	encoder::encode_rgba, settings::{EncodeJob, Mode, OutputFormat, WebpSettings}, source::{self, Conversion}
 };
 
 /// Above this many pixels a preview is refused rather than attempted.
@@ -39,6 +39,9 @@ pub struct Preview {
 	pub width: u32,
 	/// Height after any resize.
 	pub height: u32,
+	/// [`Conversion::saving_percent`] for this preview, so the window shows the core's
+	/// figure rather than recomputing it. `null` for a zero-byte source.
+	pub saving_percent: Option<f64>,
 }
 
 /// Encode `input` with `settings` and return it beside a faithful copy of the original.
@@ -75,7 +78,8 @@ pub fn preview(settings: &EncodeJob, input: &Path) -> Result<Preview, String> {
 
 	// The original side is always lossless WebP; the encoded side is whatever format the
 	// job writes, and its `data:` URL has to say so or the webview will not decode it.
-	Ok(Preview { original: data_url(&original, OutputFormat::Webp), encoded: data_url(&encoded, settings.format), source_bytes, encoded_bytes: encoded.len() as u64, width, height })
+	let saving_percent = Conversion { source_bytes, output_bytes: encoded.len() as u64, width, height }.saving_percent();
+	Ok(Preview { original: data_url(&original, OutputFormat::Webp), encoded: data_url(&encoded, settings.format), source_bytes, encoded_bytes: encoded.len() as u64, width, height, saving_percent })
 }
 
 /// Whether an image is too large to hold two base64 copies of in the webview, and the

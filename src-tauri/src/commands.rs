@@ -224,10 +224,13 @@ pub async fn convert_scanned(app: tauri::AppHandle, state: tauri::State<'_, Canc
 ///
 /// Returns the failure as a string for display, including a refusal for images too large
 /// to hold two copies of in the webview.
+///
+/// `async`, with the encode on a blocking thread, for the same reason as
+/// [`convert_image`]: a synchronous command holds the event loop, and an AVIF encode at
+/// its default speed takes long enough to freeze the window visibly.
 #[tauri::command]
-#[expect(clippy::needless_pass_by_value, reason = "Tauri deserializes command arguments into owned values; the preview borrows them")]
-pub fn preview_encode(settings: EncodeJob, input: PathBuf) -> Result<Preview, String> {
-	preview::preview(&settings, &input)
+pub async fn preview_encode(settings: EncodeJob, input: PathBuf) -> Result<Preview, String> {
+	tauri::async_runtime::spawn_blocking(move || preview::preview(&settings, &input)).await.map_err(|error| format!("the preview thread failed: {error}"))?
 }
 
 /// The user's saved presets, sorted by name.

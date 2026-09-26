@@ -335,6 +335,14 @@ prettier subset.
       while the reference image stays pixel-exact — and any resize is applied to both, so
       the comparison is like for like instead of a big image beside a small one.
       Refused above 24 megapixels: two base64 copies in the webview is real memory.
+      **Correction (2026-09-26): this was ticked when only the backend existed.** The
+      `preview_encode` command and its tests landed in 343f7c0, but nothing in the window
+      ever called it, so the README's "preview the result" was untrue until the Preview
+      panel was built. It now exists: pick one of the selected files, see both sides with
+      the size, dimensions and the core's saving figure, and a notice when the settings
+      have changed since. `preview_encode` is now `async` too — as a synchronous command
+      an AVIF preview froze the window while it encoded. Verified in the running window,
+      for both formats, by dropping a file through Tauri's own drop event.
 - [x] Persist settings between launches. `src-tauri/src/preferences.rs` stores the last
       used settings and destination as JSON in the OS's per-app config directory, saved
       after a conversion run rather than on every slider drag.
@@ -543,9 +551,19 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
          WebP parity was unchanged through it (76/76).
          **An AVIF encode cannot be cancelled mid-way:** `ravif` has no progress hook, so
          cancel is honoured before and after the encode only.
-      3. UI: a format selector, and the per-format control groups the mode logic already
-         knows how to show and hide.
-      4. Output naming, `SourceFormat` sniffing for `.avif` input, and the preview.
+      3. **Done.** A Format selector (WebP / AVIF) above Mode; WebP's Mode, Quality and
+         Advanced panels show only for WebP, and an AVIF panel (quality, alpha quality,
+         speed, multi-threading, bit depth, colour model, colour under transparency) only
+         for AVIF. Resize moved into its own panel because both formats share it. The file
+         extension and the progress note follow the format. Verified in the running window:
+         switching shows 3 AVIF sliders and hides Mode; **WebKitGTK displays the AVIF
+         preview**; an AVIF conversion writes a file `avifdec` reads as 10-bit 4:4:4 with
+         alpha. The axe audit now covers the AVIF panel and an on-screen preview too, and
+         caught one contrast failure (a 3.91:1 description on the Format cards), fixed.
+      4. Output naming and the preview — **done in slices 2 and 3**. What is left:
+- [ ] Read AVIF **input** (`SourceFormat` sniffing for `ftypavif`, and a decoder). No
+      decoder is in the tree; `ravif` only encodes. Options: `dav1d` via bindings (a C
+      library again) or leave AVIF output-only and say so.
 
       Do **not** start at step 2. Step 1 is the one that can silently change WebP output,
       and it is the one the existing parity tests can prove innocent.

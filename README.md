@@ -1,7 +1,7 @@
 # Skidbladnir
 
-A desktop GUI for converting images to next-generation open-source formats. Today it
-drives Google's `cwebp` encoder and exposes its full control surface — not just a
+A desktop GUI for converting images to next-generation open-source formats — **WebP**
+and **AVIF**. For WebP it drives libwebp with `cwebp`'s full control surface — not just a
 quality slider — so you can tune an encode the way the command-line tool allows,
 without memorising the command line.
 
@@ -11,7 +11,13 @@ without memorising the command line.
 
 ## Features
 
-**Encoding modes**
+**Output formats**
+
+- **WebP**, through libwebp, byte-for-byte identical to `cwebp` at the same settings
+- **AVIF** (Tauri app only), through `ravif`: quality, alpha quality, speed, 8- or 10-bit,
+  YCbCr or RGB, and what happens to colour under transparency
+
+**WebP encoding modes**
 
 - Lossy, lossless, near-lossless and JPEG-like modes
 - Built-in presets: default, photo, picture, drawing, icon, text
@@ -32,6 +38,8 @@ without memorising the command line.
 
 **Workflow**
 
+- Preview the result beside the original, in either format, before anything is written
+  (Tauri app only)
 - Batch conversion across multiple input files
 - Original and converted file sizes reported after each conversion
 - Advanced options hidden behind a disclosure so the common path stays simple
@@ -44,9 +52,9 @@ Two applications are released from this repository while the migration is under 
 
 - **The Electron app** — the one to use for production work. Windows only; the last
   release of it is v0.4.3.
-- **The Tauri app** — the rewrite, released as a **prerelease**. Linux `.deb` today.
-  Windows and macOS installers are not produced yet: those platforms compile and pass
-  their tests in CI, but nothing has bundled an installer for them.
+- **The Tauri app** — the rewrite, released as a **prerelease**: a Linux `.deb` and
+  AppImage, a Windows installer and an Apple Silicon macOS `.dmg`. See Status for which
+  of those have actually been run.
 
 Each release says which of the two it contains.
 
@@ -134,7 +142,12 @@ What the new app can already do:
   without leaving a half-converted image behind.
 - Convert a whole folder, including subfolders, recreating its structure in the
   destination.
-- Preview the result beside the original before anything is written to disk.
+- Write **AVIF** as well as WebP, with its own panel of controls. Each format keeps its
+  own settings while you try the other. AVIF output is checked by decoding it with
+  libavif's own `avifdec`, measuring how close the pixels come back, and confirming
+  transparency survives.
+- Preview the result beside the original, in either format, before anything is
+  written to disk.
 - Tell you what an existing WebP already is — size, lossy or lossless, alpha — and say
   plainly when a file is an animation it cannot re-encode, rather than failing obscurely.
 - Remember your settings and destination between launches, and save named presets of
@@ -162,9 +175,13 @@ Known gaps:
 - The Electron app still requires a manually downloaded `cwebp.exe`, and it will
   silently overwrite your original if you convert a WebP into the folder it already
   lives in. The Tauri app refuses that conversion instead.
-- WebP is the only output format. The long-promised JPEG 2000 was dropped as a goal —
-  it has no momentum outside medical and archival imaging. **AVIF** is the decided next
-  format; JPEG XL is being watched until browsers enable it without a flag.
+- AVIF encoding is slow at the default speed on large images, and it cannot be
+  cancelled mid-file: the encoder reports no progress, so Cancel takes effect when the
+  current file finishes (which is then discarded, not written). AVIF input is not read
+  yet, and there is no chroma subsampling control — AVIF is always written 4:4:4.
+- JPEG XL is being watched until browsers enable it without a flag. The long-promised
+  JPEG 2000 was dropped as a goal; it has no momentum outside medical and archival
+  imaging.
 - The Electron app looks different from the screenshot above, which is the Tauri app.
 
 ## License
