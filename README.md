@@ -5,9 +5,17 @@ and **AVIF**. For WebP it drives libwebp with `cwebp`'s full control surface —
 quality slider — so you can tune an encode the way the command-line tool allows,
 without memorising the command line.
 
-![The Skidbladnir window: a dot-textured header, the mode selector, and the quality and advanced encoder controls](resources/images/screenshot.webp)
+![The Skidbladnir window with WebP selected: the format and mode selectors, the quality, resize and advanced encoder controls, and a preview of the result beside the original](resources/images/screenshot.webp)
 
-*The Tauri app. The Electron app it replaces looks different; see Status below.*
+*The Tauri app with WebP selected and a file previewed. The Electron app it replaces
+looks different; see Status below.*
+
+<details>
+<summary>With AVIF selected</summary>
+
+![The Skidbladnir window with AVIF selected: the AVIF panel with quality, alpha quality, speed, multi-threading, bit depth, colour model and colour-under-transparency controls](resources/images/screenshot-avif.webp)
+
+</details>
 
 ## Features
 

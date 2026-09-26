@@ -693,9 +693,14 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       `basicautomation.io`, so it cannot rot independently of the code. Captured from the
       running release binary over the WebDriver harness and encoded by `cwebp` at the
       app's own default settings — 91 KB for 1892x1720.
-- [ ] Re-capture the screenshot whenever the UI changes materially. It is now a scripted
-      step (WebDriver screenshot → crop → encode), so this is cheap; the risk is
-      forgetting, not effort.
+- [x] Re-captured for 0.6.0 (Format selector, AVIF panel, Preview panel), and the capture
+      is now **genuinely scripted**: `scripts/screenshot.sh` runs in CI's window job and
+      uploads the PNGs as the `screenshots` artifact. It has to be CI — on the dev host
+      WebKitWebDriver's screenshot endpoint hangs under XWayland. The README images are
+      those PNGs cropped to their content and encoded by the reference `cwebp` at the
+      app's defaults. The preview is shot in WebP because CI's WebKitGTK cannot show AVIF.
+- [ ] Re-capture whenever the UI changes materially: download the `screenshots` artifact
+      from the change's CI run, crop, encode. Cheap; the risk is forgetting.
 - [x] Dependabot now has an in-tree config (`.github/dependabot.yml`) covering cargo,
       the Nuxt frontend's npm tree, the Electron app's npm tree and github-actions, with
       the Tauri and Nuxt crates/packages grouped so they update together instead of
