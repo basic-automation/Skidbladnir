@@ -89,7 +89,7 @@ jobs:
         # npm's own cache (above) only covers downloads. Nuxt 4 keeps its build cache in
         # node_modules/.cache, so this is what stops all three runners regenerating an
         # unchanged frontend from scratch. Keyed on the lockfile and the frontend sources.
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: frontend/node_modules/.cache
           key: nuxt-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}-${{ hashFiles('frontend/**/*.vue', 'frontend/**/*.ts', 'frontend/**/*.css') }}
