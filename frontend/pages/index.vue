@@ -320,11 +320,6 @@ async function cancel() {
 
 const converted = computed(() => reports.value.length > 0 && failures.value.length === 0 && !busy.value)
 
-function savingOf(report: ConversionReport): number {
-	if (report.sourceBytes === 0) return 0
-	return ((report.sourceBytes - report.outputBytes) / report.sourceBytes) * 100
-}
-
 function basename(path: string): string {
 	return path.split(/[\\/]/).pop() ?? path
 }
@@ -587,8 +582,9 @@ function basename(path: string): string {
 									<td class="py-1 pr-2 font-sans text-palenight-bright" data-selectable>{{ basename(report.outputPath) }}</td>
 									<td class="py-1 text-right">{{ formatBytes(report.sourceBytes) }}</td>
 									<td class="py-1 text-right">{{ formatBytes(report.outputBytes) }}</td>
-									<td class="py-1 text-right" :class="savingOf(report) >= 0 ? 'text-palenight-green' : 'text-palenight-orange'">
-										{{ savingOf(report) >= 0 ? '−' : '+' }}{{ Math.abs(savingOf(report)).toFixed(1) }}%
+									<td v-if="report.savingPercent === null" class="py-1 text-right">—</td>
+									<td v-else class="py-1 text-right" :class="report.savingPercent >= 0 ? 'text-palenight-green' : 'text-palenight-orange'">
+										{{ report.savingPercent >= 0 ? '−' : '+' }}{{ Math.abs(report.savingPercent).toFixed(1) }}%
 									</td>
 									<td class="py-1 text-right">{{ report.width }}×{{ report.height }}</td>
 								</tr>

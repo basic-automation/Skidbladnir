@@ -64,7 +64,7 @@ pub fn validate_settings(settings: EncodeSettings) -> Result<EncodeSettings, Str
 
 /// The result of a conversion, as the UI needs it: what was written, and the before and
 /// after sizes the Electron app also reported and users relied on.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConversionReport {
 	/// Which file was converted. Echoed back because a batch UI dispatches many
@@ -75,6 +75,18 @@ pub struct ConversionReport {
 	/// Sizes and dimensions.
 	#[serde(flatten)]
 	pub conversion: Conversion,
+	/// [`Conversion::saving_percent`], computed here so the window displays the core's
+	/// figure instead of recomputing it in TypeScript, where the two could disagree at the
+	/// rounding edges. `null` for a zero-byte source.
+	pub saving_percent: Option<f64>,
+}
+
+impl ConversionReport {
+	/// A report for `conversion`, with the saving filled in from it.
+	#[must_use]
+	pub fn new(input_path: PathBuf, output_path: PathBuf, conversion: Conversion) -> Self {
+		Self { input_path, output_path, conversion, saving_percent: conversion.saving_percent() }
+	}
 }
 
 /// Identify which of these paths Skidbladnir can actually read.
@@ -196,7 +208,7 @@ pub async fn convert_scanned(app: tauri::AppHandle, state: tauri::State<'_, Canc
 			!cancelled.load(Ordering::Relaxed)
 		})
 		.map_err(|error| error.to_string())?;
-		Ok(ConversionReport { input_path: input, output_path, conversion })
+		Ok(ConversionReport::new(input, output_path, conversion))
 	})
 	.await
 	.map_err(|error| format!("the conversion thread failed: {error}"))?
@@ -266,7 +278,7 @@ pub fn delete_preset(app: tauri::AppHandle, name: String) -> Result<Vec<Preset>,
 pub fn convert_one(settings: &EncodeSettings, input: PathBuf, output_directory: PathBuf, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<ConversionReport, String> {
 	let output_path = output_path_in(output_directory, &input);
 	let conversion = encode_file_with_progress(settings, &input, &output_path, on_progress).map_err(|error| error.to_string())?;
-	Ok(ConversionReport { input_path: input, output_path, conversion })
+	Ok(ConversionReport::new(input, output_path, conversion))
 }
 
 /// Convert one image into `output_directory`, using the Electron app's output naming.
@@ -313,9 +325,11 @@ pub async fn convert_image(app: tauri::AppHandle, state: tauri::State<'_, Cancel
 
 #[cfg(test)]
 mod tests {
-	use skidbladnir_encode::settings::{EncodeSettings, Mode};
+	use skidbladnir_encode::{
+		settings::{EncodeSettings, Mode}, source::Conversion
+	};
 
-	use super::{convert_one, default_settings, encoder_version, inspect_dropped_paths, validate_settings};
+	use super::{ConversionReport, convert_one, default_settings, encoder_version, inspect_dropped_paths, validate_settings};
 
 	/// The version string is shown to users, so it must actually contain versions rather
 	/// than a placeholder.
@@ -394,6 +408,20 @@ mod tests {
 		assert_eq!(std::fs::read(&webp).expect("read it back"), bytes, "the source must be untouched");
 
 		let _ = std::fs::remove_dir_all(&dir);
+	}
+
+	/// The window reads the saving from the report rather than computing its own, so the
+	/// report must carry the core's figure under the name the frontend reads.
+	#[test]
+	fn conversion_report_carries_the_cores_saving() {
+		let conversion = Conversion { source_bytes: 1000, output_bytes: 250, width: 4, height: 3 };
+		let json = serde_json::to_value(ConversionReport::new("in.png".into(), "in.webp".into(), conversion)).expect("serialize");
+		assert_eq!(json["savingPercent"], serde_json::json!(75.0));
+		assert_eq!(json["sourceBytes"], serde_json::json!(1000), "the sizes must stay flattened alongside it");
+
+		let empty = Conversion { source_bytes: 0, output_bytes: 10, width: 1, height: 1 };
+		let json = serde_json::to_value(ConversionReport::new("in.png".into(), "in.webp".into(), empty)).expect("serialize");
+		assert!(json["savingPercent"].is_null(), "a zero-byte source has no saving, not a saving of zero");
 	}
 
 	/// The settings must survive the JSON round trip the IPC boundary actually performs.

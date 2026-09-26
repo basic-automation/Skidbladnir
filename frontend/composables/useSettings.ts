@@ -39,6 +39,8 @@ export interface ConversionReport {
 	outputBytes: number
 	width: number
 	height: number
+	/** The core's saving as a percentage of the original, negative if the output grew; `null` for a zero-byte source. */
+	savingPercent: number | null
 }
 
 /**
