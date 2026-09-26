@@ -37,7 +37,7 @@ jobs:
     name: rustfmt (nightly)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
@@ -49,7 +49,7 @@ jobs:
     name: cargo deny
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@v2
         with:
@@ -67,7 +67,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install the Linux system dependencies Tauri needs
         # Needed from Phase 1 onward, when src-tauri/ joins the workspace: Tauri 2 links
@@ -173,7 +173,7 @@ jobs:
     name: window smoke + accessibility
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install the system dependencies
         run: |
@@ -256,7 +256,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:

@@ -41,7 +41,7 @@ jobs:
           - { name: macos-x64, os: macos-latest, target: x86_64-apple-darwin }
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ (inputs.dry_run && github.ref) || inputs.tag || github.ref }}
 
