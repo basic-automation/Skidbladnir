@@ -145,10 +145,20 @@ building and running the Electron app until Phase 6 retires it.
       `execute/sync`, not `execute/async`: the async endpoint waits for a completion
       callback, so a script that simply returns hangs until the driver times out (this
       cost a debugging round already).
-- [ ] Run the smoke test on the **Windows** runner too. `tauri-driver` supports Windows
-      through Microsoft's `msedgedriver` (it has no macOS support at all), so this is the
-      one way the Windows build can be *launched* rather than only compiled before a
-      human does it.
+- [x] Run the smoke test on the **Windows** runner too — the `window smoke (windows)` job.
+      `tauri-driver` drives Windows through Microsoft's `msedgedriver`, fetched by the
+      pinned `msedgedriver-tool` to match the installed WebView2. Four traps, each found
+      by a failing run rather than by reading:
+      - Git Bash paths (`/d/a/...`) reach native Windows programs unreadable; the harness
+        converts with `cygpath`.
+      - On the `windows-2025` image WebView2 never opens its DevTools port ("DevToolsActivePort
+        file doesn't exist"); the job is pinned to `windows-2022`, per
+        <https://github.com/actions/runner-images/issues/14738>.
+      - Git Bash rewrites the installer's `/S` into a drive path, turning a silent install
+        into one waiting for a click; `MSYS_NO_PATHCONV=1`, plus a 45-minute job ceiling.
+      - Windows serves the bundled frontend from `http://tauri.localhost`, not
+        `tauri://localhost`.
+      tauri-driver has no macOS support, so the macOS build still cannot be launched this way.
 
 ## Phase 2 — Encode core in Rust (the real work)
 
@@ -397,9 +407,10 @@ prettier subset.
 - [x] Speed up the `window` CI job. It now uses the **prebuilt** `@tauri-apps/cli` from the
       frontend's lockfile instead of `cargo install tauri-cli`: **10m42s → 1m41s** for the
       whole job on its first run with the change.
-- [ ] Use the prebuilt CLI in `release.yml` as well. Left on `cargo install` on purpose —
-      a tag-triggered workflow cannot be exercised before a tag, so change it in the run
-      that cuts the next release, where the release itself proves it.
+- [x] Use the prebuilt CLI in `release.yml` as well — done, and **tested before a tag**:
+      the workflow gained a `dry_run` dispatch input that builds the dispatching branch and
+      attaches nothing. The dry run built all four installers in 7m44s (the 0.5.0 release
+      took 13m36s).
 - [x] Run `scripts/a11y-audit.sh` in CI alongside the smoke test — same job.
 
 ## Phase 5 — Tri-platform packaging and release
@@ -420,12 +431,16 @@ prettier subset.
       `release.yml` for 0.5.0. **Compiled and bundled, never launched** — see below.
 - [x] `cargo tauri build` green on **macOS** (`.dmg`) — built by `release.yml` for 0.5.0,
       **Apple Silicon only** and never launched.
-- [ ] First-launch verification of the Windows and macOS builds. Nobody has opened either.
-      Windows can be automated (see the Windows smoke-test item in Phase 1); macOS cannot,
-      because `tauri-driver` does not support it, so the `.dmg` needs a human.
-- [ ] An Intel macOS build. The `macos-latest` runner is Apple Silicon, so the only
-      `.dmg` is `aarch64`; Intel Macs need an explicit `x86_64-apple-darwin` target (or a
-      universal binary) in the release matrix, if they are in scope at all.
+- [x] First launch of the **Windows** build — and of the *installed* app, not just the bare
+      executable. CI builds the NSIS installer, installs it silently to
+      `%LOCALAPPDATA%\Skidbladnir`, and runs the full smoke test (13 checks) against the
+      installed `skidbladnir.exe`. WebView2 displays AVIF there.
+- [ ] First launch of the **macOS** build. `tauri-driver` does not support macOS, so the
+      `.dmg` still needs a human to open it once.
+- [x] An Intel macOS build. `release.yml` cross-builds `x86_64-apple-darwin` on the Apple
+      Silicon runner as a fourth matrix entry; the dry run produced
+      `Skidbladnir_<version>_x64.dmg` beside the `aarch64` one. Never launched, like the
+      Apple Silicon build.
 - [ ] Stop attaching a locally-built `.deb` to a release that CI then overwrites with
       `--clobber`. Attach CI's artifacts only, and verify the published files after the
       fact as was done for 0.5.0 — the downloadable file is the one that matters.
@@ -468,7 +483,10 @@ in `index.html`). That is as far as this host can verify it — actually *runnin
 Windows and a downloaded `cwebp.exe`. So "master still has a working app" holds to the level
 that can be checked here, and no further claim is made.
 
-- [ ] **Gate added: do not retire Electron until the Windows build has been launched.**
+- [x] **Gate added: do not retire Electron until the Windows build has been launched.**
+      **Cleared 2026-09-26** — the installed Windows app passes the smoke test in CI.
+      Retiring Electron is now unblocked; it is a product decision worth an owner's nod,
+      since the README still calls the Electron app the one for production work.
       Both stated preconditions now hold (Phase 3 parity is ticked and a Tauri release
       has shipped), but the Electron app is **Windows-only**, and the Tauri Windows build
       has been compiled and never opened. Retiring the one Windows app that is known to

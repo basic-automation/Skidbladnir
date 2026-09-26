@@ -53,8 +53,8 @@ Two applications are released from this repository while the migration is under 
 - **The Electron app** — the one to use for production work. Windows only; the last
   release of it is v0.4.3.
 - **The Tauri app** — the rewrite, released as a **prerelease**: a Linux `.deb` and
-  AppImage, a Windows installer and an Apple Silicon macOS `.dmg`. See Status for which
-  of those have actually been run.
+  AppImage, a Windows installer, and macOS `.dmg`s for Apple Silicon and Intel. See
+  Status for which of those have actually been run.
 
 Each release says which of the two it contains.
 
@@ -166,9 +166,9 @@ What the new app can already do:
 
 Known gaps:
 
-- The Windows installer and the macOS `.dmg` are built by CI but **have never been
-  launched** by anyone — treat them as untested. The macOS build is for Apple Silicon
-  only; there is no Intel build. The Linux `.deb` and AppImage have been run.
+- The macOS `.dmg`s (Apple Silicon and Intel) are built by CI but **have never been
+  launched** — treat them as untested. The Windows installer is installed and exercised
+  by CI on every change, and the Linux `.deb` and AppImage have been run.
 - No AppImage is produced on the maintainer's machine, because bundling one needs
   `patchelf`, which is not installed there. CI has it.
 - The app is not code-signed on any platform, and there is no auto-updater.
