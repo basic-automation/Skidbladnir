@@ -68,7 +68,11 @@ start)
 		export GDK_BACKEND=x11
 	fi
 
-	tauri-driver --port "$PORT" --native-port "$NATIVE_PORT" >/dev/null 2>&1 &
+	# tauri-driver is a native Windows program there: it cannot open a Git Bash path like
+	# /d/a/..., so hand it the Windows form.
+	if [ "$ON_WINDOWS" = 1 ]; then APP=$(cygpath -w "$APP"); fi
+	driver_log="${STATE%.json}.driver.log"
+	tauri-driver --port "$PORT" --native-port "$NATIVE_PORT" >"$driver_log" 2>&1 &
 	driver_pid=$!
 	for _ in $(seq 1 50); do
 		curl -sf -o /dev/null "http://127.0.0.1:$PORT/status" && break
@@ -76,7 +80,9 @@ start)
 	done
 
 	payload=$("$PY" -c 'import json,sys; print(json.dumps({"capabilities":{"alwaysMatch":{"tauri:options":{"application":sys.argv[1]}}}}))' "$APP")
-	response=$(curl -sf -X POST -H 'Content-Type: application/json' -d "$payload" "http://127.0.0.1:$PORT/session" || true)
+	# -s, not -sf: when the session is refused the driver's error body is the diagnosis,
+	# and -f would throw it away.
+	response=$(curl -s --max-time 120 -X POST -H 'Content-Type: application/json' -d "$payload" "http://127.0.0.1:$PORT/session" || true)
 	session=$(printf '%s' "$response" | "$PY" -c 'import json,sys
 try:
     d = json.load(sys.stdin)
@@ -87,6 +93,8 @@ print(d.get("value", {}).get("sessionId") or d.get("sessionId") or "")' 2>/dev/n
 	if [ -z "$session" ]; then
 		kill "$driver_pid" 2>/dev/null || true
 		echo "could not start a session. Driver response: $response" >&2
+		echo "--- tauri-driver log ($driver_log) ---" >&2
+		cat "$driver_log" >&2 || true
 		exit 4
 	fi
 	printf '{"session":"%s","port":"%s","driver":"%s"}\n' "$session" "$PORT" "$driver_pid" > "$STATE"
