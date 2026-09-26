@@ -262,12 +262,35 @@ jobs:
           ls -la "$RUNNER_TEMP/edgedriver"
           echo "$RUNNER_TEMP/edgedriver" >> "$GITHUB_PATH"
 
-      - name: Build the app
+      - name: Build the app and its installer
         # See the Linux window job: `tauri build`, not `cargo build --release`, for the
-        # custom-protocol feature.
+        # custom-protocol feature. The NSIS installer is built too, because what users
+        # run is the installed app, not the bare executable.
         run: |
           npm --prefix frontend ci
-          cd src-tauri && ../frontend/node_modules/.bin/tauri build --no-bundle
+          cd src-tauri && ../frontend/node_modules/.bin/tauri build --bundles nsis
 
-      - name: Smoke test the window
-        run: scripts/smoke-test.sh --app "$(cygpath -u "$GITHUB_WORKSPACE")/target/release/skidbladnir.exe"
+      - name: Install it the way a user would, silently
+        # Tauri's NSIS installer defaults to a per-user install under
+        # %LOCALAPPDATA%\<productName>. Find the executable rather than trusting that
+        # path, and fail loudly if the installer put nothing anywhere.
+        run: |
+          installer=$(ls target/release/bundle/nsis/*-setup.exe)
+          echo "installing $installer"
+          "$installer" /S
+          app=""
+          for _ in $(seq 1 60); do
+            app=$(find "$(cygpath -u "$LOCALAPPDATA")/Skidbladnir" -maxdepth 1 -iname 'skidbladnir.exe' 2>/dev/null | head -1)
+            [ -n "$app" ] && break
+            sleep 1
+          done
+          if [ -z "$app" ]; then
+            echo "::error::the installer did not put skidbladnir.exe under %LOCALAPPDATA%\Skidbladnir"
+            find "$(cygpath -u "$LOCALAPPDATA")" -maxdepth 3 -iname 'skidbladnir*' || true
+            exit 1
+          fi
+          ls -la "$app"
+          echo "INSTALLED_APP=$app" >> "$GITHUB_ENV"
+
+      - name: Smoke test the installed app
+        run: scripts/smoke-test.sh --app "$INSTALLED_APP"
