@@ -224,7 +224,7 @@ jobs:
         # uploaded for a person to review and commit, never committed by CI itself.
         run: xvfb-run -a -s "-screen 0 1200x3200x24" scripts/screenshot.sh --app target/release/skidbladnir --out screenshots
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: screenshots
           path: screenshots/*.png
