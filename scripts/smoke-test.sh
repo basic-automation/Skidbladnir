@@ -124,7 +124,7 @@ check "converts an image end to end" \
 	"const I=window.__TAURI_INTERNALS__;
 	 const s=await I.invoke('default_settings');
 	 const r=await I.invoke('convert_image', { settings: s, input: '$scratch/smoke.png', outputDirectory: '$scratch/out' });
-	 return r.width + 'x' + r.height + ' ' + (r.outputBytes > 0)" '48x48 true'
+	 return r.width + 'x' + r.height + ' ' + (r.outputBytes > 0) + ' ' + typeof r.savingPercent" '48x48 true number'
 
 if [ -s "$scratch/out/smoke.webp" ]; then
 	printf 'ok   %s\n' "wrote a non-empty WebP to disk ($(wc -c < "$scratch/out/smoke.webp") bytes)"
