@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-	encoder::{EncodeError, RgbaImage, encode_rgba_with_progress}, settings::EncodeSettings
+	encoder::{EncodeError, RgbaImage, encode_rgba_with_progress}, settings::EncodeJob
 };
 
 /// The input formats Skidbladnir accepts, matching the Electron app's accepted list.
@@ -449,7 +449,7 @@ pub fn output_path_in(directory: PathBuf, input: &Path) -> PathBuf {
 /// Returns [`ConvertError`] if the input cannot be read or decoded, the settings or image
 /// are invalid, the output would overwrite the source, the output directory does not
 /// exist, or the write fails.
-pub fn encode_file(settings: &EncodeSettings, input: &Path, output: &Path) -> Result<Conversion, ConvertError> {
+pub fn encode_file(settings: &EncodeJob, input: &Path, output: &Path) -> Result<Conversion, ConvertError> {
 	encode_file_with_progress(settings, input, output, &mut |_| true)
 }
 
@@ -463,7 +463,7 @@ pub fn encode_file(settings: &EncodeSettings, input: &Path, output: &Path) -> Re
 ///
 /// As [`encode_file`], plus a cancellation surfaced as [`ConvertError::Encode`] wrapping
 /// [`EncodeError::Cancelled`].
-pub fn encode_file_with_progress(settings: &EncodeSettings, input: &Path, output: &Path, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Conversion, ConvertError> {
+pub fn encode_file_with_progress(settings: &EncodeJob, input: &Path, output: &Path, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Conversion, ConvertError> {
 	let directory = output.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
 	if !directory.is_dir() {
 		return Err(ConvertError::MissingOutputDirectory { path: directory.to_path_buf() });
@@ -513,7 +513,7 @@ mod tests {
 	};
 
 	use super::{Conversion, ConvertError, SourceFormat, encode_file, load, output_path_in};
-	use crate::settings::{EncodeSettings, Mode, Resize};
+	use crate::settings::{EncodeJob, Mode, Resize, WebpSettings};
 
 	/// A scratch directory that cleans itself up. Every test in this module writes only
 	/// inside one of these — nothing here touches a path outside the temp directory.
@@ -576,7 +576,7 @@ mod tests {
 		let output = scratch.join("source.webp");
 		write_png(&input, 64, 48);
 
-		let conversion = encode_file(&EncodeSettings::default(), &input, &output).expect("conversion succeeds");
+		let conversion = encode_file(&EncodeJob::default(), &input, &output).expect("conversion succeeds");
 		assert!(output.is_file(), "the output file must exist");
 		assert_eq!(conversion.output_bytes, fs::metadata(&output).expect("stat the output").len(), "the reported output size must be the file on disk");
 		assert_eq!(conversion.source_bytes, fs::metadata(&input).expect("stat the input").len());
@@ -591,7 +591,7 @@ mod tests {
 		let scratch = Scratch::new("resize");
 		let input = scratch.join("source.png");
 		write_png(&input, 64, 48);
-		let settings = EncodeSettings { resize: Resize { width: 32, height: 0 }, ..Default::default() };
+		let settings = EncodeJob { resize: Resize { width: 32, height: 0 }, ..Default::default() };
 		let conversion = encode_file(&settings, &input, &scratch.join("out.webp")).expect("conversion succeeds");
 		assert_eq!((conversion.width, conversion.height), (32, 24), "height must be derived, not echoed back as 0");
 	}
@@ -604,14 +604,14 @@ mod tests {
 		let png = scratch.join("photo.png");
 		write_png(&png, 32, 32);
 		let webp = scratch.join("photo.webp");
-		encode_file(&EncodeSettings::default(), &png, &webp).expect("first conversion succeeds");
+		encode_file(&EncodeJob::default(), &png, &webp).expect("first conversion succeeds");
 		let original = fs::read(&webp).expect("read the converted file");
 
 		// Now convert that WebP into the same directory: output_path_in derives photo.webp,
 		// which is the input.
 		let derived = output_path_in(scratch.0.clone(), &webp);
 		assert_eq!(derived, webp, "this is the dangerous case the guard exists for");
-		let error = encode_file(&EncodeSettings::default(), &webp, &derived).expect_err("must refuse");
+		let error = encode_file(&EncodeJob::default(), &webp, &derived).expect_err("must refuse");
 		assert!(matches!(error, ConvertError::WouldOverwriteSource { .. }), "got {error}");
 		assert_eq!(fs::read(&webp).expect("read the file again"), original, "the source must be byte-identical after the refusal");
 	}
@@ -626,7 +626,7 @@ mod tests {
 		fs::write(&output, b"PRECIOUS EXISTING CONTENT").expect("seed the output file");
 
 		// Invalid settings: the encode fails before anything is written.
-		let settings = EncodeSettings { method: 9, ..Default::default() };
+		let settings = EncodeJob::from(WebpSettings { method: 9, ..Default::default() });
 		assert!(encode_file(&settings, &input, &output).is_err());
 		assert_eq!(fs::read(&output).expect("read the output"), b"PRECIOUS EXISTING CONTENT", "a failed encode must not truncate the destination");
 	}
@@ -636,7 +636,7 @@ mod tests {
 		let scratch = Scratch::new("staging");
 		let input = scratch.join("source.png");
 		write_png(&input, 24, 24);
-		encode_file(&EncodeSettings::default(), &input, &scratch.join("out.webp")).expect("conversion succeeds");
+		encode_file(&EncodeJob::default(), &input, &scratch.join("out.webp")).expect("conversion succeeds");
 		let leftovers: Vec<_> = fs::read_dir(&scratch.0).expect("list the directory").filter_map(Result::ok).filter(|entry| entry.file_name().to_string_lossy().contains(".part")).collect();
 		assert!(leftovers.is_empty(), "staging files left behind: {leftovers:?}");
 	}
@@ -647,7 +647,7 @@ mod tests {
 		let input = scratch.join("source.png");
 		write_png(&input, 16, 16);
 		let missing = scratch.join("nope");
-		let error = encode_file(&EncodeSettings::default(), &input, &missing.join("out.webp")).expect_err("must refuse");
+		let error = encode_file(&EncodeJob::default(), &input, &missing.join("out.webp")).expect_err("must refuse");
 		assert!(matches!(error, ConvertError::MissingOutputDirectory { .. }), "got {error}");
 		assert!(!missing.exists(), "the directory must not have been created");
 	}
@@ -669,7 +669,7 @@ mod tests {
 		let png = scratch.join("source.png");
 		write_png(&png, 40, 30);
 		let webp = scratch.join("intermediate.webp");
-		encode_file(&EncodeSettings { mode: Mode::Lossless, ..Default::default() }, &png, &webp).expect("encode to webp");
+		encode_file(&EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() }), &png, &webp).expect("encode to webp");
 
 		let loaded = load(&webp).expect("decode the webp");
 		assert_eq!(loaded.format, SourceFormat::Webp);
@@ -686,7 +686,7 @@ mod tests {
 		write_png(&input, 64, 64);
 		let output = scratch.join("out.webp");
 
-		let error = super::encode_file_with_progress(&EncodeSettings::default(), &input, &output, &mut |_| false).expect_err("must cancel");
+		let error = super::encode_file_with_progress(&EncodeJob::default(), &input, &output, &mut |_| false).expect_err("must cancel");
 		assert!(matches!(error, ConvertError::Encode(crate::encoder::EncodeError::Cancelled)), "got {error}");
 		assert!(!output.exists(), "a cancelled conversion must not create the output");
 		let leftovers: Vec<_> = fs::read_dir(&scratch.0).expect("list").filter_map(Result::ok).filter(|e| e.file_name().to_string_lossy().contains(".part")).collect();
@@ -699,7 +699,7 @@ mod tests {
 		let input = scratch.join("source.png");
 		write_png(&input, 96, 64);
 		let mut seen = Vec::new();
-		super::encode_file_with_progress(&EncodeSettings::default(), &input, &scratch.join("out.webp"), &mut |percent| {
+		super::encode_file_with_progress(&EncodeJob::default(), &input, &scratch.join("out.webp"), &mut |percent| {
 			seen.push(percent);
 			true
 		})
@@ -741,7 +741,7 @@ mod tests {
 		let png = scratch.join("source.png");
 		write_png(&png, 40, 30);
 		let webp = scratch.join("out.webp");
-		super::encode_file(&EncodeSettings { mode: Mode::Lossless, ..Default::default() }, &png, &webp).expect("encode");
+		super::encode_file(&EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() }), &png, &webp).expect("encode");
 
 		let inspected = super::inspect_paths(&[webp]);
 		let details = inspected[0].webp.expect("a WebP must report its header");

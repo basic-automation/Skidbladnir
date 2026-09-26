@@ -1,4 +1,4 @@
-//! Turning [`EncodeSettings`] into a `cwebp` command line.
+//! Turning [`EncodeJob`] into a `cwebp` command line.
 //!
 //! This is not dead weight in a port that intends to call libwebp directly. It has two
 //! jobs that outlive the subprocess:
@@ -18,7 +18,7 @@
 
 use std::{ffi::OsString, path::Path};
 
-use crate::settings::{EncodeSettings, Mode, TargetMetric};
+use crate::settings::{EncodeJob, Mode, TargetMetric};
 
 /// Build the `cwebp` argument list for these settings, encoding `input` to `output`.
 ///
@@ -34,7 +34,9 @@ use crate::settings::{EncodeSettings, Mode, TargetMetric};
 /// the values that mode uses — the advanced lossy controls reach the encoder in
 /// [`Mode::Lossy`] alone, and [`Mode::NearLossless`] sends nothing but its own level.
 #[must_use]
-pub fn cwebp_args(settings: &EncodeSettings, input: &Path, output: &Path) -> Vec<OsString> {
+pub fn cwebp_args(job: &EncodeJob, input: &Path, output: &Path) -> Vec<OsString> {
+	// `cwebp` is a WebP encoder, so the job's WebP settings are everything but the resize.
+	let settings = &job.webp;
 	let mut args: Vec<OsString> = Vec::new();
 	let mut push = |flag: &str| args.push(OsString::from(flag));
 
@@ -140,10 +142,10 @@ pub fn cwebp_args(settings: &EncodeSettings, input: &Path, output: &Path) -> Vec
 		push(&settings.sns.to_string());
 	}
 
-	if !settings.resize.is_noop() {
+	if !job.resize.is_noop() {
 		push("-resize");
-		push(&settings.resize.width.to_string());
-		push(&settings.resize.height.to_string());
+		push(&job.resize.width.to_string());
+		push(&job.resize.height.to_string());
 	}
 
 	args.push(input.as_os_str().to_os_string());
@@ -157,11 +159,11 @@ mod tests {
 	use std::path::Path;
 
 	use super::cwebp_args;
-	use crate::settings::{AlphaFiltering, EncodeSettings, FilterType, Mode, Preset, Resize, TargetMetric};
+	use crate::settings::{AlphaFiltering, EncodeJob, FilterType, Mode, Preset, Resize, TargetMetric, WebpSettings};
 
 	/// Render an argument list as a space-joined string, so a failing assertion reads like
 	/// the command line it is about rather than a vector of `OsString`.
-	fn line(settings: &EncodeSettings) -> String {
+	fn line(settings: &EncodeJob) -> String {
 		cwebp_args(settings, Path::new("in.png"), Path::new("out.webp")).iter().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>().join(" ")
 	}
 
@@ -169,12 +171,12 @@ mod tests {
 	/// its position is what `main.js` concatenates.
 	#[test]
 	fn default_lossy_matches_the_electron_command_line() {
-		assert_eq!(line(&EncodeSettings::default()), "-af -mt -alpha_filter best -q 75 -alpha_q 100 -m 4 -segments 4 -partition_limit 0 -pass 6 -sns 50 in.png -o out.webp");
+		assert_eq!(line(&EncodeJob::default()), "-af -mt -alpha_filter best -q 75 -alpha_q 100 -m 4 -segments 4 -partition_limit 0 -pass 6 -sns 50 in.png -o out.webp");
 	}
 
 	#[test]
 	fn lossless_pairs_exact_and_skips_the_advanced_controls() {
-		let settings = EncodeSettings { mode: Mode::Lossless, ..Default::default() };
+		let settings = EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() });
 		// No -af: the renderer sends the filter selection for the lossy mode only. No
 		// -segments / -sns / -pass / -partition_limit either.
 		assert_eq!(line(&settings), "-lossless -exact -mt -alpha_filter best -q 75 -alpha_q 100 -m 4 in.png -o out.webp");
@@ -182,13 +184,13 @@ mod tests {
 
 	#[test]
 	fn near_lossless_sends_the_quality_slider_as_its_level_and_no_q() {
-		let settings = EncodeSettings { mode: Mode::NearLossless, quality: 60, ..Default::default() };
+		let settings = EncodeJob::from(WebpSettings { mode: Mode::NearLossless, quality: 60, ..Default::default() });
 		assert_eq!(line(&settings), "-near_lossless 60 -mt -alpha_filter best in.png -o out.webp");
 	}
 
 	#[test]
 	fn jpeg_like_is_lossy_with_the_basic_controls_only() {
-		let settings = EncodeSettings { mode: Mode::JpegLike, ..Default::default() };
+		let settings = EncodeJob::from(WebpSettings { mode: Mode::JpegLike, ..Default::default() });
 		assert_eq!(line(&settings), "-jpeg_like -mt -alpha_filter best -q 75 -alpha_q 100 -m 4 in.png -o out.webp");
 	}
 
@@ -196,14 +198,14 @@ mod tests {
 	/// quality but not alpha quality or method.
 	#[test]
 	fn preset_mode_clears_alpha_filter() {
-		let settings = EncodeSettings { mode: Mode::Preset, preset: Some(Preset::Drawing), ..Default::default() };
+		let settings = EncodeJob::from(WebpSettings { mode: Mode::Preset, preset: Some(Preset::Drawing), ..Default::default() });
 		assert_eq!(line(&settings), "-preset drawing -mt -q 75 in.png -o out.webp");
 	}
 
 	#[test]
 	fn every_preset_reaches_the_command_line() {
 		for (preset, expected) in [(Preset::Default, "default"), (Preset::Photo, "photo"), (Preset::Picture, "picture"), (Preset::Drawing, "drawing"), (Preset::Icon, "icon"), (Preset::Text, "text")] {
-			let settings = EncodeSettings { mode: Mode::Preset, preset: Some(preset), ..Default::default() };
+			let settings = EncodeJob::from(WebpSettings { mode: Mode::Preset, preset: Some(preset), ..Default::default() });
 			assert_eq!(line(&settings), format!("-preset {expected} -mt -q 75 in.png -o out.webp"));
 		}
 	}
@@ -211,16 +213,16 @@ mod tests {
 	/// An unselected preset must not silently fall through to the lossy defaults.
 	#[test]
 	fn preset_mode_without_a_preset_emits_no_preset_flag() {
-		let settings = EncodeSettings { mode: Mode::Preset, preset: None, ..Default::default() };
+		let settings = EncodeJob::from(WebpSettings { mode: Mode::Preset, preset: None, ..Default::default() });
 		assert!(!line(&settings).contains("-preset"), "an unselected preset must be caught by validate(), not guessed at");
 		assert_eq!(settings.validate(), Err(crate::settings::ValidationError::MissingPreset));
 	}
 
 	#[test]
 	fn manual_filtering_adds_strength_and_sharpness() {
-		let strong = EncodeSettings { filter: FilterType::Strong, filter_strength: 65, filter_sharpness: 3, ..Default::default() };
+		let strong = EncodeJob::from(WebpSettings { filter: FilterType::Strong, filter_strength: 65, filter_sharpness: 3, ..Default::default() });
 		assert_eq!(line(&strong), "-strong -mt -f 65 -sharpness 3 -alpha_filter best -q 75 -alpha_q 100 -m 4 -segments 4 -partition_limit 0 -pass 6 -sns 50 in.png -o out.webp");
-		let simple = EncodeSettings { filter: FilterType::Simple, filter_strength: 10, filter_sharpness: 7, ..Default::default() };
+		let simple = EncodeJob::from(WebpSettings { filter: FilterType::Simple, filter_strength: 10, filter_sharpness: 7, ..Default::default() });
 		assert_eq!(line(&simple), "-nostrong -mt -f 10 -sharpness 7 -alpha_filter best -q 75 -alpha_q 100 -m 4 -segments 4 -partition_limit 0 -pass 6 -sns 50 in.png -o out.webp");
 	}
 
@@ -228,7 +230,7 @@ mod tests {
 	/// must not be sent — the Electron UI disables both sliders in that state.
 	#[test]
 	fn auto_filtering_withholds_the_strength_sliders() {
-		let settings = EncodeSettings { filter: FilterType::Auto, filter_strength: 99, filter_sharpness: 5, ..Default::default() };
+		let settings = EncodeJob::from(WebpSettings { filter: FilterType::Auto, filter_strength: 99, filter_sharpness: 5, ..Default::default() });
 		let rendered = line(&settings);
 		assert!(rendered.contains("-af"));
 		assert!(!rendered.contains("-f 99"), "auto filtering must not send a manual strength: {rendered}");
@@ -237,12 +239,12 @@ mod tests {
 
 	#[test]
 	fn target_size_and_psnr_are_mutually_exclusive() {
-		let sized = EncodeSettings { target: Some(TargetMetric::Size(51_200)), ..Default::default() };
+		let sized = EncodeJob::from(WebpSettings { target: Some(TargetMetric::Size(51_200)), ..Default::default() });
 		let rendered = line(&sized);
 		assert!(rendered.contains("-size 51200"), "{rendered}");
 		assert!(!rendered.contains("-psnr"), "{rendered}");
 
-		let psnr = EncodeSettings { target: Some(TargetMetric::Psnr(42)), ..Default::default() };
+		let psnr = EncodeJob::from(WebpSettings { target: Some(TargetMetric::Psnr(42)), ..Default::default() });
 		let rendered = line(&psnr);
 		assert!(rendered.contains("-print_psnr -psnr 42"), "{rendered}");
 		assert!(!rendered.contains("-size"), "{rendered}");
@@ -252,17 +254,17 @@ mod tests {
 	/// target at all.
 	#[test]
 	fn default_encode_carries_no_size_target() {
-		assert!(!line(&EncodeSettings::default()).contains("-size"), "the Electron app's `-size 1` default must not come back");
+		assert!(!line(&EncodeJob::default()).contains("-size"), "the Electron app's `-size 1` default must not come back");
 	}
 
 	#[test]
 	fn optional_lossy_switches_appear_only_when_set() {
-		let all_on = EncodeSettings { sharp_yuv: true, low_memory: true, ..Default::default() };
+		let all_on = EncodeJob::from(WebpSettings { sharp_yuv: true, low_memory: true, ..Default::default() });
 		let rendered = line(&all_on);
 		assert!(rendered.contains("-sharp_yuv"), "{rendered}");
 		assert!(rendered.contains("-low_memory"), "{rendered}");
 
-		let rendered = line(&EncodeSettings::default());
+		let rendered = line(&EncodeJob::default());
 		assert!(!rendered.contains("-sharp_yuv"), "{rendered}");
 		assert!(!rendered.contains("-low_memory"), "{rendered}");
 	}
@@ -272,7 +274,7 @@ mod tests {
 	#[test]
 	fn sharp_yuv_does_not_leak_into_other_modes() {
 		for mode in [Mode::Lossless, Mode::NearLossless, Mode::JpegLike, Mode::Preset] {
-			let settings = EncodeSettings { mode, preset: Some(Preset::Photo), sharp_yuv: true, low_memory: true, ..Default::default() };
+			let settings = EncodeJob::from(WebpSettings { mode, preset: Some(Preset::Photo), sharp_yuv: true, low_memory: true, ..Default::default() });
 			let rendered = line(&settings);
 			assert!(!rendered.contains("-sharp_yuv"), "{mode:?} must not send -sharp_yuv: {rendered}");
 			assert!(!rendered.contains("-low_memory"), "{mode:?} must not send -low_memory: {rendered}");
@@ -281,17 +283,17 @@ mod tests {
 
 	#[test]
 	fn multi_threading_can_be_turned_off() {
-		let settings = EncodeSettings { multi_threading: false, ..Default::default() };
+		let settings = EncodeJob::from(WebpSettings { multi_threading: false, ..Default::default() });
 		assert!(!line(&settings).contains("-mt"));
 	}
 
 	#[test]
 	fn alpha_filtering_variants_and_absence() {
 		for (choice, expected) in [(AlphaFiltering::Off, "none"), (AlphaFiltering::Fast, "fast"), (AlphaFiltering::Best, "best")] {
-			let settings = EncodeSettings { alpha_filtering: Some(choice), ..Default::default() };
+			let settings = EncodeJob::from(WebpSettings { alpha_filtering: Some(choice), ..Default::default() });
 			assert!(line(&settings).contains(&format!("-alpha_filter {expected}")));
 		}
-		let settings = EncodeSettings { alpha_filtering: None, ..Default::default() };
+		let settings = EncodeJob::from(WebpSettings { alpha_filtering: None, ..Default::default() });
 		assert!(!line(&settings).contains("-alpha_filter"));
 	}
 
@@ -299,16 +301,16 @@ mod tests {
 	#[test]
 	fn resize_is_emitted_in_every_mode_when_set() {
 		for mode in [Mode::Lossy, Mode::Lossless, Mode::NearLossless, Mode::JpegLike, Mode::Preset] {
-			let settings = EncodeSettings { mode, preset: Some(Preset::Icon), resize: Resize { width: 1024, height: 0 }, ..Default::default() };
+			let settings = EncodeJob { resize: Resize { width: 1024, height: 0 }, webp: WebpSettings { mode, preset: Some(Preset::Icon), ..Default::default() }, ..Default::default() };
 			assert!(line(&settings).contains("-resize 1024 0"), "{mode:?} must carry the resize");
 		}
-		assert!(!line(&EncodeSettings::default()).contains("-resize"));
+		assert!(!line(&EncodeJob::default()).contains("-resize"));
 	}
 
 	/// Resize lands immediately before the input path, as the last option.
 	#[test]
 	fn resize_is_the_last_option_before_the_paths() {
-		let settings = EncodeSettings { resize: Resize { width: 0, height: 480 }, ..Default::default() };
+		let settings = EncodeJob { resize: Resize { width: 0, height: 480 }, ..Default::default() };
 		assert!(line(&settings).ends_with("-resize 0 480 in.png -o out.webp"), "{}", line(&settings));
 	}
 
@@ -317,7 +319,7 @@ mod tests {
 	/// Electron app, which builds one shell line and spawns it with `shell: true`.
 	#[test]
 	fn paths_are_passed_as_arguments_not_shell_text() {
-		let args = cwebp_args(&EncodeSettings::default(), Path::new("/tmp/a b/holiday \"photo\".png"), Path::new("/tmp/out dir/holiday.webp"));
+		let args = cwebp_args(&EncodeJob::default(), Path::new("/tmp/a b/holiday \"photo\".png"), Path::new("/tmp/out dir/holiday.webp"));
 		let tail = &args[args.len() - 3..];
 		assert_eq!(tail[0], std::ffi::OsString::from("/tmp/a b/holiday \"photo\".png"));
 		assert_eq!(tail[1], std::ffi::OsString::from("-o"));

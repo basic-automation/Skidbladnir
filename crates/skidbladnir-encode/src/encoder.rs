@@ -55,7 +55,7 @@ use std::ffi::c_int;
 use libwebp_sys::{WEBP_ENCODER_ABI_VERSION, WebPConfig, WebPConfigInitInternal, WebPEncode, WebPMemoryWrite, WebPMemoryWriter, WebPMemoryWriterClear, WebPMemoryWriterInit, WebPPicture, WebPPictureCopy, WebPPictureFree, WebPPictureImportRGBA, WebPPictureInitInternal, WebPPictureRescale, WebPPreset, WebPValidateConfig};
 use thiserror::Error;
 
-use crate::settings::{AlphaFiltering, EncodeSettings, FilterType, Mode, Preset, TargetMetric};
+use crate::settings::{AlphaFiltering, EncodeJob, FilterType, Mode, Preset, Resize, TargetMetric, WebpSettings};
 
 /// An 8-bit RGBA source image, borrowed.
 ///
@@ -101,7 +101,7 @@ pub enum EncodeError {
 	},
 	/// libwebp rejected the translated `WebPConfig`.
 	///
-	/// The range checks in [`EncodeSettings::validate`] should make this unreachable, so
+	/// The range checks in [`EncodeJob::validate`] should make this unreachable, so
 	/// it means the two disagree and the settings model needs fixing.
 	#[error("libwebp rejected the encoder configuration")]
 	InvalidConfig,
@@ -126,7 +126,7 @@ pub enum EncodeError {
 /// `WebPConfigPreset` resets the whole config to the preset's values, keeping only the
 /// quality. Applying it first, as the Electron app's command line does, means the
 /// explicit controls that follow win — which is the behaviour a user of the old app saw.
-fn build_config(settings: &EncodeSettings) -> Result<WebPConfig, EncodeError> {
+fn build_config(settings: &WebpSettings) -> Result<WebPConfig, EncodeError> {
 	settings.validate()?;
 
 	// WebPConfigInit: the inline helper libwebp declares in its header is not exported,
@@ -327,8 +327,8 @@ unsafe extern "C" fn progress_trampoline(percent: c_int, picture: *const WebPPic
 ///
 /// Returns [`EncodeError`] if the settings are invalid, the image buffer does not match
 /// its stated dimensions, or libwebp fails to allocate, rescale or encode.
-pub fn encode_rgba(settings: &EncodeSettings, image: &RgbaImage<'_>) -> Result<Vec<u8>, EncodeError> {
-	encode_rgba_with_progress(settings, image, &mut |_| true)
+pub fn encode_rgba(job: &EncodeJob, image: &RgbaImage<'_>) -> Result<Vec<u8>, EncodeError> {
+	encode_rgba_with_progress(job, image, &mut |_| true)
 }
 
 /// Encode an RGBA image, reporting progress and allowing the caller to stop.
@@ -348,8 +348,10 @@ pub fn encode_rgba(settings: &EncodeSettings, image: &RgbaImage<'_>) -> Result<V
 /// # Errors
 ///
 /// As [`encode_rgba`], plus [`EncodeError::Cancelled`] if `on_progress` returned `false`.
-pub fn encode_rgba_with_progress(settings: &EncodeSettings, image: &RgbaImage<'_>, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
-	let config = build_config(settings)?;
+pub fn encode_rgba_with_progress(job: &EncodeJob, image: &RgbaImage<'_>, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
+	// WebP is the only `OutputFormat`, so the job's WebP settings are the whole story.
+	// When a second format arrives this is where the job is dispatched on it.
+	let config = build_config(&job.webp)?;
 
 	let expected = (image.width as usize).checked_mul(image.height as usize).and_then(|pixels| pixels.checked_mul(4)).ok_or(EncodeError::ImageTooLarge { width: image.width, height: image.height })?;
 	if image.width == 0 || image.height == 0 || image.pixels.len() != expected {
@@ -371,7 +373,7 @@ pub fn encode_rgba_with_progress(settings: &EncodeSettings, image: &RgbaImage<'_
 	// cwebp.c decides the colour path *before* reading the input, because it changes
 	// which conversion the samples go through. Matching it is a parity requirement, not
 	// an optimisation.
-	let resizing = !settings.resize.is_noop();
+	let resizing = !job.resize.is_noop();
 	picture.0.use_argb = c_int::from(config.lossless == 1 || config.use_sharp_yuv == 1 || config.preprocessing > 0 || resizing);
 	picture.0.width = width;
 	picture.0.height = height;
@@ -386,7 +388,7 @@ pub fn encode_rgba_with_progress(settings: &EncodeSettings, image: &RgbaImage<'_
 	}
 
 	if resizing {
-		resize_picture(&mut picture, settings, &config)?;
+		resize_picture(&mut picture, job.resize, &config)?;
 	}
 
 	let mut writer = Writer(unsafe {
@@ -432,9 +434,9 @@ pub fn encode_rgba_with_progress(settings: &EncodeSettings, image: &RgbaImage<'_
 /// rescaling an opaque copy for the colour channels and the real picture for alpha, then
 /// reassembling. Without this, a lossless resize diverges from `cwebp` in every
 /// transparent pixel.
-fn resize_picture(picture: &mut Picture, settings: &EncodeSettings, config: &WebPConfig) -> Result<(), EncodeError> {
-	let target_w = i32::try_from(settings.resize.width).map_err(|_| EncodeError::ImageTooLarge { width: settings.resize.width, height: settings.resize.height })?;
-	let target_h = i32::try_from(settings.resize.height).map_err(|_| EncodeError::ImageTooLarge { width: settings.resize.width, height: settings.resize.height })?;
+fn resize_picture(picture: &mut Picture, resize: Resize, config: &WebPConfig) -> Result<(), EncodeError> {
+	let target_w = i32::try_from(resize.width).map_err(|_| EncodeError::ImageTooLarge { width: resize.width, height: resize.height })?;
+	let target_h = i32::try_from(resize.height).map_err(|_| EncodeError::ImageTooLarge { width: resize.width, height: resize.height })?;
 
 	if config.exact == 0 {
 		if unsafe { WebPPictureRescale(&raw mut picture.0, target_w, target_h) } == 0 {
@@ -507,7 +509,7 @@ fn for_each_argb_row(picture: &mut Picture, mut f: impl FnMut(&mut [u32])) {
 #[cfg(test)]
 mod tests {
 	use super::{EncodeError, RgbaImage, build_config, encode_rgba};
-	use crate::settings::{AlphaFiltering, EncodeSettings, FilterType, Mode, Preset, Resize, TargetMetric};
+	use crate::settings::{AlphaFiltering, EncodeJob, FilterType, Mode, Preset, Resize, TargetMetric, WebpSettings};
 
 	/// A small RGBA test image with real colour variation and a real alpha ramp, so the
 	/// alpha controls have something to act on.
@@ -524,7 +526,7 @@ mod tests {
 		pixels
 	}
 
-	fn encode(settings: &EncodeSettings) -> Result<Vec<u8>, EncodeError> {
+	fn encode(settings: &EncodeJob) -> Result<Vec<u8>, EncodeError> {
 		let pixels = fixture(48, 32);
 		encode_rgba(settings, &RgbaImage { width: 48, height: 32, pixels: &pixels })
 	}
@@ -533,7 +535,7 @@ mod tests {
 	/// claim at the config level; `tests/parity.rs` is the claim at the byte level.
 	#[test]
 	fn every_lossy_control_reaches_webpconfig() {
-		let settings = EncodeSettings { mode: Mode::Lossy, quality: 42, alpha_quality: 33, alpha_filtering: Some(AlphaFiltering::Best), method: 5, segments: 2, partition_limit: 17, sns: 81, passes: 9, filter: FilterType::Strong, filter_strength: 64, filter_sharpness: 6, target: Some(TargetMetric::Size(12_345)), sharp_yuv: true, low_memory: true, multi_threading: true, ..Default::default() };
+		let settings = WebpSettings { mode: Mode::Lossy, quality: 42, alpha_quality: 33, alpha_filtering: Some(AlphaFiltering::Best), method: 5, segments: 2, partition_limit: 17, sns: 81, passes: 9, filter: FilterType::Strong, filter_strength: 64, filter_sharpness: 6, target: Some(TargetMetric::Size(12_345)), sharp_yuv: true, low_memory: true, multi_threading: true, ..Default::default() };
 		let config = build_config(&settings).expect("config builds");
 		assert!((config.quality - 42.0).abs() < f32::EPSILON);
 		assert_eq!(config.alpha_quality, 33);
@@ -556,14 +558,14 @@ mod tests {
 
 	#[test]
 	fn auto_filter_sets_autofilter_and_leaves_strength_alone() {
-		let config = build_config(&EncodeSettings { filter: FilterType::Auto, filter_strength: 99, ..Default::default() }).expect("config builds");
+		let config = build_config(&WebpSettings { filter: FilterType::Auto, filter_strength: 99, ..Default::default() }).expect("config builds");
 		assert_eq!(config.autofilter, 1);
 		assert_ne!(config.filter_strength, 99, "auto filtering must not adopt the manual strength");
 	}
 
 	#[test]
 	fn simple_filter_selects_filter_type_zero() {
-		let config = build_config(&EncodeSettings { filter: FilterType::Simple, ..Default::default() }).expect("config builds");
+		let config = build_config(&WebpSettings { filter: FilterType::Simple, ..Default::default() }).expect("config builds");
 		assert_eq!(config.filter_type, 0);
 		assert_eq!(config.autofilter, 0);
 	}
@@ -572,21 +574,21 @@ mod tests {
 	/// `lossless = 1` in cwebp.c, and without it the encode is an ordinary lossy one.
 	#[test]
 	fn near_lossless_implies_lossless() {
-		let config = build_config(&EncodeSettings { mode: Mode::NearLossless, quality: 60, ..Default::default() }).expect("config builds");
+		let config = build_config(&WebpSettings { mode: Mode::NearLossless, quality: 60, ..Default::default() }).expect("config builds");
 		assert_eq!(config.near_lossless, 60);
 		assert_eq!(config.lossless, 1, "cwebp.c: use near-lossless only with lossless");
 	}
 
 	#[test]
 	fn lossless_sets_exact() {
-		let config = build_config(&EncodeSettings { mode: Mode::Lossless, ..Default::default() }).expect("config builds");
+		let config = build_config(&WebpSettings { mode: Mode::Lossless, ..Default::default() }).expect("config builds");
 		assert_eq!(config.lossless, 1);
 		assert_eq!(config.exact, 1);
 	}
 
 	#[test]
 	fn jpeg_like_sets_emulate_jpeg_size() {
-		assert_eq!(build_config(&EncodeSettings { mode: Mode::JpegLike, ..Default::default() }).expect("config builds").emulate_jpeg_size, 1);
+		assert_eq!(build_config(&WebpSettings { mode: Mode::JpegLike, ..Default::default() }).expect("config builds").emulate_jpeg_size, 1);
 	}
 
 	/// A preset is a re-initialisation, so this pins libwebp's actual preset table
@@ -597,7 +599,7 @@ mod tests {
 		// (preset, sns_strength, filter_strength, filter_sharpness, segments)
 		let expected = [(Preset::Default, 50, 60, 0, 4), (Preset::Picture, 80, 35, 4, 4), (Preset::Photo, 80, 30, 3, 4), (Preset::Drawing, 25, 10, 6, 4), (Preset::Icon, 0, 0, 0, 4), (Preset::Text, 0, 0, 0, 2)];
 		for (preset, sns, strength, sharpness, segments) in expected {
-			let config = build_config(&EncodeSettings { mode: Mode::Preset, preset: Some(preset), ..Default::default() }).expect("config builds");
+			let config = build_config(&WebpSettings { mode: Mode::Preset, preset: Some(preset), ..Default::default() }).expect("config builds");
 			assert_eq!((config.sns_strength, config.filter_strength, config.filter_sharpness, config.segments), (sns, strength, sharpness, segments), "{preset:?}");
 		}
 	}
@@ -606,7 +608,7 @@ mod tests {
 	/// re-initialisation the preset performs.
 	#[test]
 	fn quality_after_a_preset_still_wins() {
-		let config = build_config(&EncodeSettings { mode: Mode::Preset, preset: Some(Preset::Icon), quality: 30, ..Default::default() }).expect("config builds");
+		let config = build_config(&WebpSettings { mode: Mode::Preset, preset: Some(Preset::Icon), quality: 30, ..Default::default() }).expect("config builds");
 		assert!((config.quality - 30.0).abs() < f32::EPSILON);
 	}
 
@@ -614,13 +616,13 @@ mod tests {
 	/// app deliberately clears that flag in preset mode, leaving libwebp's default of 1.
 	#[test]
 	fn preset_mode_keeps_libwebps_alpha_filtering() {
-		let config = build_config(&EncodeSettings { mode: Mode::Preset, preset: Some(Preset::Photo), alpha_filtering: Some(AlphaFiltering::Best), ..Default::default() }).expect("config builds");
+		let config = build_config(&WebpSettings { mode: Mode::Preset, preset: Some(Preset::Photo), alpha_filtering: Some(AlphaFiltering::Best), ..Default::default() }).expect("config builds");
 		assert_eq!(config.alpha_filtering, 1, "preset mode must not override the preset's alpha filtering");
 	}
 
 	#[test]
 	fn psnr_target_sets_show_compressed_like_cwebp() {
-		let config = build_config(&EncodeSettings { target: Some(TargetMetric::Psnr(41)), ..Default::default() }).expect("config builds");
+		let config = build_config(&WebpSettings { target: Some(TargetMetric::Psnr(41)), ..Default::default() }).expect("config builds");
 		assert!((config.target_PSNR - 41.0).abs() < f32::EPSILON);
 		assert_eq!(config.show_compressed, 1, "cwebp sets show_compressed for -print_psnr");
 		assert_eq!(config.target_size, 0);
@@ -628,7 +630,7 @@ mod tests {
 
 	#[test]
 	fn invalid_settings_are_rejected_before_libwebp_sees_them() {
-		let err = build_config(&EncodeSettings { method: 9, ..Default::default() }).expect_err("method 9 is out of range");
+		let err = build_config(&WebpSettings { method: 9, ..Default::default() }).expect_err("method 9 is out of range");
 		assert!(matches!(err, EncodeError::Settings(_)), "got {err:?}");
 	}
 
@@ -644,7 +646,7 @@ mod tests {
 
 	#[test]
 	fn a_default_encode_produces_a_webp() {
-		let bytes = encode(&EncodeSettings::default()).expect("default settings encode");
+		let bytes = encode(&EncodeJob::default()).expect("default settings encode");
 		assert!(bytes.len() > 20, "suspiciously small output: {} bytes", bytes.len());
 		assert_eq!(&bytes[0..4], b"RIFF");
 		assert_eq!(&bytes[8..12], b"WEBP");
@@ -653,7 +655,7 @@ mod tests {
 	#[test]
 	fn every_mode_encodes() {
 		for mode in [Mode::Lossy, Mode::Lossless, Mode::NearLossless, Mode::JpegLike, Mode::Preset] {
-			let settings = EncodeSettings { mode, preset: Some(Preset::Photo), ..Default::default() };
+			let settings = EncodeJob::from(WebpSettings { mode, preset: Some(Preset::Photo), ..Default::default() });
 			let bytes = encode(&settings).unwrap_or_else(|e| panic!("{mode:?} failed to encode: {e}"));
 			assert_eq!(&bytes[0..4], b"RIFF", "{mode:?} did not produce a RIFF container");
 		}
@@ -664,7 +666,7 @@ mod tests {
 	#[test]
 	fn lossless_round_trips_the_pixels() {
 		let pixels = fixture(48, 32);
-		let bytes = encode_rgba(&EncodeSettings { mode: Mode::Lossless, ..Default::default() }, &RgbaImage { width: 48, height: 32, pixels: &pixels }).expect("lossless encodes");
+		let bytes = encode_rgba(&EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() }), &RgbaImage { width: 48, height: 32, pixels: &pixels }).expect("lossless encodes");
 		let mut width = 0;
 		let mut height = 0;
 		let decoded = unsafe { libwebp_sys::WebPDecodeRGBA(bytes.as_ptr(), bytes.len(), &raw mut width, &raw mut height) };
@@ -679,7 +681,7 @@ mod tests {
 	fn resize_changes_the_output_dimensions() {
 		let pixels = fixture(48, 32);
 		for (resize, expected) in [(Resize { width: 24, height: 16 }, (24, 16)), (Resize { width: 24, height: 0 }, (24, 16)), (Resize { width: 0, height: 16 }, (24, 16))] {
-			let bytes = encode_rgba(&EncodeSettings { resize, ..Default::default() }, &RgbaImage { width: 48, height: 32, pixels: &pixels }).expect("resized encode");
+			let bytes = encode_rgba(&EncodeJob { resize, ..Default::default() }, &RgbaImage { width: 48, height: 32, pixels: &pixels }).expect("resized encode");
 			let mut width = 0;
 			let mut height = 0;
 			assert_ne!(unsafe { libwebp_sys::WebPGetInfo(bytes.as_ptr(), bytes.len(), &raw mut width, &raw mut height) }, 0);
@@ -692,7 +694,7 @@ mod tests {
 	#[test]
 	fn lossless_resize_uses_the_exact_path_and_still_decodes() {
 		let pixels = fixture(48, 32);
-		let bytes = encode_rgba(&EncodeSettings { mode: Mode::Lossless, resize: Resize { width: 24, height: 16 }, ..Default::default() }, &RgbaImage { width: 48, height: 32, pixels: &pixels }).expect("lossless resize encodes");
+		let bytes = encode_rgba(&EncodeJob { resize: Resize { width: 24, height: 16 }, webp: WebpSettings { mode: Mode::Lossless, ..Default::default() }, ..Default::default() }, &RgbaImage { width: 48, height: 32, pixels: &pixels }).expect("lossless resize encodes");
 		let mut width = 0;
 		let mut height = 0;
 		assert_ne!(unsafe { libwebp_sys::WebPGetInfo(bytes.as_ptr(), bytes.len(), &raw mut width, &raw mut height) }, 0);
@@ -701,14 +703,14 @@ mod tests {
 
 	#[test]
 	fn a_malformed_buffer_is_rejected() {
-		let err = encode_rgba(&EncodeSettings::default(), &RgbaImage { width: 4, height: 4, pixels: &[0; 10] }).expect_err("a short buffer must be rejected");
+		let err = encode_rgba(&EncodeJob::default(), &RgbaImage { width: 4, height: 4, pixels: &[0; 10] }).expect_err("a short buffer must be rejected");
 		assert!(matches!(err, EncodeError::MalformedImage { expected: 64, actual: 10, .. }), "got {err:?}");
 	}
 
 	#[test]
 	fn zero_dimensions_are_rejected() {
-		assert!(encode_rgba(&EncodeSettings::default(), &RgbaImage { width: 0, height: 4, pixels: &[] }).is_err());
-		assert!(encode_rgba(&EncodeSettings::default(), &RgbaImage { width: 4, height: 0, pixels: &[] }).is_err());
+		assert!(encode_rgba(&EncodeJob::default(), &RgbaImage { width: 0, height: 4, pixels: &[] }).is_err());
+		assert!(encode_rgba(&EncodeJob::default(), &RgbaImage { width: 4, height: 0, pixels: &[] }).is_err());
 	}
 
 	/// The hook must actually fire, with sane percentages, and must not change the output.
@@ -716,7 +718,7 @@ mod tests {
 	fn progress_is_reported_without_changing_the_output() {
 		let pixels = fixture(96, 64);
 		let image = RgbaImage { width: 96, height: 64, pixels: &pixels };
-		let settings = EncodeSettings::default();
+		let settings = EncodeJob::default();
 
 		let mut seen: Vec<u32> = Vec::new();
 		let with_hook = super::encode_rgba_with_progress(&settings, &image, &mut |percent| {
@@ -745,7 +747,7 @@ mod tests {
 		let pixels = fixture(96, 64);
 		let image = RgbaImage { width: 96, height: 64, pixels: &pixels };
 		let mut calls = 0_u32;
-		let error = super::encode_rgba_with_progress(&EncodeSettings::default(), &image, &mut |_| {
+		let error = super::encode_rgba_with_progress(&EncodeJob::default(), &image, &mut |_| {
 			calls += 1;
 			false
 		})
@@ -760,7 +762,7 @@ mod tests {
 		let pixels = fixture(128, 128);
 		let image = RgbaImage { width: 128, height: 128, pixels: &pixels };
 		let mut calls = 0_u32;
-		let result = super::encode_rgba_with_progress(&EncodeSettings { method: 6, ..Default::default() }, &image, &mut |_| {
+		let result = super::encode_rgba_with_progress(&EncodeJob::from(WebpSettings { method: 6, ..Default::default() }), &image, &mut |_| {
 			calls += 1;
 			calls < 2
 		});
@@ -776,8 +778,8 @@ mod tests {
 	/// Quality must actually move the output size, or the control is decorative.
 	#[test]
 	fn quality_changes_the_output_size() {
-		let low = encode(&EncodeSettings { quality: 5, ..Default::default() }).expect("q5 encodes");
-		let high = encode(&EncodeSettings { quality: 95, ..Default::default() }).expect("q95 encodes");
+		let low = encode(&EncodeJob::from(WebpSettings { quality: 5, ..Default::default() })).expect("q5 encodes");
+		let high = encode(&EncodeJob::from(WebpSettings { quality: 95, ..Default::default() })).expect("q95 encodes");
 		assert!(low.len() < high.len(), "q5 produced {} bytes, q95 produced {} bytes", low.len(), high.len());
 	}
 }

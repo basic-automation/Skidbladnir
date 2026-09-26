@@ -11,7 +11,7 @@
 use std::{collections::BTreeMap, fs, io, path::Path};
 
 use serde::{Deserialize, Serialize};
-use skidbladnir_encode::settings::EncodeSettings;
+use skidbladnir_encode::settings::EncodeJob;
 use thiserror::Error;
 
 /// The file inside the app's config directory.
@@ -28,7 +28,7 @@ pub struct Preset {
 	/// What the user called it.
 	pub name: String,
 	/// The settings it restores.
-	pub settings: EncodeSettings,
+	pub settings: EncodeJob,
 }
 
 /// Why a preset could not be saved.
@@ -57,7 +57,7 @@ pub enum PresetError {
 #[must_use]
 pub fn load_from(directory: &Path) -> Vec<Preset> {
 	let Ok(text) = fs::read_to_string(directory.join(FILE_NAME)) else { return Vec::new() };
-	let Ok(stored) = serde_json::from_str::<BTreeMap<String, EncodeSettings>>(&text) else { return Vec::new() };
+	let Ok(stored) = serde_json::from_str::<BTreeMap<String, EncodeJob>>(&text) else { return Vec::new() };
 	// A BTreeMap is already name-ordered, which keeps the UI's list stable across saves.
 	// Anything the encoder would refuse is dropped rather than offered to the user.
 	stored.into_iter().filter(|(_, settings)| settings.validate().is_ok()).map(|(name, settings)| Preset { name, settings }).collect()
@@ -69,7 +69,7 @@ pub fn load_from(directory: &Path) -> Vec<Preset> {
 ///
 /// Returns [`PresetError`] if the name is empty or too long, the settings are invalid, or
 /// the file cannot be written.
-pub fn save_to(directory: &Path, name: &str, settings: &EncodeSettings) -> Result<Vec<Preset>, PresetError> {
+pub fn save_to(directory: &Path, name: &str, settings: &EncodeJob) -> Result<Vec<Preset>, PresetError> {
 	let name = name.trim();
 	if name.is_empty() {
 		return Err(PresetError::EmptyName);
@@ -79,7 +79,7 @@ pub fn save_to(directory: &Path, name: &str, settings: &EncodeSettings) -> Resul
 	}
 	settings.validate()?;
 
-	let mut stored: BTreeMap<String, EncodeSettings> = load_from(directory).into_iter().map(|preset| (preset.name, preset.settings)).collect();
+	let mut stored: BTreeMap<String, EncodeJob> = load_from(directory).into_iter().map(|preset| (preset.name, preset.settings)).collect();
 	stored.insert(name.to_owned(), settings.clone());
 	write(directory, &stored)?;
 	Ok(load_from(directory))
@@ -91,14 +91,14 @@ pub fn save_to(directory: &Path, name: &str, settings: &EncodeSettings) -> Resul
 ///
 /// Returns [`PresetError::Write`] if the file cannot be written.
 pub fn delete_from(directory: &Path, name: &str) -> Result<Vec<Preset>, PresetError> {
-	let mut stored: BTreeMap<String, EncodeSettings> = load_from(directory).into_iter().map(|preset| (preset.name, preset.settings)).collect();
+	let mut stored: BTreeMap<String, EncodeJob> = load_from(directory).into_iter().map(|preset| (preset.name, preset.settings)).collect();
 	stored.remove(name.trim());
 	write(directory, &stored)?;
 	Ok(load_from(directory))
 }
 
 /// Write the whole set, staged and renamed like every other file this app writes.
-fn write(directory: &Path, stored: &BTreeMap<String, EncodeSettings>) -> Result<(), PresetError> {
+fn write(directory: &Path, stored: &BTreeMap<String, EncodeJob>) -> Result<(), PresetError> {
 	let to_error = |error: io::Error| PresetError::Write(error.to_string());
 	fs::create_dir_all(directory).map_err(to_error)?;
 	let text = serde_json::to_string_pretty(stored).map_err(|error| PresetError::Write(error.to_string()))?;
@@ -115,7 +115,7 @@ fn write(directory: &Path, stored: &BTreeMap<String, EncodeSettings>) -> Result<
 mod tests {
 	use std::{fs, path::PathBuf};
 
-	use skidbladnir_encode::settings::{EncodeSettings, Mode};
+	use skidbladnir_encode::settings::{EncodeJob, Mode, WebpSettings};
 
 	use super::{PresetError, delete_from, load_from, save_to};
 
@@ -141,13 +141,13 @@ mod tests {
 		let scratch = Scratch::new("crud");
 		assert_eq!(load_from(&scratch.0), Vec::new(), "nothing saved yet");
 
-		let shots = EncodeSettings { quality: 88, ..Default::default() };
+		let shots = EncodeJob::from(WebpSettings { quality: 88, ..Default::default() });
 		let presets = save_to(&scratch.0, "Product shots", &shots).expect("save");
 		assert_eq!(presets.len(), 1);
 		assert_eq!(presets[0].name, "Product shots");
-		assert_eq!(presets[0].settings.quality, 88);
+		assert_eq!(presets[0].settings.webp.quality, 88);
 
-		let presets = save_to(&scratch.0, "Wiki screenshots", &EncodeSettings { mode: Mode::Lossless, ..Default::default() }).expect("save");
+		let presets = save_to(&scratch.0, "Wiki screenshots", &EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() })).expect("save");
 		// Sorted by name, so the list does not reshuffle between saves.
 		assert_eq!(presets.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), vec!["Product shots", "Wiki screenshots"]);
 
@@ -158,26 +158,26 @@ mod tests {
 	#[test]
 	fn saving_the_same_name_replaces_rather_than_duplicates() {
 		let scratch = Scratch::new("replace");
-		save_to(&scratch.0, "Mine", &EncodeSettings { quality: 10, ..Default::default() }).expect("save");
-		let presets = save_to(&scratch.0, "Mine", &EncodeSettings { quality: 90, ..Default::default() }).expect("save again");
+		save_to(&scratch.0, "Mine", &EncodeJob::from(WebpSettings { quality: 10, ..Default::default() })).expect("save");
+		let presets = save_to(&scratch.0, "Mine", &EncodeJob::from(WebpSettings { quality: 90, ..Default::default() })).expect("save again");
 		assert_eq!(presets.len(), 1);
-		assert_eq!(presets[0].settings.quality, 90);
+		assert_eq!(presets[0].settings.webp.quality, 90);
 	}
 
 	#[test]
 	fn names_are_trimmed_and_must_not_be_empty() {
 		let scratch = Scratch::new("names");
-		assert_eq!(save_to(&scratch.0, "   ", &EncodeSettings::default()), Err(PresetError::EmptyName));
-		assert_eq!(save_to(&scratch.0, "", &EncodeSettings::default()), Err(PresetError::EmptyName));
-		let presets = save_to(&scratch.0, "  Padded  ", &EncodeSettings::default()).expect("save");
+		assert_eq!(save_to(&scratch.0, "   ", &EncodeJob::default()), Err(PresetError::EmptyName));
+		assert_eq!(save_to(&scratch.0, "", &EncodeJob::default()), Err(PresetError::EmptyName));
+		let presets = save_to(&scratch.0, "  Padded  ", &EncodeJob::default()).expect("save");
 		assert_eq!(presets[0].name, "Padded");
 	}
 
 	#[test]
 	fn absurd_names_are_refused() {
 		let scratch = Scratch::new("longname");
-		assert_eq!(save_to(&scratch.0, &"x".repeat(81), &EncodeSettings::default()), Err(PresetError::NameTooLong));
-		assert!(save_to(&scratch.0, &"x".repeat(80), &EncodeSettings::default()).is_ok());
+		assert_eq!(save_to(&scratch.0, &"x".repeat(81), &EncodeJob::default()), Err(PresetError::NameTooLong));
+		assert!(save_to(&scratch.0, &"x".repeat(80), &EncodeJob::default()).is_ok());
 	}
 
 	/// A name is a JSON key, never a path component. This is the test that says so.
@@ -185,7 +185,7 @@ mod tests {
 	fn a_name_that_looks_like_a_path_stays_inside_the_config_directory() {
 		let scratch = Scratch::new("traversal");
 		let nasty = "../../escaped";
-		save_to(&scratch.0, nasty, &EncodeSettings::default()).expect("save");
+		save_to(&scratch.0, nasty, &EncodeJob::default()).expect("save");
 		assert_eq!(load_from(&scratch.0).iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), vec![nasty]);
 		// Exactly one file, and it is the presets file.
 		let entries: Vec<String> = fs::read_dir(&scratch.0).expect("list").filter_map(Result::ok).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
@@ -196,7 +196,7 @@ mod tests {
 	#[test]
 	fn invalid_settings_are_refused() {
 		let scratch = Scratch::new("invalid");
-		let error = save_to(&scratch.0, "Bad", &EncodeSettings { segments: 9, ..Default::default() }).expect_err("must refuse");
+		let error = save_to(&scratch.0, "Bad", &EncodeJob::from(WebpSettings { segments: 9, ..Default::default() })).expect_err("must refuse");
 		assert!(matches!(error, PresetError::InvalidSettings(_)), "got {error}");
 		assert_eq!(load_from(&scratch.0), Vec::new(), "nothing should have been written");
 	}

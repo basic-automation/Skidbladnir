@@ -11,11 +11,11 @@
 // Help text is libwebp's own wording from `cwebp -longhelp`. The Electron app was not a
 // source for it: its `-info` spans are live value readouts and it has one tooltip in total.
 import { computed, onMounted, onUnmounted, ref, toRaw, watch } from 'vue'
-import type { ConversionReport, EncodeSettings, Mode, Preset } from '~/composables/useSettings'
+import type { ConversionReport, EncodeJob, Mode, Preset } from '~/composables/useSettings'
 import { formatBytes, usesLossyOptions, usesManualFilter } from '~/composables/useSettings'
 import { invokeCommand, isTauri } from '~/composables/useTauri'
 
-const settings = ref<EncodeSettings | null>(null)
+const settings = ref<EncodeJob | null>(null)
 const backendVersion = ref('')
 const startupError = ref('')
 
@@ -44,7 +44,7 @@ const mirrorStructure = ref(true)
 const animatedInputs = computed(() => inspected.value.filter(entry => entry.webp?.hasAnimation))
 
 /** Preferences as the Rust side stores them, plus why it fell back if it did. */
-interface Preferences { settings: EncodeSettings, outputDirectory: string | null }
+interface Preferences { settings: EncodeJob, outputDirectory: string | null }
 interface LoadedPreferences { preferences: Preferences, fellBack: string | null }
 
 const preferencesNotice = ref('')
@@ -52,7 +52,7 @@ const currentFile = ref('')
 const currentPercent = ref(0)
 const doneCount = ref(0)
 const cancelling = ref(false)
-const presets = ref<{ name: string, settings: EncodeSettings }[]>([])
+const presets = ref<{ name: string, settings: EncodeJob }[]>([])
 const presetName = ref('')
 const presetError = ref('')
 let unlistenProgress: (() => void) | null = null
@@ -92,20 +92,20 @@ const TARGET_ITEMS = [
 	{ label: 'Target PSNR', value: 'psnr' },
 ]
 
-const lossy = computed(() => (settings.value ? usesLossyOptions(settings.value.mode) : false))
-const manualFilter = computed(() => (settings.value ? usesManualFilter(settings.value.filter) : false))
-const basicOnly = computed(() => settings.value?.mode === 'nearLossless' || settings.value?.mode === 'preset')
+const lossy = computed(() => (settings.value ? usesLossyOptions(settings.value.webp.mode) : false))
+const manualFilter = computed(() => (settings.value ? usesManualFilter(settings.value.webp.filter) : false))
+const basicOnly = computed(() => settings.value?.webp.mode === 'nearLossless' || settings.value?.webp.mode === 'preset')
 
 // The quality slider is relabelled per mode, because libwebp genuinely reinterprets it.
 const qualityLabel = computed(() => {
-	switch (settings.value?.mode) {
+	switch (settings.value?.webp.mode) {
 		case 'lossless': return 'Compression effort'
 		case 'nearLossless': return 'Near-lossless level'
 		default: return 'Quality'
 	}
 })
 const qualityHelp = computed(() => {
-	switch (settings.value?.mode) {
+	switch (settings.value?.webp.mode) {
 		case 'lossless': return '0 is fastest and largest, 100 slowest and smallest. Not fidelity here.'
 		case 'nearLossless': return '0 is maximum loss, 100 is off.'
 		default: return 'quality factor (0: small .. 100: big)'
@@ -120,9 +120,9 @@ const targetPsnr = ref(42)
 
 watch([targetKind, targetSize, targetPsnr], () => {
 	if (!settings.value) return
-	if (targetKind.value === 'size') settings.value.target = { kind: 'size', value: targetSize.value }
-	else if (targetKind.value === 'psnr') settings.value.target = { kind: 'psnr', value: targetPsnr.value }
-	else settings.value.target = null
+	if (targetKind.value === 'size') settings.value.webp.target = { kind: 'size', value: targetSize.value }
+	else if (targetKind.value === 'psnr') settings.value.webp.target = { kind: 'psnr', value: targetPsnr.value }
+	else settings.value.webp.target = null
 })
 
 onMounted(async () => {
@@ -134,7 +134,7 @@ onMounted(async () => {
 		settings.value = loaded.preferences.settings
 		outputDirectory.value = loaded.preferences.outputDirectory ?? ''
 		// 'noFile' is a first launch, which is not worth telling anyone about.
-		presets.value = await invokeCommand<{ name: string, settings: EncodeSettings }[]>('list_presets')
+		presets.value = await invokeCommand<{ name: string, settings: EncodeJob }[]>('list_presets')
 		if (loaded.fellBack && loaded.fellBack !== 'noFile') {
 			preferencesNotice.value = FALLBACK_MESSAGES[loaded.fellBack] ?? 'Your saved settings could not be used, so the defaults were loaded.'
 		}
@@ -219,7 +219,7 @@ async function chooseOutput() {
 const canConvert = computed(() => {
 	if (!settings.value || busy.value) return false
 	if (inputPaths.value.length === 0 || !outputDirectory.value) return false
-	return !(settings.value.mode === 'preset' && !settings.value.preset)
+	return !(settings.value.webp.mode === 'preset' && !settings.value.webp.preset)
 })
 
 async function convert() {
@@ -234,7 +234,7 @@ async function convert() {
 	currentFile.value = ''
 	try {
 		// Validate once against the encoder's own rules rather than a copy of them here.
-		await invokeCommand<EncodeSettings>('validate_settings', { settings: settings.value })
+		await invokeCommand<EncodeJob>('validate_settings', { settings: settings.value })
 	}
 	catch (error) {
 		validationError.value = error instanceof Error ? error.message : String(error)
@@ -298,14 +298,14 @@ async function deletePreset(name: string) {
 	}
 }
 
-function applyPreset(preset: { name: string, settings: EncodeSettings }) {
+function applyPreset(preset: { name: string, settings: EncodeJob }) {
 	// Copied, not aliased: editing the controls afterwards must not silently rewrite the
 	// stored preset.
 	settings.value = structuredClone(toRaw(preset.settings))
-	// The target radio is UI state derived from settings.target, so bring it back in step.
-	targetKind.value = settings.value.target?.kind ?? 'none'
-	if (settings.value.target?.kind === 'size') targetSize.value = settings.value.target.value
-	if (settings.value.target?.kind === 'psnr') targetPsnr.value = settings.value.target.value
+	// The target radio is UI state derived from settings.webp.target, so bring it back in step.
+	targetKind.value = settings.value.webp.target?.kind ?? 'none'
+	if (settings.value.webp.target?.kind === 'size') targetSize.value = settings.value.webp.target.value
+	if (settings.value.webp.target?.kind === 'psnr') targetPsnr.value = settings.value.webp.target.value
 }
 
 async function cancel() {
@@ -423,22 +423,22 @@ function basename(path: string): string {
 								:key="mode.value"
 								type="button"
 								role="radio"
-								:aria-checked="settings.mode === mode.value"
+								:aria-checked="settings.webp.mode === mode.value"
 								class="rounded-md border px-3 py-2 text-left transition-colors"
-								:class="settings.mode === mode.value
+								:class="settings.webp.mode === mode.value
 									? 'border-palenight-green bg-palenight-green/10'
 									: 'border-palenight-selection hover:border-palenight-comment'"
-								@click="settings.mode = mode.value"
+								@click="settings.webp.mode = mode.value"
 							>
-								<span class="block text-sm font-semibold" :class="settings.mode === mode.value ? 'text-palenight-green' : 'text-palenight-bright'">{{ mode.label }}</span>
+								<span class="block text-sm font-semibold" :class="settings.webp.mode === mode.value ? 'text-palenight-green' : 'text-palenight-bright'">{{ mode.label }}</span>
 								<span class="block text-xs text-palenight-fg">{{ mode.help }}</span>
 							</button>
 						</div>
 
-						<div v-if="settings.mode === 'preset'" class="mx-auto w-full max-w-sm text-left">
+						<div v-if="settings.webp.mode === 'preset'" class="mx-auto w-full max-w-sm text-left">
 							<span class="text-sm font-medium text-palenight-bright">Preset</span>
-							<USelect v-model="settings.preset" :items="PRESET_ITEMS" class="mt-1 w-full" />
-							<p v-if="!settings.preset" class="mt-1 text-xs text-palenight-yellow">
+							<USelect v-model="settings.webp.preset" :items="PRESET_ITEMS" class="mt-1 w-full" />
+							<p v-if="!settings.webp.preset" class="mt-1 text-xs text-palenight-yellow">
 								Pick a preset before converting.
 							</p>
 						</div>
@@ -471,9 +471,9 @@ function basename(path: string): string {
 
 					<ControlPanel title="Quality">
 						<div class="grid gap-5 sm:grid-cols-2">
-							<ControlSlider v-model="settings.quality" :label="qualityLabel" :min="0" :max="100" :help="qualityHelp" />
-							<ControlSlider v-model="settings.alphaQuality" label="Alpha quality" :min="0" :max="100" help="transparency-compression quality (0..100)" :disabled="basicOnly" />
-							<ControlSlider v-model="settings.method" label="Compression method" :min="0" :max="6" help="0 = fast, 6 = slowest and smallest" :disabled="basicOnly" />
+							<ControlSlider v-model="settings.webp.quality" :label="qualityLabel" :min="0" :max="100" :help="qualityHelp" />
+							<ControlSlider v-model="settings.webp.alphaQuality" label="Alpha quality" :min="0" :max="100" help="transparency-compression quality (0..100)" :disabled="basicOnly" />
+							<ControlSlider v-model="settings.webp.method" label="Compression method" :min="0" :max="6" help="0 = fast, 6 = slowest and smallest" :disabled="basicOnly" />
 							<div class="grid grid-cols-2 gap-3 text-left">
 								<div>
 									<span class="text-sm font-medium text-palenight-bright">Resize width</span>
@@ -494,23 +494,23 @@ function basename(path: string): string {
 					<!-- The Electron app kept the expert controls behind a disclosure. -->
 					<ControlPanel v-if="lossy" title="Advanced options">
 						<div class="grid gap-5 sm:grid-cols-2">
-							<ControlSlider v-model="settings.sns" label="Spatial noise shaping" :min="0" :max="100" help="0 = off, 100 = maximum" />
-							<ControlSlider v-model="settings.segments" label="Segments" :min="1" :max="4" help="number of segments to use (1..4)" />
-							<ControlSlider v-model="settings.partitionLimit" label="Partition limit" :min="0" :max="100" help="degradation allowed to fit the 512k prediction-mode limit" />
-							<ControlSlider v-model="settings.passes" label="Analysis passes" :min="1" :max="10" help="analysis pass number (1..10)" />
+							<ControlSlider v-model="settings.webp.sns" label="Spatial noise shaping" :min="0" :max="100" help="0 = off, 100 = maximum" />
+							<ControlSlider v-model="settings.webp.segments" label="Segments" :min="1" :max="4" help="number of segments to use (1..4)" />
+							<ControlSlider v-model="settings.webp.partitionLimit" label="Partition limit" :min="0" :max="100" help="degradation allowed to fit the 512k prediction-mode limit" />
+							<ControlSlider v-model="settings.webp.passes" label="Analysis passes" :min="1" :max="10" help="analysis pass number (1..10)" />
 						</div>
 
 						<div class="grid gap-5 border-t border-dotted border-palenight-selection pt-5 sm:grid-cols-2">
 							<div class="text-left">
 								<span class="text-sm font-medium text-palenight-bright">Deblocking filter</span>
-								<URadioGroup v-model="settings.filter" :items="FILTER_ITEMS" orientation="horizontal" class="mt-2" />
+								<URadioGroup v-model="settings.webp.filter" :items="FILTER_ITEMS" orientation="horizontal" class="mt-2" />
 								<p class="mt-1 text-xs text-palenight-muted">
 									Auto lets the encoder pick the strength, so the two sliders do not apply.
 								</p>
 							</div>
 							<div class="flex flex-col gap-5">
-								<ControlSlider v-model="settings.filterStrength" label="Filter strength" :min="0" :max="100" help="0 = off .. 100 = strongest" :disabled="!manualFilter" />
-								<ControlSlider v-model="settings.filterSharpness" label="Filter sharpness" :min="0" :max="7" help="0 = most sharp .. 7 = least sharp" :disabled="!manualFilter" />
+								<ControlSlider v-model="settings.webp.filterStrength" label="Filter strength" :min="0" :max="100" help="0 = off .. 100 = strongest" :disabled="!manualFilter" />
+								<ControlSlider v-model="settings.webp.filterSharpness" label="Filter sharpness" :min="0" :max="7" help="0 = most sharp .. 7 = least sharp" :disabled="!manualFilter" />
 							</div>
 						</div>
 
@@ -532,9 +532,9 @@ function basename(path: string): string {
 						</div>
 
 						<div class="grid gap-3 border-t border-dotted border-palenight-selection pt-5 sm:grid-cols-3">
-							<ControlToggle v-model="settings.sharpYuv" label="Sharp YUV" help="sharper (and slower) RGB to YUV" />
-							<ControlToggle v-model="settings.lowMemory" label="Low memory" help="less memory, slower encoding" />
-							<ControlToggle v-model="settings.multiThreading" label="Multi-threading" help="use multi-threading if available" />
+							<ControlToggle v-model="settings.webp.sharpYuv" label="Sharp YUV" help="sharper (and slower) RGB to YUV" />
+							<ControlToggle v-model="settings.webp.lowMemory" label="Low memory" help="less memory, slower encoding" />
+							<ControlToggle v-model="settings.webp.multiThreading" label="Multi-threading" help="use multi-threading if available" />
 						</div>
 					</ControlPanel>
 

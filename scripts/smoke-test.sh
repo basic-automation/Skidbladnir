@@ -86,7 +86,7 @@ check "renders the app" 'return document.querySelector("h1")?.textContent?.trim(
 check "IPC returns the linked encoder version" \
 	'const I=window.__TAURI_INTERNALS__; return await I.invoke("encoder_version")' 'libwebp encoder'
 check "IPC returns the core defaults" \
-	'const I=window.__TAURI_INTERNALS__; const s=await I.invoke("default_settings"); return String(s.quality)+"/"+String(s.method)' '75/4'
+	'const I=window.__TAURI_INTERNALS__; const s=await I.invoke("default_settings"); return s.format+" "+String(s.webp.quality)+"/"+String(s.webp.method)' 'webp 75/4'
 check "the lossy controls are present" \
 	'return String(document.querySelectorAll("[role=slider]").length)' '9'
 check "every focusable control has a name" \

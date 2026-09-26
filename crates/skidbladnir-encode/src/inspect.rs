@@ -73,7 +73,7 @@ pub fn inspect_webp(bytes: &[u8]) -> Option<WebpInfo> {
 mod tests {
 	use super::{WebpCompression, inspect_webp};
 	use crate::{
-		encoder::{RgbaImage, encode_rgba}, settings::{EncodeSettings, Mode}
+		encoder::{RgbaImage, encode_rgba}, settings::{EncodeJob, Mode, WebpSettings}
 	};
 
 	fn fixture(width: u32, height: u32, opaque: bool) -> Vec<u8> {
@@ -91,13 +91,13 @@ mod tests {
 		let pixels = fixture(70, 50, true);
 		let image = RgbaImage { width: 70, height: 50, pixels: &pixels };
 
-		let lossy = encode_rgba(&EncodeSettings::default(), &image).expect("encode");
+		let lossy = encode_rgba(&EncodeJob::default(), &image).expect("encode");
 		let info = inspect_webp(&lossy).expect("inspect");
 		assert_eq!((info.width, info.height), (70, 50));
 		assert_eq!(info.compression, WebpCompression::Lossy);
 		assert!(!info.has_animation);
 
-		let lossless = encode_rgba(&EncodeSettings { mode: Mode::Lossless, ..Default::default() }, &image).expect("encode");
+		let lossless = encode_rgba(&EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() }), &image).expect("encode");
 		let info = inspect_webp(&lossless).expect("inspect");
 		assert_eq!(info.compression, WebpCompression::Lossless);
 	}
@@ -107,11 +107,11 @@ mod tests {
 	#[test]
 	fn alpha_is_read_from_the_bitstream() {
 		let transparent = fixture(40, 40, false);
-		let info = inspect_webp(&encode_rgba(&EncodeSettings::default(), &RgbaImage { width: 40, height: 40, pixels: &transparent }).expect("encode")).expect("inspect");
+		let info = inspect_webp(&encode_rgba(&EncodeJob::default(), &RgbaImage { width: 40, height: 40, pixels: &transparent }).expect("encode")).expect("inspect");
 		assert!(info.has_alpha, "an image with a real alpha ramp must report alpha");
 
 		let opaque = fixture(40, 40, true);
-		let info = inspect_webp(&encode_rgba(&EncodeSettings::default(), &RgbaImage { width: 40, height: 40, pixels: &opaque }).expect("encode")).expect("inspect");
+		let info = inspect_webp(&encode_rgba(&EncodeJob::default(), &RgbaImage { width: 40, height: 40, pixels: &opaque }).expect("encode")).expect("inspect");
 		assert!(!info.has_alpha, "a fully opaque image should not carry an alpha channel");
 	}
 

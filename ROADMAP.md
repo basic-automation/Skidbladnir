@@ -165,6 +165,7 @@ The Electron app shells out to `cwebp.exe`. The Rust port should not.
       three `cwebp` binaries, where each came from, how their integrity is checked and who
       updates them go into this file and the README **before** they are committed.
 - [x] Define the `EncodeSettings` type — `crates/skidbladnir-encode/src/settings.rs`.
+      (Since split into `EncodeJob` + `WebpSettings` for Phase 7; see the AVIF item.)
       Serializable, camelCase over the wire, `#[serde(default)]` so a partial payload from
       the frontend fills in rather than failing, with every range and default taken from
       the Electron UI's own `<input>` attributes and pinned by test.
@@ -492,9 +493,13 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
         store.
 
       *Migration path, in landable slices:*
-      1. Rename `EncodeSettings` → `WebpSettings`, lift `resize` out into `EncodeJob`, add
-         `OutputFormat` with a single variant. No behaviour change; the parity tests must
-         stay byte-identical through it, which is exactly what makes the refactor safe.
+      1. **Done.** Rename `EncodeSettings` → `WebpSettings`, lift `resize` out into
+         `EncodeJob`, add `OutputFormat` with a single variant. No behaviour change: the 76
+         parity settings, the PNG-file and colour-type parity and the CMYK check all stayed
+         byte-identical against `cwebp` 1.6.0 through it. `EncodeJob` is the wire and
+         on-disk type; it **reads the old flat shape too**, so preset and preferences files
+         saved by 0.5.0 load with every value intact — verified in the running window with
+         a hand-written 0.5.0-shape preferences file, not only by unit test.
       2. Add `AvifSettings` and the `libavif-sys` encode path behind the new variant, with
          its own fixture tests (round-trip and dimension checks, **not** parity — there is
          no reference CLI contract to hold to).

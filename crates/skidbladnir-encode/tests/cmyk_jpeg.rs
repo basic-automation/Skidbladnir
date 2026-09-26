@@ -25,7 +25,7 @@
 use std::{env, fs, path::PathBuf, process::Command};
 
 use skidbladnir_encode::{
-	settings::EncodeSettings, source::{SourceFormat, encode_file, load}
+	settings::EncodeJob, source::{SourceFormat, encode_file, load}
 };
 
 const CMYK_JPEG: &[u8] = include_bytes!("fixtures/cmyk-adobe.jpg");
@@ -70,7 +70,7 @@ fn adobe_cmyk_jpeg_decodes_to_the_right_colours() {
 fn adobe_cmyk_jpeg_converts() {
 	let (dir, path) = fixture_on_disk("converts");
 	let output = dir.join("cmyk-adobe.webp");
-	let conversion = encode_file(&EncodeSettings::default(), &path, &output).expect("a CMYK JPEG must convert");
+	let conversion = encode_file(&EncodeJob::default(), &path, &output).expect("a CMYK JPEG must convert");
 	assert_eq!((conversion.width, conversion.height), (32, 16));
 	assert!(fs::read(&output).expect("read the output").starts_with(b"RIFF"), "the output must be a WebP");
 	let _ = fs::remove_dir_all(&dir);
