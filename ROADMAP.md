@@ -140,11 +140,15 @@ building and running the Electron app until Phase 6 retires it.
       build script was written, and then deleted once measurement showed it was redundant.
       **Enforcement was verified, not assumed** — in the running window an injected inline
       `<script>` does not execute and `fetch("https://example.com/")` is blocked.
-- [ ] Run `scripts/smoke-test.sh` in CI. The harness dependency is gone; what remains is
-      runner setup — `xvfb` for a display, the `webkit2gtk-driver` package, and
-      `cargo install tauri-driver`. Note `execute/sync`, not `execute/async`: the async
-      endpoint waits for a completion callback, so a script that simply returns hangs
-      until the driver times out (this cost a debugging round already).
+- [x] Run `scripts/smoke-test.sh` in CI — the `window smoke + accessibility` job, under
+      `xvfb-run` with the `webkit2gtk-driver` package and `tauri-driver`. Note
+      `execute/sync`, not `execute/async`: the async endpoint waits for a completion
+      callback, so a script that simply returns hangs until the driver times out (this
+      cost a debugging round already).
+- [ ] Run the smoke test on the **Windows** runner too. `tauri-driver` supports Windows
+      through Microsoft's `msedgedriver` (it has no macOS support at all), so this is the
+      one way the Windows build can be *launched* rather than only compiled before a
+      human does it.
 
 ## Phase 2 — Encode core in Rust (the real work)
 
@@ -382,13 +386,13 @@ prettier subset.
       the slider track alone and the label reads "· not in use", which is both accessible
       and clearer. The sixth was the selected mode card, whose tinted background lifts to
       `#373d42` where the muted token is 3.92:1; its description uses the brighter token.
-- [ ] Speed up the `window` CI job. `cargo install tauri-cli --locked` compiles the CLI
-      from source and dominates the job at roughly ten minutes on a cold cache. The Tauri
-      CLI also ships as a **prebuilt npm binary** (`@tauri-apps/cli`, invoked as
-      `npx tauri`), which would turn that into a download. Deliberately not changed during
-      the release run — a slow job that works beats a fast one that might not.
-- [ ] Run `scripts/a11y-audit.sh` in CI alongside the smoke test — same runner setup, and
-      it needs `frontend/node_modules` present for axe-core.
+- [x] Speed up the `window` CI job. It now uses the **prebuilt** `@tauri-apps/cli` from the
+      frontend's lockfile instead of `cargo install tauri-cli`: **10m42s → 1m41s** for the
+      whole job on its first run with the change.
+- [ ] Use the prebuilt CLI in `release.yml` as well. Left on `cargo install` on purpose —
+      a tag-triggered workflow cannot be exercised before a tag, so change it in the run
+      that cuts the next release, where the release itself proves it.
+- [x] Run `scripts/a11y-audit.sh` in CI alongside the smoke test — same job.
 
 ## Phase 5 — Tri-platform packaging and release
 
@@ -396,12 +400,27 @@ prettier subset.
       on `patchelf`.** Only the AppImage target needs it; `cargo tauri build --bundles deb`
       produces a valid 3.8 MB `Skidbladnir_<version>_amd64.deb` on the dev host today,
       containing `usr/bin/skidbladnir` and the hicolor icon set.
-- [ ] AppImage on Linux still needs `patchelf` (owner-gated locally: `sudo pacman -S
-      patchelf`). CI installs it from apt, so the AppImage is produced there — it simply
-      cannot be produced or checked on the dev host.
-- [ ] `cargo tauri build` green on **Windows** (MSI/NSIS) — CI-verified, the dev host
-      cannot build Windows targets.
-- [ ] `cargo tauri build` green on **macOS** (`.dmg`) — CI-verified, no local Mac.
+- [x] AppImage on Linux — produced by `release.yml` in CI (80 MB for 0.5.0). It still
+      cannot be *built* on the dev host without `patchelf` (owner-gated, Phase 1), but it
+      can be *checked*: the published `Skidbladnir_0.5.0_amd64.AppImage` was downloaded,
+      unpacked with `--appimage-extract`, and passes the 9-check smoke test launched
+      through its own `AppRun`.
+- [x] The published 0.5.0 `.deb` passes the same smoke test. This closes the gap the
+      0.5.0 run left: CI's upload replaced the locally-tested `.deb`, so the file users
+      download had never been run. It now has.
+- [x] `cargo tauri build` green on **Windows** (NSIS `x64-setup.exe`) — built by
+      `release.yml` for 0.5.0. **Compiled and bundled, never launched** — see below.
+- [x] `cargo tauri build` green on **macOS** (`.dmg`) — built by `release.yml` for 0.5.0,
+      **Apple Silicon only** and never launched.
+- [ ] First-launch verification of the Windows and macOS builds. Nobody has opened either.
+      Windows can be automated (see the Windows smoke-test item in Phase 1); macOS cannot,
+      because `tauri-driver` does not support it, so the `.dmg` needs a human.
+- [ ] An Intel macOS build. The `macos-latest` runner is Apple Silicon, so the only
+      `.dmg` is `aarch64`; Intel Macs need an explicit `x86_64-apple-darwin` target (or a
+      universal binary) in the release matrix, if they are in scope at all.
+- [ ] Stop attaching a locally-built `.deb` to a release that CI then overwrites with
+      `--clobber`. Attach CI's artifacts only, and verify the published files after the
+      fact as was done for 0.5.0 — the downloadable file is the one that matters.
 - [x] A `release.yml` workflow that builds all three targets and attaches them to the
       GitHub release for a tag. Triggers on `v*` tags, or manually with a tag input so a
       release whose build failed can be retried without moving the tag. `fail-fast: false`,
@@ -427,7 +446,8 @@ prettier subset.
 - [ ] (owner-gated, when the updater is revisited) Generate and store an updater signing
       keypair. `cargo tauri signer generate`. The private key and its password belong in
       the repository's Actions secrets and nowhere else; the routine must never see them.
-- [ ] First tri-platform release of the Tauri app.
+- [x] First tri-platform release of the Tauri app — **v0.5.0**, a prerelease carrying a
+      Windows installer, a macOS `.dmg`, a `.deb` and an AppImage.
 
 ## Phase 6 — Retire Electron
 
@@ -440,6 +460,12 @@ in `index.html`). That is as far as this host can verify it — actually *runnin
 Windows and a downloaded `cwebp.exe`. So "master still has a working app" holds to the level
 that can be checked here, and no further claim is made.
 
+- [ ] **Gate added: do not retire Electron until the Windows build has been launched.**
+      Both stated preconditions now hold (Phase 3 parity is ticked and a Tauri release
+      has shipped), but the Electron app is **Windows-only**, and the Tauri Windows build
+      has been compiled and never opened. Retiring the one Windows app that is known to
+      have run, in favour of one that never has, would risk leaving Windows users with
+      nothing. Clears when the Windows first-launch item in Phase 5 is ticked.
 - [ ] Remove `main.js`, `index.html`, `index.css` and the Electron dependencies.
 - [ ] Remove the `resources/win/bin` cwebp-download step from the README.
 - [ ] Final Electron release tagged as the last of its line, so users on it have a
