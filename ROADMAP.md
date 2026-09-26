@@ -571,6 +571,15 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       AV1 decoder the AVIF-input item needs: decode the preview in Rust and send it to the
       webview as lossless WebP, as the original side already is. The two items should be
       solved together.
+      **Blocked on `nasm` (owner-gated), found 2026-09-26.** The right decoder exists:
+      `avif-decode` 3.0.0 (20 September 2026, by `ravif`'s author) is pure Rust over
+      `rav1d`, the Rust port of dav1d — no C library. But on x86 it depends on `rav1d` with
+      default features, which include `asm`, and rav1d's build script then panics with
+      "NASM build failed. Make sure you have nasm installed". Cargo feature unification
+      means Skidbladnir cannot switch that off from its side. `sudo pacman -S nasm` on the
+      dev host (and `nasm` on the three CI runners: apt, brew, choco) unblocks this **and**
+      the rav1e `asm` speed-up at once.
+      <https://crates.io/crates/avif-decode> · <https://crates.io/crates/rav1d>
 
       Do **not** start at step 2. Step 1 is the one that can silently change WebP output,
       and it is the one the existing parity tests can prove innocent.
