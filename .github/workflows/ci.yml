@@ -222,7 +222,7 @@ jobs:
         # The dev host cannot take these (WebKitWebDriver's screenshot hangs under
         # XWayland), so CI does, on a virtual screen tall enough for every panel. They are
         # uploaded for a person to review and commit, never committed by CI itself.
-        run: xvfb-run -a -s "-screen 0 1200x2400x24" scripts/screenshot.sh --app target/release/skidbladnir --out screenshots
+        run: xvfb-run -a -s "-screen 0 1200x3200x24" scripts/screenshot.sh --app target/release/skidbladnir --out screenshots
 
       - uses: actions/upload-artifact@v4
         with:

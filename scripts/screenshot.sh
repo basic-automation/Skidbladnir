@@ -62,7 +62,7 @@ session=$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1]))["session
 base="http://127.0.0.1:${SKIDBLADNIR_WD_PORT:-4444}/session/$session"
 
 # Tall enough to show every panel without scrolling, at the width the window opens at.
-curl -s --max-time 30 -X POST -H 'Content-Type: application/json' -d '{"width":1000,"height":2300}' "$base/window/rect" >/dev/null
+curl -s --max-time 30 -X POST -H 'Content-Type: application/json' -d '{"width":1000,"height":3000}' "$base/window/rect" >/dev/null
 sleep 2
 
 shot() {
