@@ -237,6 +237,9 @@ jobs:
   window-windows:
     name: window smoke (windows)
     runs-on: windows-2022
+    # A GUI installer that stops to ask a question never returns. Bound the job rather
+    # than let a hang hold a runner for GitHub's six-hour default.
+    timeout-minutes: 45
     defaults:
       run:
         shell: bash
@@ -277,7 +280,10 @@ jobs:
         run: |
           installer=$(ls target/release/bundle/nsis/*-setup.exe)
           echo "installing $installer"
-          "$installer" /S
+          # MSYS_NO_PATHCONV: Git Bash rewrites a bare `/S` into a drive path, which turns
+          # a silent install into an interactive one waiting for a click. That hung this
+          # step for half an hour before the fix.
+          MSYS_NO_PATHCONV=1 timeout 300 "$installer" /S
           app=""
           for _ in $(seq 1 60); do
             app=$(find "$(cygpath -u "$LOCALAPPDATA")/Skidbladnir" -maxdepth 1 -iname 'skidbladnir.exe' 2>/dev/null | head -1)
