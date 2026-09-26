@@ -144,7 +144,8 @@ What the new app can already do:
   dotted option groups, two-column controls and the circular action button — restyled
   in the Palenight palette.
 - Read PNG, JPEG, TIFF and WebP input, identifying the format by its contents rather
-  than by its file extension.
+  than by its file extension. That includes **CMYK JPEGs** as Photoshop writes them,
+  which `cwebp` itself refuses to read.
 - Refuse to overwrite your source image, and stage every write through a temporary
   file so a failed conversion cannot damage a file that was already there.
 - Report the before and after sizes, and the dimensions actually produced.
@@ -152,8 +153,9 @@ What the new app can already do:
 
 Known gaps:
 
-- Only a Linux `.deb` is released for the Tauri app. Windows and macOS installers are
-  built by CI for a tagged release; if a release does not list them, they did not build.
+- The Windows installer and the macOS `.dmg` are built by CI but **have never been
+  launched** by anyone — treat them as untested. The macOS build is for Apple Silicon
+  only; there is no Intel build. The Linux `.deb` and AppImage have been run.
 - No AppImage is produced on the maintainer's machine, because bundling one needs
   `patchelf`, which is not installed there. CI has it.
 - The app is not code-signed on any platform, and there is no auto-updater.

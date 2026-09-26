@@ -1,9 +1,17 @@
 //! The one representation of an encode job.
 //!
-//! Field-for-field this mirrors what the Electron UI collects in `index.html` and what
-//! `main.js` turns into a `cwebp` command line. Ranges and defaults are the Electron
-//! `<input>` attributes, not invented ones, so a user of the old app finds the same
-//! numbers in the new one.
+//! An [`EncodeJob`] is what the window sends, what presets and the preferences file
+//! store, and what the encoder takes: the output format, the resize (which every format
+//! shares), and one settings struct per format. There is one format today, WebP, whose
+//! [`WebpSettings`] mirror field-for-field what the Electron UI collects in `index.html`
+//! and what `main.js` turns into a `cwebp` command line. Ranges and defaults are the
+//! Electron `<input>` attributes, not invented ones, so a user of the old app finds the
+//! same numbers in the new one.
+//!
+//! The split exists so a second format can be added without a UI that shows WebP's
+//! `sns` for an encoder that has no such thing (ROADMAP.md Phase 7). Each format's
+//! settings stay live while the user tries another, which is why they are sibling
+//! fields rather than an enum.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -168,15 +176,16 @@ impl Resize {
 	}
 }
 
-/// A complete encode job: every control the GUI exposes, in one serializable struct.
+/// Every WebP control the GUI exposes: the `cwebp` surface less the resize, which
+/// belongs to the [`EncodeJob`] because every output format shares it.
 ///
-/// [`EncodeSettings::default`] is the Electron UI's own load-time state, so a
+/// [`WebpSettings::default`] is the Electron UI's own load-time state, so a
 /// default-constructed value encodes what the old app encodes when the user touches
 /// nothing but the file pickers — with one deliberate exception, documented on
-/// [`EncodeSettings::target`].
+/// [`WebpSettings::target`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct EncodeSettings {
+pub struct WebpSettings {
 	/// Which of the five modes to encode in.
 	pub mode: Mode,
 	/// The named preset, required when `mode` is [`Mode::Preset`] and ignored otherwise.
@@ -229,17 +238,90 @@ pub struct EncodeSettings {
 	pub low_memory: bool,
 	/// Encode multi-threaded (`-mt`). On by default, as the Electron app hardcodes it.
 	pub multi_threading: bool,
-	/// Resize before encoding.
-	pub resize: Resize,
 }
 
-impl Default for EncodeSettings {
+impl Default for WebpSettings {
 	fn default() -> Self {
-		Self { mode: Mode::Lossy, preset: None, quality: 75, alpha_quality: 100, alpha_filtering: Some(AlphaFiltering::Best), method: 4, segments: 4, partition_limit: 0, sns: 50, passes: 6, filter: FilterType::Auto, filter_strength: 20, filter_sharpness: 0, target: None, sharp_yuv: false, low_memory: false, multi_threading: true, resize: Resize { width: 0, height: 0 } }
+		Self { mode: Mode::Lossy, preset: None, quality: 75, alpha_quality: 100, alpha_filtering: Some(AlphaFiltering::Best), method: 4, segments: 4, partition_limit: 0, sns: 50, passes: 6, filter: FilterType::Auto, filter_strength: 20, filter_sharpness: 0, target: None, sharp_yuv: false, low_memory: false, multi_threading: true }
 	}
 }
 
-/// Why a set of [`EncodeSettings`] cannot be encoded.
+/// Which format to write.
+///
+/// One variant today. It exists now, before a second format does, so that the settings
+/// files and the wire format already carry it and adding AVIF does not change their shape
+/// a second time.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OutputFormat {
+	/// WebP, through libwebp.
+	#[default]
+	Webp,
+}
+
+/// A complete encode job: the output format, the shared resize, and each format's own
+/// settings.
+///
+/// This is the type that crosses the IPC boundary and is written to disk by presets and
+/// the preferences file. It reads **both** its own shape and the flat shape that
+/// `EncodeSettings` had before this split — `{ "mode": ..., "quality": ..., "resize": ... }`
+/// — so a preset or preferences file saved by an earlier version still loads with every
+/// value intact rather than silently falling back to the defaults. It always writes its
+/// own shape.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EncodeJob {
+	/// Which format to write.
+	pub format: OutputFormat,
+	/// Resize before encoding. Shared by every format.
+	pub resize: Resize,
+	/// The WebP controls.
+	pub webp: WebpSettings,
+}
+
+impl From<WebpSettings> for EncodeJob {
+	/// A WebP job with no resize.
+	fn from(webp: WebpSettings) -> Self {
+		Self { webp, ..Self::default() }
+	}
+}
+
+impl<'de> Deserialize<'de> for EncodeJob {
+	fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+		/// Both shapes at once. `resize` is top-level in each, so it needs no special
+		/// case; the WebP controls are either under `webp` (current) or flattened at the
+		/// top level (before the split). `webp` wins when present.
+		#[derive(Deserialize)]
+		#[serde(rename_all = "camelCase")]
+		struct Wire {
+			#[serde(default)]
+			format: OutputFormat,
+			#[serde(default)]
+			resize: Resize,
+			webp: Option<WebpSettings>,
+			#[serde(flatten)]
+			flat: WebpSettings,
+		}
+
+		let wire = Wire::deserialize(deserializer)?;
+		Ok(Self { format: wire.format, resize: wire.resize, webp: wire.webp.unwrap_or(wire.flat) })
+	}
+}
+
+impl EncodeJob {
+	/// Check the settings of the format this job writes.
+	///
+	/// # Errors
+	///
+	/// Returns the first [`ValidationError`] found.
+	pub fn validate(&self) -> Result<(), ValidationError> {
+		match self.format {
+			OutputFormat::Webp => self.webp.validate(),
+		}
+	}
+}
+
+/// Why a set of [`WebpSettings`] cannot be encoded.
 ///
 /// These are the errors the Electron UI shows, plus the range checks its `<input>`
 /// attributes enforce in the browser and nothing enforces over IPC.
@@ -265,7 +347,7 @@ pub enum ValidationError {
 	ZeroTargetSize,
 }
 
-impl EncodeSettings {
+impl WebpSettings {
 	/// Check every control against the range libwebp accepts.
 	///
 	/// Ranges are validated for all modes, not only the mode that reads them, so that a
@@ -318,7 +400,7 @@ mod tests {
 	/// same clicks, so they are pinned here rather than left to drift.
 	#[test]
 	fn defaults_match_the_electron_ui() {
-		let s = EncodeSettings::default();
+		let s = WebpSettings::default();
 		assert_eq!(s.mode, Mode::Lossy);
 		assert_eq!(s.quality, 75);
 		assert_eq!(s.alpha_quality, 100);
@@ -332,23 +414,24 @@ mod tests {
 		assert_eq!(s.filter_sharpness, 0);
 		assert_eq!(s.alpha_filtering, Some(AlphaFiltering::Best));
 		assert!(s.multi_threading, "the Electron app hardcodes -mt on every encode");
-		assert!(s.resize.is_noop());
+		assert!(EncodeJob::default().resize.is_noop());
+		assert_eq!(EncodeJob::default().format, OutputFormat::Webp);
 	}
 
 	/// The one place the port deliberately disagrees with the Electron app.
 	#[test]
 	fn default_has_no_size_target() {
-		assert_eq!(EncodeSettings::default().target, None, "the Electron app's `-size 1` default is a bug and is not reproduced");
+		assert_eq!(WebpSettings::default().target, None, "the Electron app's `-size 1` default is a bug and is not reproduced");
 	}
 
 	#[test]
 	fn default_settings_validate() {
-		assert_eq!(EncodeSettings::default().validate(), Ok(()));
+		assert_eq!(WebpSettings::default().validate(), Ok(()));
 	}
 
 	#[test]
 	fn preset_mode_needs_a_preset() {
-		let mut s = EncodeSettings { mode: Mode::Preset, ..Default::default() };
+		let mut s = WebpSettings { mode: Mode::Preset, ..Default::default() };
 		assert_eq!(s.validate(), Err(ValidationError::MissingPreset));
 		s.preset = Some(Preset::Photo);
 		assert_eq!(s.validate(), Ok(()));
@@ -356,7 +439,7 @@ mod tests {
 
 	#[test]
 	fn out_of_range_controls_are_rejected() {
-		let cases: Vec<(EncodeSettings, &'static str, u32, u32, u32)> = vec![(EncodeSettings { quality: 101, ..Default::default() }, "quality", 101, 0, 100), (EncodeSettings { alpha_quality: 101, ..Default::default() }, "alpha_quality", 101, 0, 100), (EncodeSettings { method: 7, ..Default::default() }, "method", 7, 0, 6), (EncodeSettings { segments: 0, ..Default::default() }, "segments", 0, 1, 4), (EncodeSettings { segments: 5, ..Default::default() }, "segments", 5, 1, 4), (EncodeSettings { partition_limit: 101, ..Default::default() }, "partition_limit", 101, 0, 100), (EncodeSettings { sns: 101, ..Default::default() }, "sns", 101, 0, 100), (EncodeSettings { passes: 0, ..Default::default() }, "passes", 0, 1, 10), (EncodeSettings { passes: 11, ..Default::default() }, "passes", 11, 1, 10), (EncodeSettings { filter_strength: 101, ..Default::default() }, "filter_strength", 101, 0, 100), (EncodeSettings { filter_sharpness: 8, ..Default::default() }, "filter_sharpness", 8, 0, 7)];
+		let cases: Vec<(WebpSettings, &'static str, u32, u32, u32)> = vec![(WebpSettings { quality: 101, ..Default::default() }, "quality", 101, 0, 100), (WebpSettings { alpha_quality: 101, ..Default::default() }, "alpha_quality", 101, 0, 100), (WebpSettings { method: 7, ..Default::default() }, "method", 7, 0, 6), (WebpSettings { segments: 0, ..Default::default() }, "segments", 0, 1, 4), (WebpSettings { segments: 5, ..Default::default() }, "segments", 5, 1, 4), (WebpSettings { partition_limit: 101, ..Default::default() }, "partition_limit", 101, 0, 100), (WebpSettings { sns: 101, ..Default::default() }, "sns", 101, 0, 100), (WebpSettings { passes: 0, ..Default::default() }, "passes", 0, 1, 10), (WebpSettings { passes: 11, ..Default::default() }, "passes", 11, 1, 10), (WebpSettings { filter_strength: 101, ..Default::default() }, "filter_strength", 101, 0, 100), (WebpSettings { filter_sharpness: 8, ..Default::default() }, "filter_sharpness", 8, 0, 7)];
 		for (settings, field, value, min, max) in cases {
 			assert_eq!(settings.validate(), Err(ValidationError::OutOfRange { field, value, min, max }), "expected {field} = {value} to be rejected");
 		}
@@ -364,19 +447,19 @@ mod tests {
 
 	#[test]
 	fn boundary_values_are_accepted() {
-		let extremes = EncodeSettings { quality: 100, alpha_quality: 0, method: 6, segments: 1, partition_limit: 100, sns: 100, passes: 10, filter_strength: 100, filter_sharpness: 7, ..Default::default() };
+		let extremes = WebpSettings { quality: 100, alpha_quality: 0, method: 6, segments: 1, partition_limit: 100, sns: 100, passes: 10, filter_strength: 100, filter_sharpness: 7, ..Default::default() };
 		assert_eq!(extremes.validate(), Ok(()));
-		let floors = EncodeSettings { quality: 0, method: 0, segments: 4, partition_limit: 0, sns: 0, passes: 1, filter_strength: 0, filter_sharpness: 0, ..Default::default() };
+		let floors = WebpSettings { quality: 0, method: 0, segments: 4, partition_limit: 0, sns: 0, passes: 1, filter_strength: 0, filter_sharpness: 0, ..Default::default() };
 		assert_eq!(floors.validate(), Ok(()));
 	}
 
 	#[test]
 	fn target_bounds_are_checked() {
-		assert_eq!(EncodeSettings { target: Some(TargetMetric::Size(0)), ..Default::default() }.validate(), Err(ValidationError::ZeroTargetSize));
-		assert_eq!(EncodeSettings { target: Some(TargetMetric::Psnr(0)), ..Default::default() }.validate(), Err(ValidationError::OutOfRange { field: "target", value: 0, min: 1, max: 10_000 }));
-		assert_eq!(EncodeSettings { target: Some(TargetMetric::Psnr(10_001)), ..Default::default() }.validate(), Err(ValidationError::OutOfRange { field: "target", value: 10_001, min: 1, max: 10_000 }));
-		assert_eq!(EncodeSettings { target: Some(TargetMetric::Size(1)), ..Default::default() }.validate(), Ok(()));
-		assert_eq!(EncodeSettings { target: Some(TargetMetric::Psnr(10_000)), ..Default::default() }.validate(), Ok(()));
+		assert_eq!(WebpSettings { target: Some(TargetMetric::Size(0)), ..Default::default() }.validate(), Err(ValidationError::ZeroTargetSize));
+		assert_eq!(WebpSettings { target: Some(TargetMetric::Psnr(0)), ..Default::default() }.validate(), Err(ValidationError::OutOfRange { field: "target", value: 0, min: 1, max: 10_000 }));
+		assert_eq!(WebpSettings { target: Some(TargetMetric::Psnr(10_001)), ..Default::default() }.validate(), Err(ValidationError::OutOfRange { field: "target", value: 10_001, min: 1, max: 10_000 }));
+		assert_eq!(WebpSettings { target: Some(TargetMetric::Size(1)), ..Default::default() }.validate(), Ok(()));
+		assert_eq!(WebpSettings { target: Some(TargetMetric::Psnr(10_000)), ..Default::default() }.validate(), Ok(()));
 	}
 
 	#[test]
@@ -398,14 +481,14 @@ mod tests {
 	/// the contract with the frontend and is pinned here.
 	#[test]
 	fn round_trips_through_json() {
-		let settings = EncodeSettings { mode: Mode::NearLossless, preset: Some(Preset::Drawing), target: Some(TargetMetric::Psnr(42)), sharp_yuv: true, resize: Resize { width: 800, height: 0 }, ..Default::default() };
+		let settings = EncodeJob { resize: Resize { width: 800, height: 0 }, webp: WebpSettings { mode: Mode::NearLossless, preset: Some(Preset::Drawing), target: Some(TargetMetric::Psnr(42)), sharp_yuv: true, ..Default::default() }, ..Default::default() };
 		let json = serde_json::to_string(&settings).expect("settings serialize");
-		assert_eq!(serde_json::from_str::<EncodeSettings>(&json).expect("settings deserialize"), settings);
+		assert_eq!(serde_json::from_str::<EncodeJob>(&json).expect("settings deserialize"), settings);
 	}
 
 	#[test]
 	fn json_uses_camel_case_field_names() {
-		let json = serde_json::to_value(EncodeSettings::default()).expect("settings serialize");
+		let json = serde_json::to_value(WebpSettings::default()).expect("settings serialize");
 		let object = json.as_object().expect("settings serialize to an object");
 		for key in ["mode", "alphaQuality", "alphaFiltering", "partitionLimit", "filterStrength", "filterSharpness", "sharpYuv", "lowMemory", "multiThreading"] {
 			assert!(object.contains_key(key), "missing `{key}` in {json}");
@@ -415,10 +498,10 @@ mod tests {
 	/// A frontend that omits a field must get the default rather than a deserialize error.
 	#[test]
 	fn partial_json_falls_back_to_defaults() {
-		let settings: EncodeSettings = serde_json::from_str(r#"{"mode":"lossless","quality":90}"#).expect("partial settings deserialize");
+		let settings: WebpSettings = serde_json::from_str(r#"{"mode":"lossless","quality":90}"#).expect("partial settings deserialize");
 		assert_eq!(settings.mode, Mode::Lossless);
 		assert_eq!(settings.quality, 90);
-		assert_eq!(settings.method, EncodeSettings::default().method);
+		assert_eq!(settings.method, WebpSettings::default().method);
 	}
 
 	#[test]
@@ -439,5 +522,53 @@ mod tests {
 		assert!(Resize { width: 0, height: 0 }.is_noop());
 		assert!(!Resize { width: 800, height: 0 }.is_noop());
 		assert!(!Resize { width: 0, height: 600 }.is_noop());
+	}
+
+	/// The job's own wire shape, which the frontend now sends and the settings files now
+	/// store: format and resize at the top, the WebP controls under `webp`.
+	#[test]
+	fn job_json_nests_the_webp_controls() {
+		let json = serde_json::to_value(EncodeJob::default()).expect("job serializes");
+		assert_eq!(json["format"], "webp");
+		assert_eq!(json["resize"]["width"], 0);
+		assert_eq!(json["webp"]["quality"], 75);
+		assert!(json.get("quality").is_none(), "the WebP controls must not also appear flattened: {json}");
+	}
+
+	/// A preset or preferences file written before the split stores the old flat
+	/// `EncodeSettings` shape. It must load with every value intact — falling back to the
+	/// defaults would silently discard a user's saved settings.
+	#[test]
+	fn the_flat_shape_from_before_the_split_still_loads() {
+		let legacy = r#"{"mode":"lossless","preset":null,"quality":92,"alphaQuality":80,"alphaFiltering":"fast","method":6,"segments":2,"partitionLimit":10,"sns":30,"passes":3,"filter":"strong","filterStrength":40,"filterSharpness":5,"target":{"kind":"size","value":5000},"sharpYuv":true,"lowMemory":true,"multiThreading":false,"resize":{"width":640,"height":0}}"#;
+		let job: EncodeJob = serde_json::from_str(legacy).expect("the legacy shape deserializes");
+		let expected = EncodeJob { format: OutputFormat::Webp, resize: Resize { width: 640, height: 0 }, webp: WebpSettings { mode: Mode::Lossless, preset: None, quality: 92, alpha_quality: 80, alpha_filtering: Some(AlphaFiltering::Fast), method: 6, segments: 2, partition_limit: 10, sns: 30, passes: 3, filter: FilterType::Strong, filter_strength: 40, filter_sharpness: 5, target: Some(TargetMetric::Size(5000)), sharp_yuv: true, low_memory: true, multi_threading: false } };
+		assert_eq!(job, expected);
+
+		// And it is rewritten in the current shape, which reads back identically.
+		let rewritten = serde_json::to_string(&job).expect("serialize");
+		assert_eq!(serde_json::from_str::<EncodeJob>(&rewritten).expect("the current shape deserializes"), expected);
+	}
+
+	/// When both shapes are present, `webp` wins: the flat keys are only a fallback.
+	#[test]
+	fn nested_webp_controls_win_over_flat_ones() {
+		let job: EncodeJob = serde_json::from_str(r#"{"quality":10,"webp":{"quality":90}}"#).expect("deserialize");
+		assert_eq!(job.webp.quality, 90);
+	}
+
+	#[test]
+	fn a_partial_job_falls_back_to_defaults() {
+		let job: EncodeJob = serde_json::from_str(r#"{"webp":{"mode":"lossless"}}"#).expect("deserialize");
+		assert_eq!(job.webp.mode, Mode::Lossless);
+		assert_eq!(job.webp.quality, WebpSettings::default().quality);
+		assert!(job.resize.is_noop());
+		assert_eq!(serde_json::from_str::<EncodeJob>("{}").expect("an empty object deserializes"), EncodeJob::default());
+	}
+
+	#[test]
+	fn a_job_validates_its_formats_settings() {
+		assert_eq!(EncodeJob::default().validate(), Ok(()));
+		assert_eq!(EncodeJob::from(WebpSettings { mode: Mode::Preset, ..Default::default() }).validate(), Err(ValidationError::MissingPreset));
 	}
 }

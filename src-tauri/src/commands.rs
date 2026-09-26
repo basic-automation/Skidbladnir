@@ -12,7 +12,7 @@ use std::{
 
 use serde::Serialize;
 use skidbladnir_encode::{
-	encoder::{linked_decoder_version, linked_encoder_version}, settings::EncodeSettings, source::{Conversion, FoundImage, PathInspection, encode_file_with_progress, inspect_paths, mirrored_output_path, output_path_in, scan_directory}
+	encoder::{linked_decoder_version, linked_encoder_version}, settings::EncodeJob, source::{Conversion, FoundImage, PathInspection, encode_file_with_progress, inspect_paths, mirrored_output_path, output_path_in, scan_directory}
 };
 use tauri::{Emitter as _, Manager as _};
 
@@ -40,8 +40,8 @@ pub fn encoder_version() -> String {
 /// TypeScript is how the two drift apart.
 #[tauri::command]
 #[must_use]
-pub fn default_settings() -> EncodeSettings {
-	EncodeSettings::default()
+pub fn default_settings() -> EncodeJob {
+	EncodeJob::default()
 }
 
 /// Check settings without encoding anything, so the UI can disable its convert button
@@ -55,7 +55,7 @@ pub fn default_settings() -> EncodeSettings {
 ///
 /// Returns the validation failure as a string for display.
 #[tauri::command]
-pub fn validate_settings(settings: EncodeSettings) -> Result<EncodeSettings, String> {
+pub fn validate_settings(settings: EncodeJob) -> Result<EncodeJob, String> {
 	match settings.validate() {
 		Ok(()) => Ok(settings),
 		Err(error) => Err(error.to_string()),
@@ -64,7 +64,7 @@ pub fn validate_settings(settings: EncodeSettings) -> Result<EncodeSettings, Str
 
 /// The result of a conversion, as the UI needs it: what was written, and the before and
 /// after sizes the Electron app also reported and users relied on.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConversionReport {
 	/// Which file was converted. Echoed back because a batch UI dispatches many
@@ -75,6 +75,18 @@ pub struct ConversionReport {
 	/// Sizes and dimensions.
 	#[serde(flatten)]
 	pub conversion: Conversion,
+	/// [`Conversion::saving_percent`], computed here so the window displays the core's
+	/// figure instead of recomputing it in TypeScript, where the two could disagree at the
+	/// rounding edges. `null` for a zero-byte source.
+	pub saving_percent: Option<f64>,
+}
+
+impl ConversionReport {
+	/// A report for `conversion`, with the saving filled in from it.
+	#[must_use]
+	pub fn new(input_path: PathBuf, output_path: PathBuf, conversion: Conversion) -> Self {
+		Self { input_path, output_path, conversion, saving_percent: conversion.saving_percent() }
+	}
 }
 
 /// Identify which of these paths Skidbladnir can actually read.
@@ -175,7 +187,7 @@ pub fn scan_folder(directory: PathBuf, recursive: bool) -> Vec<FoundImage> {
 /// Returns the failure as a string for display, including a refusal if the relative path
 /// would write outside the chosen output directory.
 #[tauri::command]
-pub async fn convert_scanned(app: tauri::AppHandle, state: tauri::State<'_, CancelFlag>, settings: EncodeSettings, input: PathBuf, relative: PathBuf, output_root: PathBuf) -> Result<ConversionReport, String> {
+pub async fn convert_scanned(app: tauri::AppHandle, state: tauri::State<'_, CancelFlag>, settings: EncodeJob, input: PathBuf, relative: PathBuf, output_root: PathBuf) -> Result<ConversionReport, String> {
 	let Some(output_path) = mirrored_output_path(&output_root, &relative) else {
 		return Err(format!("refusing to write `{}`: it would land outside the chosen folder", relative.display()));
 	};
@@ -196,7 +208,7 @@ pub async fn convert_scanned(app: tauri::AppHandle, state: tauri::State<'_, Canc
 			!cancelled.load(Ordering::Relaxed)
 		})
 		.map_err(|error| error.to_string())?;
-		Ok(ConversionReport { input_path: input, output_path, conversion })
+		Ok(ConversionReport::new(input, output_path, conversion))
 	})
 	.await
 	.map_err(|error| format!("the conversion thread failed: {error}"))?
@@ -214,7 +226,7 @@ pub async fn convert_scanned(app: tauri::AppHandle, state: tauri::State<'_, Canc
 /// to hold two copies of in the webview.
 #[tauri::command]
 #[expect(clippy::needless_pass_by_value, reason = "Tauri deserializes command arguments into owned values; the preview borrows them")]
-pub fn preview_encode(settings: EncodeSettings, input: PathBuf) -> Result<Preview, String> {
+pub fn preview_encode(settings: EncodeJob, input: PathBuf) -> Result<Preview, String> {
 	preview::preview(&settings, &input)
 }
 
@@ -238,7 +250,7 @@ pub fn list_presets(app: tauri::AppHandle) -> Vec<Preset> {
 /// Returns the failure as a string for display.
 #[tauri::command]
 #[expect(clippy::needless_pass_by_value, reason = "Tauri injects AppHandle and deserializes arguments by value; the store borrows them")]
-pub fn save_preset(app: tauri::AppHandle, name: String, settings: EncodeSettings) -> Result<Vec<Preset>, String> {
+pub fn save_preset(app: tauri::AppHandle, name: String, settings: EncodeJob) -> Result<Vec<Preset>, String> {
 	presets::save_to(&config_directory(&app), &name, &settings).map_err(|error| error.to_string())
 }
 
@@ -263,10 +275,10 @@ pub fn delete_preset(app: tauri::AppHandle, name: String) -> Result<Vec<Preset>,
 /// # Errors
 ///
 /// Returns the failure as a string for display.
-pub fn convert_one(settings: &EncodeSettings, input: PathBuf, output_directory: PathBuf, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<ConversionReport, String> {
+pub fn convert_one(settings: &EncodeJob, input: PathBuf, output_directory: PathBuf, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<ConversionReport, String> {
 	let output_path = output_path_in(output_directory, &input);
 	let conversion = encode_file_with_progress(settings, &input, &output_path, on_progress).map_err(|error| error.to_string())?;
-	Ok(ConversionReport { input_path: input, output_path, conversion })
+	Ok(ConversionReport::new(input, output_path, conversion))
 }
 
 /// Convert one image into `output_directory`, using the Electron app's output naming.
@@ -292,7 +304,7 @@ pub fn convert_one(settings: &EncodeSettings, input: PathBuf, output_directory: 
 ///
 /// Returns the failure as a string for display, including a cancellation.
 #[tauri::command]
-pub async fn convert_image(app: tauri::AppHandle, state: tauri::State<'_, CancelFlag>, settings: EncodeSettings, input: PathBuf, output_directory: PathBuf) -> Result<ConversionReport, String> {
+pub async fn convert_image(app: tauri::AppHandle, state: tauri::State<'_, CancelFlag>, settings: EncodeJob, input: PathBuf, output_directory: PathBuf) -> Result<ConversionReport, String> {
 	// Each file starts uncancelled, so a cancel left over from a previous batch cannot kill
 	// the next one.
 	let cancelled = Arc::clone(&state.0);
@@ -313,9 +325,11 @@ pub async fn convert_image(app: tauri::AppHandle, state: tauri::State<'_, Cancel
 
 #[cfg(test)]
 mod tests {
-	use skidbladnir_encode::settings::{EncodeSettings, Mode};
+	use skidbladnir_encode::{
+		settings::{EncodeJob, Mode, WebpSettings}, source::Conversion
+	};
 
-	use super::{convert_one, default_settings, encoder_version, inspect_dropped_paths, validate_settings};
+	use super::{ConversionReport, convert_one, default_settings, encoder_version, inspect_dropped_paths, validate_settings};
 
 	/// The version string is shown to users, so it must actually contain versions rather
 	/// than a placeholder.
@@ -329,15 +343,15 @@ mod tests {
 	/// The defaults the frontend receives must be the core's, not a second copy.
 	#[test]
 	fn default_settings_are_the_cores_defaults() {
-		assert_eq!(default_settings(), EncodeSettings::default());
+		assert_eq!(default_settings(), EncodeJob::default());
 	}
 
 	#[test]
 	fn validate_settings_reports_the_same_rules_as_the_encoder() {
-		assert_eq!(validate_settings(EncodeSettings::default()), Ok(EncodeSettings::default()));
-		let missing_preset = EncodeSettings { mode: Mode::Preset, preset: None, ..Default::default() };
+		assert_eq!(validate_settings(EncodeJob::default()), Ok(EncodeJob::default()));
+		let missing_preset = EncodeJob::from(WebpSettings { mode: Mode::Preset, preset: None, ..Default::default() });
 		assert_eq!(validate_settings(missing_preset), Err("mode is `preset` but no preset was selected".to_owned()));
-		let bad_method = EncodeSettings { method: 9, ..Default::default() };
+		let bad_method = EncodeJob::from(WebpSettings { method: 9, ..Default::default() });
 		assert_eq!(validate_settings(bad_method), Err("method is 9, but must be in 0..=6".to_owned()));
 	}
 
@@ -345,10 +359,10 @@ mod tests {
 	/// show what the encoder will actually do rather than guessing at the defaults.
 	#[test]
 	fn validate_settings_returns_the_filled_in_form() {
-		let partial: EncodeSettings = serde_json::from_str(r#"{"mode":"lossless","quality":90}"#).expect("partial settings deserialize");
+		let partial: EncodeJob = serde_json::from_str(r#"{"mode":"lossless","quality":90}"#).expect("partial settings deserialize");
 		let validated = validate_settings(partial).expect("partial settings are valid");
-		assert_eq!(validated.quality, 90);
-		assert_eq!(validated.method, EncodeSettings::default().method, "an omitted field comes back as the core's default");
+		assert_eq!(validated.webp.quality, 90);
+		assert_eq!(validated.webp.method, EncodeJob::default().webp.method, "an omitted field comes back as the core's default");
 	}
 
 	/// The drop handler must agree with the loader, because they answer the same question.
@@ -359,7 +373,7 @@ mod tests {
 		std::fs::create_dir_all(&dir).expect("create the scratch directory");
 		let webp = dir.join("image.webp");
 		let pixels = [1_u8, 2, 3, 255];
-		let bytes = skidbladnir_encode::encoder::encode_rgba(&EncodeSettings { mode: Mode::Lossless, ..Default::default() }, &skidbladnir_encode::encoder::RgbaImage { width: 1, height: 1, pixels: &pixels }).expect("encode the fixture");
+		let bytes = skidbladnir_encode::encoder::encode_rgba(&EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() }), &skidbladnir_encode::encoder::RgbaImage { width: 1, height: 1, pixels: &pixels }).expect("encode the fixture");
 		std::fs::write(&webp, &bytes).expect("write the fixture");
 		let junk = dir.join("readme.txt");
 		std::fs::write(&junk, b"not an image").expect("write the junk file");
@@ -386,14 +400,28 @@ mod tests {
 		// A 1x1 lossless WebP, written by the core itself so the fixture is real.
 		let webp = dir.join("only.webp");
 		let pixels = [10_u8, 20, 30, 255];
-		let bytes = skidbladnir_encode::encoder::encode_rgba(&EncodeSettings { mode: Mode::Lossless, ..Default::default() }, &skidbladnir_encode::encoder::RgbaImage { width: 1, height: 1, pixels: &pixels }).expect("encode the fixture");
+		let bytes = skidbladnir_encode::encoder::encode_rgba(&EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() }), &skidbladnir_encode::encoder::RgbaImage { width: 1, height: 1, pixels: &pixels }).expect("encode the fixture");
 		std::fs::write(&webp, &bytes).expect("write the fixture");
 
-		let error = convert_one(&EncodeSettings::default(), webp.clone(), dir.clone(), &mut |_| true).expect_err("must refuse");
+		let error = convert_one(&EncodeJob::default(), webp.clone(), dir.clone(), &mut |_| true).expect_err("must refuse");
 		assert!(error.contains("refusing to overwrite the source"), "got {error}");
 		assert_eq!(std::fs::read(&webp).expect("read it back"), bytes, "the source must be untouched");
 
 		let _ = std::fs::remove_dir_all(&dir);
+	}
+
+	/// The window reads the saving from the report rather than computing its own, so the
+	/// report must carry the core's figure under the name the frontend reads.
+	#[test]
+	fn conversion_report_carries_the_cores_saving() {
+		let conversion = Conversion { source_bytes: 1000, output_bytes: 250, width: 4, height: 3 };
+		let json = serde_json::to_value(ConversionReport::new("in.png".into(), "in.webp".into(), conversion)).expect("serialize");
+		assert_eq!(json["savingPercent"], serde_json::json!(75.0));
+		assert_eq!(json["sourceBytes"], serde_json::json!(1000), "the sizes must stay flattened alongside it");
+
+		let empty = Conversion { source_bytes: 0, output_bytes: 10, width: 1, height: 1 };
+		let json = serde_json::to_value(ConversionReport::new("in.png".into(), "in.webp".into(), empty)).expect("serialize");
+		assert!(json["savingPercent"].is_null(), "a zero-byte source has no saving, not a saving of zero");
 	}
 
 	/// The settings must survive the JSON round trip the IPC boundary actually performs.
@@ -401,7 +429,7 @@ mod tests {
 	fn settings_cross_the_ipc_boundary_intact() {
 		let settings = default_settings();
 		let json = serde_json::to_string(&settings).expect("serialize");
-		let returned: EncodeSettings = serde_json::from_str(&json).expect("deserialize");
+		let returned: EncodeJob = serde_json::from_str(&json).expect("deserialize");
 		assert_eq!(returned, settings);
 		assert_eq!(validate_settings(returned), Ok(settings));
 	}

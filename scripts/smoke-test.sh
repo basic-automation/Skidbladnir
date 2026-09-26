@@ -86,7 +86,7 @@ check "renders the app" 'return document.querySelector("h1")?.textContent?.trim(
 check "IPC returns the linked encoder version" \
 	'const I=window.__TAURI_INTERNALS__; return await I.invoke("encoder_version")' 'libwebp encoder'
 check "IPC returns the core defaults" \
-	'const I=window.__TAURI_INTERNALS__; const s=await I.invoke("default_settings"); return String(s.quality)+"/"+String(s.method)' '75/4'
+	'const I=window.__TAURI_INTERNALS__; const s=await I.invoke("default_settings"); return s.format+" "+String(s.webp.quality)+"/"+String(s.webp.method)' 'webp 75/4'
 check "the lossy controls are present" \
 	'return String(document.querySelectorAll("[role=slider]").length)' '9'
 check "every focusable control has a name" \
@@ -124,7 +124,7 @@ check "converts an image end to end" \
 	"const I=window.__TAURI_INTERNALS__;
 	 const s=await I.invoke('default_settings');
 	 const r=await I.invoke('convert_image', { settings: s, input: '$scratch/smoke.png', outputDirectory: '$scratch/out' });
-	 return r.width + 'x' + r.height + ' ' + (r.outputBytes > 0)" '48x48 true'
+	 return r.width + 'x' + r.height + ' ' + (r.outputBytes > 0) + ' ' + typeof r.savingPercent" '48x48 true number'
 
 if [ -s "$scratch/out/smoke.webp" ]; then
 	printf 'ok   %s\n' "wrote a non-empty WebP to disk ($(wc -c < "$scratch/out/smoke.webp") bytes)"

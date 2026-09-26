@@ -29,7 +29,7 @@ use std::{
 };
 
 use skidbladnir_encode::{
-	RgbaImage, cwebp_args, encode_rgba, settings::{AlphaFiltering, EncodeSettings, FilterType, Mode, Preset, Resize, TargetMetric}
+	RgbaImage, cwebp_args, encode_rgba, settings::{AlphaFiltering, EncodeJob, FilterType, Mode, Preset, Resize, TargetMetric, WebpSettings}
 };
 
 /// Locate a reference `cwebp`, preferring an explicitly configured one.
@@ -86,78 +86,78 @@ fn write_pam(path: &Path, pixels: &[u8], width: u32, height: u32) {
 
 /// Every setting combination worth comparing: the whole control surface, one case per
 /// control, plus the mode-specific paths.
-fn cases() -> Vec<(String, EncodeSettings)> {
-	let mut cases: Vec<(String, EncodeSettings)> = Vec::new();
-	let mut add = |name: &str, settings: EncodeSettings| cases.push((name.to_owned(), settings));
+fn cases() -> Vec<(String, EncodeJob)> {
+	let mut cases: Vec<(String, EncodeJob)> = Vec::new();
+	let mut add = |name: &str, settings: EncodeJob| cases.push((name.to_owned(), settings));
 
-	add("default lossy", EncodeSettings::default());
+	add("default lossy", EncodeJob::default());
 
 	for quality in [0_u8, 1, 50, 99, 100] {
-		add(&format!("quality {quality}"), EncodeSettings { quality, ..Default::default() });
+		add(&format!("quality {quality}"), EncodeJob::from(WebpSettings { quality, ..Default::default() }));
 	}
 	for alpha_quality in [0_u8, 50, 100] {
-		add(&format!("alpha quality {alpha_quality}"), EncodeSettings { alpha_quality, ..Default::default() });
+		add(&format!("alpha quality {alpha_quality}"), EncodeJob::from(WebpSettings { alpha_quality, ..Default::default() }));
 	}
 	for method in 0..=6_u8 {
-		add(&format!("method {method}"), EncodeSettings { method, ..Default::default() });
+		add(&format!("method {method}"), EncodeJob::from(WebpSettings { method, ..Default::default() }));
 	}
 	for segments in 1..=4_u8 {
-		add(&format!("segments {segments}"), EncodeSettings { segments, ..Default::default() });
+		add(&format!("segments {segments}"), EncodeJob::from(WebpSettings { segments, ..Default::default() }));
 	}
 	for sns in [0_u8, 25, 50, 100] {
-		add(&format!("sns {sns}"), EncodeSettings { sns, ..Default::default() });
+		add(&format!("sns {sns}"), EncodeJob::from(WebpSettings { sns, ..Default::default() }));
 	}
 	for passes in [1_u8, 6, 10] {
-		add(&format!("passes {passes}"), EncodeSettings { passes, ..Default::default() });
+		add(&format!("passes {passes}"), EncodeJob::from(WebpSettings { passes, ..Default::default() }));
 	}
 	for partition_limit in [0_u8, 50, 100] {
-		add(&format!("partition limit {partition_limit}"), EncodeSettings { partition_limit, ..Default::default() });
+		add(&format!("partition limit {partition_limit}"), EncodeJob::from(WebpSettings { partition_limit, ..Default::default() }));
 	}
 
-	add("auto filter", EncodeSettings { filter: FilterType::Auto, ..Default::default() });
+	add("auto filter", EncodeJob::from(WebpSettings { filter: FilterType::Auto, ..Default::default() }));
 	for (strength, sharpness) in [(0_u8, 0_u8), (20, 3), (100, 7)] {
-		add(&format!("strong filter {strength}/{sharpness}"), EncodeSettings { filter: FilterType::Strong, filter_strength: strength, filter_sharpness: sharpness, ..Default::default() });
-		add(&format!("simple filter {strength}/{sharpness}"), EncodeSettings { filter: FilterType::Simple, filter_strength: strength, filter_sharpness: sharpness, ..Default::default() });
+		add(&format!("strong filter {strength}/{sharpness}"), EncodeJob::from(WebpSettings { filter: FilterType::Strong, filter_strength: strength, filter_sharpness: sharpness, ..Default::default() }));
+		add(&format!("simple filter {strength}/{sharpness}"), EncodeJob::from(WebpSettings { filter: FilterType::Simple, filter_strength: strength, filter_sharpness: sharpness, ..Default::default() }));
 	}
 
 	for bytes in [512_u32, 2_048, 16_384] {
-		add(&format!("target size {bytes}"), EncodeSettings { target: Some(TargetMetric::Size(bytes)), ..Default::default() });
+		add(&format!("target size {bytes}"), EncodeJob::from(WebpSettings { target: Some(TargetMetric::Size(bytes)), ..Default::default() }));
 	}
 	for psnr in [30_u32, 42, 50] {
-		add(&format!("target psnr {psnr}"), EncodeSettings { target: Some(TargetMetric::Psnr(psnr)), ..Default::default() });
+		add(&format!("target psnr {psnr}"), EncodeJob::from(WebpSettings { target: Some(TargetMetric::Psnr(psnr)), ..Default::default() }));
 	}
 
-	add("sharp yuv", EncodeSettings { sharp_yuv: true, ..Default::default() });
-	add("low memory", EncodeSettings { low_memory: true, ..Default::default() });
-	add("no multi-threading", EncodeSettings { multi_threading: false, ..Default::default() });
-	add("sharp yuv + low memory + no mt", EncodeSettings { sharp_yuv: true, low_memory: true, multi_threading: false, ..Default::default() });
+	add("sharp yuv", EncodeJob::from(WebpSettings { sharp_yuv: true, ..Default::default() }));
+	add("low memory", EncodeJob::from(WebpSettings { low_memory: true, ..Default::default() }));
+	add("no multi-threading", EncodeJob::from(WebpSettings { multi_threading: false, ..Default::default() }));
+	add("sharp yuv + low memory + no mt", EncodeJob::from(WebpSettings { sharp_yuv: true, low_memory: true, multi_threading: false, ..Default::default() }));
 
 	for alpha_filtering in [AlphaFiltering::Off, AlphaFiltering::Fast, AlphaFiltering::Best] {
-		add(&format!("alpha filter {}", alpha_filtering.as_cwebp_str()), EncodeSettings { alpha_filtering: Some(alpha_filtering), ..Default::default() });
+		add(&format!("alpha filter {}", alpha_filtering.as_cwebp_str()), EncodeJob::from(WebpSettings { alpha_filtering: Some(alpha_filtering), ..Default::default() }));
 	}
-	add("no alpha filter flag", EncodeSettings { alpha_filtering: None, ..Default::default() });
+	add("no alpha filter flag", EncodeJob::from(WebpSettings { alpha_filtering: None, ..Default::default() }));
 
-	add("lossless", EncodeSettings { mode: Mode::Lossless, ..Default::default() });
+	add("lossless", EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() }));
 	for quality in [0_u8, 50, 100] {
-		add(&format!("lossless effort {quality}"), EncodeSettings { mode: Mode::Lossless, quality, ..Default::default() });
+		add(&format!("lossless effort {quality}"), EncodeJob::from(WebpSettings { mode: Mode::Lossless, quality, ..Default::default() }));
 	}
 	for quality in [0_u8, 40, 60, 80, 100] {
-		add(&format!("near-lossless {quality}"), EncodeSettings { mode: Mode::NearLossless, quality, ..Default::default() });
+		add(&format!("near-lossless {quality}"), EncodeJob::from(WebpSettings { mode: Mode::NearLossless, quality, ..Default::default() }));
 	}
-	add("jpeg-like", EncodeSettings { mode: Mode::JpegLike, ..Default::default() });
+	add("jpeg-like", EncodeJob::from(WebpSettings { mode: Mode::JpegLike, ..Default::default() }));
 	for preset in [Preset::Default, Preset::Photo, Preset::Picture, Preset::Drawing, Preset::Icon, Preset::Text] {
-		add(&format!("preset {}", preset.as_cwebp_str()), EncodeSettings { mode: Mode::Preset, preset: Some(preset), ..Default::default() });
+		add(&format!("preset {}", preset.as_cwebp_str()), EncodeJob::from(WebpSettings { mode: Mode::Preset, preset: Some(preset), ..Default::default() }));
 	}
 
 	// Resize, including the -exact path that lossless takes.
 	for resize in [Resize { width: 32, height: 24 }, Resize { width: 32, height: 0 }, Resize { width: 0, height: 24 }, Resize { width: 128, height: 96 }] {
-		add(&format!("resize {}x{}", resize.width, resize.height), EncodeSettings { resize, ..Default::default() });
-		add(&format!("lossless resize {}x{}", resize.width, resize.height), EncodeSettings { mode: Mode::Lossless, resize, ..Default::default() });
+		add(&format!("resize {}x{}", resize.width, resize.height), EncodeJob { resize, ..Default::default() });
+		add(&format!("lossless resize {}x{}", resize.width, resize.height), EncodeJob { resize, webp: WebpSettings { mode: Mode::Lossless, ..Default::default() }, ..Default::default() });
 	}
 
 	// A few combinations, because controls interact: target size with a manual filter,
 	// sharp YUV with a preset-free lossy encode, and the full advanced set at once.
-	add("everything at once", EncodeSettings { mode: Mode::Lossy, quality: 61, alpha_quality: 77, alpha_filtering: Some(AlphaFiltering::Fast), method: 5, segments: 3, partition_limit: 22, sns: 66, passes: 4, filter: FilterType::Strong, filter_strength: 44, filter_sharpness: 2, target: Some(TargetMetric::Size(4_096)), sharp_yuv: true, low_memory: true, multi_threading: true, resize: Resize { width: 40, height: 0 }, preset: None });
+	add("everything at once", EncodeJob { resize: Resize { width: 40, height: 0 }, webp: WebpSettings { mode: Mode::Lossy, quality: 61, alpha_quality: 77, alpha_filtering: Some(AlphaFiltering::Fast), method: 5, segments: 3, partition_limit: 22, sns: 66, passes: 4, filter: FilterType::Strong, filter_strength: 44, filter_sharpness: 2, target: Some(TargetMetric::Size(4_096)), sharp_yuv: true, low_memory: true, multi_threading: true, preset: None }, ..Default::default() });
 
 	cases
 }
@@ -266,7 +266,7 @@ fn matches_reference_cwebp_through_a_png_file() {
 	let mut mismatches: Vec<String> = Vec::new();
 	// A representative slice rather than all 76: this test is about the decoder agreeing,
 	// and the encoder surface is already covered above.
-	let subset = [("default lossy", EncodeSettings::default()), ("lossless", EncodeSettings { mode: Mode::Lossless, ..Default::default() }), ("near-lossless 60", EncodeSettings { mode: Mode::NearLossless, quality: 60, ..Default::default() }), ("quality 30", EncodeSettings { quality: 30, ..Default::default() }), ("sharp yuv", EncodeSettings { sharp_yuv: true, ..Default::default() }), ("resize 32x0", EncodeSettings { resize: Resize { width: 32, height: 0 }, ..Default::default() })];
+	let subset = [("default lossy", EncodeJob::default()), ("lossless", EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() })), ("near-lossless 60", EncodeJob::from(WebpSettings { mode: Mode::NearLossless, quality: 60, ..Default::default() })), ("quality 30", EncodeJob::from(WebpSettings { quality: 30, ..Default::default() })), ("sharp yuv", EncodeJob::from(WebpSettings { sharp_yuv: true, ..Default::default() })), ("resize 32x0", EncodeJob { resize: Resize { width: 32, height: 0 }, ..Default::default() })];
 
 	for (name, settings) in &subset {
 		let theirs_path = dir.join(format!("cwebp-{}.webp", name.replace(' ', "-")));
@@ -351,7 +351,7 @@ fn matches_reference_cwebp_across_png_colour_types() {
 	buffer.save_with_format(&path, image::ImageFormat::Png).expect("write graya8");
 	fixtures.push(("8-bit grayscale + alpha", path));
 
-	let settings = EncodeSettings::default();
+	let settings = EncodeJob::default();
 	let mut mismatches: Vec<String> = Vec::new();
 	for (name, input) in &fixtures {
 		let theirs_path = dir.join(format!("cwebp-{}.webp", name.replace([' ', '+', '-'], "_")));

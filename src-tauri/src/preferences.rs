@@ -18,7 +18,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use skidbladnir_encode::settings::EncodeSettings;
+use skidbladnir_encode::settings::EncodeJob;
 
 /// The file inside the app's config directory.
 const FILE_NAME: &str = "preferences.json";
@@ -28,7 +28,7 @@ const FILE_NAME: &str = "preferences.json";
 #[serde(rename_all = "camelCase", default)]
 pub struct Preferences {
 	/// The encode settings last used.
-	pub settings: EncodeSettings,
+	pub settings: EncodeJob,
 	/// The destination directory last chosen, if it still exists.
 	pub output_directory: Option<PathBuf>,
 }
@@ -113,7 +113,7 @@ pub fn save_to(directory: &Path, preferences: &Preferences) -> io::Result<()> {
 mod tests {
 	use std::{fs, path::PathBuf};
 
-	use skidbladnir_encode::settings::{EncodeSettings, Mode};
+	use skidbladnir_encode::settings::{EncodeJob, Mode, WebpSettings};
 
 	use super::{Preferences, PreferencesFallback, load_from, save_to};
 
@@ -139,7 +139,7 @@ mod tests {
 	#[test]
 	fn round_trips_settings_and_destination() {
 		let scratch = Scratch::new("roundtrip");
-		let preferences = Preferences { settings: EncodeSettings { mode: Mode::Lossless, quality: 92, sharp_yuv: true, ..Default::default() }, output_directory: Some(scratch.0.clone()) };
+		let preferences = Preferences { settings: EncodeJob::from(WebpSettings { mode: Mode::Lossless, quality: 92, sharp_yuv: true, ..Default::default() }), output_directory: Some(scratch.0.clone()) };
 		save_to(&scratch.0, &preferences).expect("save");
 		let loaded = load_from(&scratch.0);
 		assert_eq!(loaded.fell_back, None);
@@ -152,7 +152,7 @@ mod tests {
 		let loaded = load_from(&scratch.0);
 		assert_eq!(loaded.fell_back, Some(PreferencesFallback::NoFile));
 		assert_eq!(loaded.preferences, Preferences::default());
-		assert_eq!(loaded.preferences.settings, EncodeSettings::default());
+		assert_eq!(loaded.preferences.settings, EncodeJob::default());
 	}
 
 	/// A truncated file — the shape a crash mid-write would leave — must not stop the app
@@ -163,7 +163,7 @@ mod tests {
 		fs::write(scratch.0.join("preferences.json"), b"{\"settings\": {\"quality\": 9").expect("write the truncated file");
 		let loaded = load_from(&scratch.0);
 		assert_eq!(loaded.fell_back, Some(PreferencesFallback::Unparseable));
-		assert_eq!(loaded.preferences.settings, EncodeSettings::default());
+		assert_eq!(loaded.preferences.settings, EncodeJob::default());
 	}
 
 	/// A file that parses but holds values the encoder rejects must not be loaded, or the
@@ -174,7 +174,7 @@ mod tests {
 		fs::write(scratch.0.join("preferences.json"), br#"{"settings":{"method":99}}"#).expect("write the invalid file");
 		let loaded = load_from(&scratch.0);
 		assert_eq!(loaded.fell_back, Some(PreferencesFallback::InvalidSettings));
-		assert_eq!(loaded.preferences.settings.method, EncodeSettings::default().method);
+		assert_eq!(loaded.preferences.settings.webp.method, EncodeJob::default().webp.method);
 	}
 
 	/// A partial file is a normal thing for a version upgrade to produce; missing fields
@@ -185,8 +185,8 @@ mod tests {
 		fs::write(scratch.0.join("preferences.json"), br#"{"settings":{"quality":33}}"#).expect("write the partial file");
 		let loaded = load_from(&scratch.0);
 		assert_eq!(loaded.fell_back, None);
-		assert_eq!(loaded.preferences.settings.quality, 33);
-		assert_eq!(loaded.preferences.settings.segments, EncodeSettings::default().segments);
+		assert_eq!(loaded.preferences.settings.webp.quality, 33);
+		assert_eq!(loaded.preferences.settings.webp.segments, EncodeJob::default().webp.segments);
 	}
 
 	/// A destination that has been deleted or unmounted since last launch is dropped.

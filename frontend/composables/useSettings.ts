@@ -1,4 +1,4 @@
-// The settings model, mirroring the Rust `EncodeSettings` exactly.
+// The settings model, mirroring the Rust `EncodeJob` and `WebpSettings` exactly.
 //
 // The DEFAULTS are deliberately not written here: they are fetched from the Rust core on
 // mount. Duplicating them in TypeScript is precisely how the two drift apart, and they
@@ -10,7 +10,20 @@ export type FilterType = 'auto' | 'simple' | 'strong'
 export type AlphaFiltering = 'off' | 'fast' | 'best'
 export type TargetMetric = { kind: 'size', value: number } | { kind: 'psnr', value: number } | null
 
-export interface EncodeSettings {
+export type OutputFormat = 'webp'
+
+export interface Resize { width: number, height: number }
+
+/** What the window sends, and what presets and the preferences file store. */
+export interface EncodeJob {
+	format: OutputFormat
+	/** Shared by every output format. */
+	resize: Resize
+	webp: WebpSettings
+}
+
+/** The WebP controls: the `cwebp` surface less the resize, which belongs to the job. */
+export interface WebpSettings {
 	mode: Mode
 	preset: Preset | null
 	quality: number
@@ -28,7 +41,6 @@ export interface EncodeSettings {
 	sharpYuv: boolean
 	lowMemory: boolean
 	multiThreading: boolean
-	resize: { width: number, height: number }
 }
 
 /** Sizes and dimensions a completed conversion reports back. */
@@ -39,6 +51,8 @@ export interface ConversionReport {
 	outputBytes: number
 	width: number
 	height: number
+	/** The core's saving as a percentage of the original, negative if the output grew; `null` for a zero-byte source. */
+	savingPercent: number | null
 }
 
 /**

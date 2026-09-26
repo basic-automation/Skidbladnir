@@ -12,6 +12,7 @@
   },
   "devDependencies": {
     "@iconify-json/lucide": "^1.2.136",
+    "@tauri-apps/cli": "^2.11.5",
     "axe-core": "^4.13.0",
     "nuxt": "^4.0.0",
     "tailwindcss": "^4.1.0",

@@ -140,11 +140,15 @@ building and running the Electron app until Phase 6 retires it.
       build script was written, and then deleted once measurement showed it was redundant.
       **Enforcement was verified, not assumed** — in the running window an injected inline
       `<script>` does not execute and `fetch("https://example.com/")` is blocked.
-- [ ] Run `scripts/smoke-test.sh` in CI. The harness dependency is gone; what remains is
-      runner setup — `xvfb` for a display, the `webkit2gtk-driver` package, and
-      `cargo install tauri-driver`. Note `execute/sync`, not `execute/async`: the async
-      endpoint waits for a completion callback, so a script that simply returns hangs
-      until the driver times out (this cost a debugging round already).
+- [x] Run `scripts/smoke-test.sh` in CI — the `window smoke + accessibility` job, under
+      `xvfb-run` with the `webkit2gtk-driver` package and `tauri-driver`. Note
+      `execute/sync`, not `execute/async`: the async endpoint waits for a completion
+      callback, so a script that simply returns hangs until the driver times out (this
+      cost a debugging round already).
+- [ ] Run the smoke test on the **Windows** runner too. `tauri-driver` supports Windows
+      through Microsoft's `msedgedriver` (it has no macOS support at all), so this is the
+      one way the Windows build can be *launched* rather than only compiled before a
+      human does it.
 
 ## Phase 2 — Encode core in Rust (the real work)
 
@@ -165,6 +169,7 @@ The Electron app shells out to `cwebp.exe`. The Rust port should not.
       three `cwebp` binaries, where each came from, how their integrity is checked and who
       updates them go into this file and the README **before** they are committed.
 - [x] Define the `EncodeSettings` type — `crates/skidbladnir-encode/src/settings.rs`.
+      (Since split into `EncodeJob` + `WebpSettings` for Phase 7; see the AVIF item.)
       Serializable, camelCase over the wire, `#[serde(default)]` so a partial payload from
       the frontend fills in rather than failing, with every range and default taken from
       the Electron UI's own `<input>` attributes and pinned by test.
@@ -232,9 +237,21 @@ The Electron app shells out to `cwebp.exe`. The Rust port should not.
       16-bit RGBA, 16-bit RGB, 8-bit grayscale and 8-bit grayscale+alpha so it cannot drift
       back. 8-bit palette was verified identical by hand (the `image` crate cannot write
       one, so it is not in the test).
-- [ ] CMYK JPEG input is still **untested** against libjpeg as `cwebp` drives it. The same
-      class of bug as the 16-bit PNG one above, in a decoder path nothing has exercised —
-      it needs a real CMYK JPEG fixture, which the `image` crate cannot write.
+- [x] CMYK JPEG input. **Tested, and it is not a parity question after all: `cwebp`
+      refuses CMYK JPEG outright.** It asks libjpeg for `JCS_RGB`, which libjpeg cannot
+      produce from four channels, so `cwebp` 1.6.0 exits with "libjpeg error: Unsupported
+      color conversion request". There is no reference output to match. What
+      `tests/cmyk_jpeg.rs` pins instead, against a 439-byte Adobe/YCCK fixture made with
+      `magick` (provenance and SHA-256 in the test):
+      - our decoder produces the **right colours**, not their inverse — within 3 levels of
+        ImageMagick's own CMYK→sRGB conversion at both ends and the middle of a ramp;
+      - the file converts end to end;
+      - the reference `cwebp` **still refuses** it — after first proving that `cwebp` reads
+        RGB JPEG at all, so a build without libjpeg cannot pass it vacuously. If a future
+        libwebp starts converting CMYK, this fails, and agreement becomes a parity test.
+      Runs in CI's enforced parity step alongside `parity.rs`.
+- [ ] CMYK JPEG **without** an Adobe marker (plain, non-inverted CMYK) is untested. Rarer
+      than Photoshop's inverted form, and nothing on this host writes one on request.
 
 ## Phase 3 — Frontend parity (Nuxt + Tailwind)
 
@@ -369,13 +386,13 @@ prettier subset.
       the slider track alone and the label reads "· not in use", which is both accessible
       and clearer. The sixth was the selected mode card, whose tinted background lifts to
       `#373d42` where the muted token is 3.92:1; its description uses the brighter token.
-- [ ] Speed up the `window` CI job. `cargo install tauri-cli --locked` compiles the CLI
-      from source and dominates the job at roughly ten minutes on a cold cache. The Tauri
-      CLI also ships as a **prebuilt npm binary** (`@tauri-apps/cli`, invoked as
-      `npx tauri`), which would turn that into a download. Deliberately not changed during
-      the release run — a slow job that works beats a fast one that might not.
-- [ ] Run `scripts/a11y-audit.sh` in CI alongside the smoke test — same runner setup, and
-      it needs `frontend/node_modules` present for axe-core.
+- [x] Speed up the `window` CI job. It now uses the **prebuilt** `@tauri-apps/cli` from the
+      frontend's lockfile instead of `cargo install tauri-cli`: **10m42s → 1m41s** for the
+      whole job on its first run with the change.
+- [ ] Use the prebuilt CLI in `release.yml` as well. Left on `cargo install` on purpose —
+      a tag-triggered workflow cannot be exercised before a tag, so change it in the run
+      that cuts the next release, where the release itself proves it.
+- [x] Run `scripts/a11y-audit.sh` in CI alongside the smoke test — same job.
 
 ## Phase 5 — Tri-platform packaging and release
 
@@ -383,12 +400,27 @@ prettier subset.
       on `patchelf`.** Only the AppImage target needs it; `cargo tauri build --bundles deb`
       produces a valid 3.8 MB `Skidbladnir_<version>_amd64.deb` on the dev host today,
       containing `usr/bin/skidbladnir` and the hicolor icon set.
-- [ ] AppImage on Linux still needs `patchelf` (owner-gated locally: `sudo pacman -S
-      patchelf`). CI installs it from apt, so the AppImage is produced there — it simply
-      cannot be produced or checked on the dev host.
-- [ ] `cargo tauri build` green on **Windows** (MSI/NSIS) — CI-verified, the dev host
-      cannot build Windows targets.
-- [ ] `cargo tauri build` green on **macOS** (`.dmg`) — CI-verified, no local Mac.
+- [x] AppImage on Linux — produced by `release.yml` in CI (80 MB for 0.5.0). It still
+      cannot be *built* on the dev host without `patchelf` (owner-gated, Phase 1), but it
+      can be *checked*: the published `Skidbladnir_0.5.0_amd64.AppImage` was downloaded,
+      unpacked with `--appimage-extract`, and passes the 9-check smoke test launched
+      through its own `AppRun`.
+- [x] The published 0.5.0 `.deb` passes the same smoke test. This closes the gap the
+      0.5.0 run left: CI's upload replaced the locally-tested `.deb`, so the file users
+      download had never been run. It now has.
+- [x] `cargo tauri build` green on **Windows** (NSIS `x64-setup.exe`) — built by
+      `release.yml` for 0.5.0. **Compiled and bundled, never launched** — see below.
+- [x] `cargo tauri build` green on **macOS** (`.dmg`) — built by `release.yml` for 0.5.0,
+      **Apple Silicon only** and never launched.
+- [ ] First-launch verification of the Windows and macOS builds. Nobody has opened either.
+      Windows can be automated (see the Windows smoke-test item in Phase 1); macOS cannot,
+      because `tauri-driver` does not support it, so the `.dmg` needs a human.
+- [ ] An Intel macOS build. The `macos-latest` runner is Apple Silicon, so the only
+      `.dmg` is `aarch64`; Intel Macs need an explicit `x86_64-apple-darwin` target (or a
+      universal binary) in the release matrix, if they are in scope at all.
+- [ ] Stop attaching a locally-built `.deb` to a release that CI then overwrites with
+      `--clobber`. Attach CI's artifacts only, and verify the published files after the
+      fact as was done for 0.5.0 — the downloadable file is the one that matters.
 - [x] A `release.yml` workflow that builds all three targets and attaches them to the
       GitHub release for a tag. Triggers on `v*` tags, or manually with a tag input so a
       release whose build failed can be retried without moving the tag. `fail-fast: false`,
@@ -414,7 +446,8 @@ prettier subset.
 - [ ] (owner-gated, when the updater is revisited) Generate and store an updater signing
       keypair. `cargo tauri signer generate`. The private key and its password belong in
       the repository's Actions secrets and nowhere else; the routine must never see them.
-- [ ] First tri-platform release of the Tauri app.
+- [x] First tri-platform release of the Tauri app — **v0.5.0**, a prerelease carrying a
+      Windows installer, a macOS `.dmg`, a `.deb` and an AppImage.
 
 ## Phase 6 — Retire Electron
 
@@ -427,6 +460,12 @@ in `index.html`). That is as far as this host can verify it — actually *runnin
 Windows and a downloaded `cwebp.exe`. So "master still has a working app" holds to the level
 that can be checked here, and no further claim is made.
 
+- [ ] **Gate added: do not retire Electron until the Windows build has been launched.**
+      Both stated preconditions now hold (Phase 3 parity is ticked and a Tauri release
+      has shipped), but the Electron app is **Windows-only**, and the Tauri Windows build
+      has been compiled and never opened. Retiring the one Windows app that is known to
+      have run, in favour of one that never has, would risk leaving Windows users with
+      nothing. Clears when the Windows first-launch item in Phase 5 is ticked.
 - [ ] Remove `main.js`, `index.html`, `index.css` and the Electron dependencies.
 - [ ] Remove the `resources/win/bin` cwebp-download step from the README.
 - [ ] Final Electron release tagged as the last of its line, so users on it have a
@@ -480,9 +519,13 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
         store.
 
       *Migration path, in landable slices:*
-      1. Rename `EncodeSettings` → `WebpSettings`, lift `resize` out into `EncodeJob`, add
-         `OutputFormat` with a single variant. No behaviour change; the parity tests must
-         stay byte-identical through it, which is exactly what makes the refactor safe.
+      1. **Done.** Rename `EncodeSettings` → `WebpSettings`, lift `resize` out into
+         `EncodeJob`, add `OutputFormat` with a single variant. No behaviour change: the 76
+         parity settings, the PNG-file and colour-type parity and the CMYK check all stayed
+         byte-identical against `cwebp` 1.6.0 through it. `EncodeJob` is the wire and
+         on-disk type; it **reads the old flat shape too**, so preset and preferences files
+         saved by 0.5.0 load with every value intact — verified in the running window with
+         a hand-written 0.5.0-shape preferences file, not only by unit test.
       2. Add `AvifSettings` and the `libavif-sys` encode path behind the new variant, with
          its own fixture tests (round-trip and dimension checks, **not** parity — there is
          no reference CLI contract to hold to).
@@ -492,6 +535,13 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
 
       Do **not** start at step 2. Step 1 is the one that can silently change WebP output,
       and it is the one the existing parity tests can prove innocent.
+- [ ] **Re-check the AVIF encoder choice before slice 2.** `libavif-sys` — the binding
+      chosen above — was last published in July 2024 as `0.17.0+libavif.1.0.4`, while
+      upstream libavif has moved on to **1.4.2** (26 May 2026). Starting a new format on a
+      two-year-old vendored encoder is the wrong baseline. Compare: a maintained binding
+      at a current libavif, linking a system libavif where one exists, or `ravif` after
+      all. Decide before writing the encode path.
+      <https://crates.io/crates/libavif-sys> · <https://github.com/AOMediaCodec/libavif/releases>
 - [ ] Watch **Tauri 3**, do not adopt it. `3.0.0-alpha` releases began appearing in
       September 2026, bringing a CEF runtime option, plugin-API changes
       (`js_init_script` → `initialization_script`) and removed deprecated APIs. Adopting an
@@ -501,7 +551,7 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
 - [x] Confirm the encoder is current. **No libwebp upgrade is pending:** 1.6.0
       (9 July 2025) is still the newest release, and it is exactly what `libwebp-sys`
       vendors and what the parity test compares against, so the parity claim is against
-      current upstream. Re-check each run.
+      current upstream. Re-check each run. Re-checked 2026-09-25: still 1.6.0.
       <https://github.com/webmproject/libwebp/tags>
 - [x] Strike the JPEG 2000 claim from the README — done; the Status section now lists
       WebP as the only output format rather than promising JPEG 2000.

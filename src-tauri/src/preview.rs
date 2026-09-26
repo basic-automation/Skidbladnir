@@ -13,7 +13,7 @@ use std::path::Path;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::Serialize;
 use skidbladnir_encode::{
-	encoder::encode_rgba, settings::{EncodeSettings, Mode}, source
+	encoder::encode_rgba, settings::{EncodeJob, Mode, WebpSettings}, source
 };
 
 /// Above this many pixels a preview is refused rather than attempted.
@@ -52,7 +52,7 @@ pub struct Preview {
 /// # Errors
 ///
 /// Returns the failure as a string for display.
-pub fn preview(settings: &EncodeSettings, input: &Path) -> Result<Preview, String> {
+pub fn preview(settings: &EncodeJob, input: &Path) -> Result<Preview, String> {
 	let source_bytes = std::fs::metadata(input).map(|meta| meta.len()).map_err(|error| format!("could not read `{}`: {error}", input.display()))?;
 	let image = source::load(input).map_err(|error| error.to_string())?;
 
@@ -64,7 +64,7 @@ pub fn preview(settings: &EncodeSettings, input: &Path) -> Result<Preview, Strin
 
 	// The original is shown at the same dimensions as the encoded side when a resize is in
 	// play, so the comparison is like for like rather than a big image next to a small one.
-	let original_settings = EncodeSettings { mode: Mode::Lossless, quality: 100, resize: settings.resize, ..Default::default() };
+	let original_settings = EncodeJob { resize: settings.resize, webp: WebpSettings { mode: Mode::Lossless, quality: 100, ..Default::default() }, ..Default::default() };
 	let original = encode_rgba(&original_settings, &image.as_rgba()).map_err(|error| error.to_string())?;
 
 	let (width, height) = dimensions(&encoded).unwrap_or((image.width, image.height));
@@ -104,7 +104,7 @@ mod tests {
 	use std::{fs, path::PathBuf};
 
 	use base64::Engine as _;
-	use skidbladnir_encode::settings::{EncodeSettings, Resize};
+	use skidbladnir_encode::settings::{EncodeJob, Resize, WebpSettings};
 
 	use super::preview;
 
@@ -141,7 +141,7 @@ mod tests {
 		let input = scratch.join_png();
 		let before: Vec<_> = fs::read_dir(&scratch.0).expect("list").filter_map(Result::ok).map(|e| e.file_name()).collect();
 
-		let result = preview(&EncodeSettings::default(), &input).expect("preview");
+		let result = preview(&EncodeJob::default(), &input).expect("preview");
 		assert!(result.original.starts_with("data:image/webp;base64,"), "{}", &result.original[..40]);
 		assert!(result.encoded.starts_with("data:image/webp;base64,"));
 		assert!(result.encoded_bytes > 0);
@@ -158,7 +158,7 @@ mod tests {
 	fn a_resize_applies_to_both_sides() {
 		let scratch = Scratch::new("resize");
 		let input = scratch.join_png();
-		let result = preview(&EncodeSettings { resize: Resize { width: 32, height: 0 }, ..Default::default() }, &input).expect("preview");
+		let result = preview(&EncodeJob { resize: Resize { width: 32, height: 0 }, ..Default::default() }, &input).expect("preview");
 		assert_eq!((result.width, result.height), (32, 24));
 		// Both sides decode to the resized dimensions.
 		for (label, url) in [("original", &result.original), ("encoded", &result.encoded)] {
@@ -173,8 +173,8 @@ mod tests {
 	fn quality_changes_the_encoded_side() {
 		let scratch = Scratch::new("quality");
 		let input = scratch.join_png();
-		let low = preview(&EncodeSettings { quality: 5, ..Default::default() }, &input).expect("preview");
-		let high = preview(&EncodeSettings { quality: 95, ..Default::default() }, &input).expect("preview");
+		let low = preview(&EncodeJob::from(WebpSettings { quality: 5, ..Default::default() }), &input).expect("preview");
+		let high = preview(&EncodeJob::from(WebpSettings { quality: 95, ..Default::default() }), &input).expect("preview");
 		assert!(low.encoded_bytes < high.encoded_bytes, "q5 {} vs q95 {}", low.encoded_bytes, high.encoded_bytes);
 		// The original side is the same both times: it does not depend on the settings.
 		assert_eq!(low.original, high.original);
@@ -202,7 +202,7 @@ mod tests {
 		let scratch = Scratch::new("notimage");
 		let input = scratch.0.join("notes.txt");
 		fs::write(&input, b"not an image").expect("write");
-		assert!(preview(&EncodeSettings::default(), &input).is_err());
+		assert!(preview(&EncodeJob::default(), &input).is_err());
 	}
 
 	impl Scratch {
