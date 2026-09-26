@@ -227,9 +227,16 @@ jobs:
   # installed WebView2 exactly. msedgedriver-tool reads that version and fetches the
   # matching driver from Microsoft. It is pinned to a commit (v0.2.2) rather than a
   # branch, because it runs with the job's token.
+  #
+  # Pinned to windows-2022, not windows-latest: on the windows-2025 image WebView2 never
+  # opens the DevTools port msedgedriver needs, and every session fails with
+  # "DevToolsActivePort file doesn't exist" (seen here with WebView2 153). The reporter of
+  # https://github.com/actions/runner-images/issues/14738 found that switching only the
+  # image to windows-2022 fixes it, and no launch-flag workaround did. Revisit when
+  # windows-2022 is retired.
   window-windows:
     name: window smoke (windows)
-    runs-on: windows-latest
+    runs-on: windows-2022
     defaults:
       run:
         shell: bash
