@@ -214,3 +214,50 @@ jobs:
 
       - name: Accessibility audit
         run: xvfb-run -a scripts/a11y-audit.sh
+
+  # The same smoke test, on Windows. This is the only place the Windows build is
+  # LAUNCHED rather than just compiled: the dev host cannot run it, and nobody had
+  # opened a Windows build before this job existed. The Electron app is Windows-only,
+  # so ROADMAP.md Phase 6 does not retire it until this job has been green.
+  #
+  # tauri-driver drives Windows through Microsoft's msedgedriver, which must match the
+  # installed WebView2 exactly. msedgedriver-tool reads that version and fetches the
+  # matching driver from Microsoft. It is pinned to a commit (v0.2.2) rather than a
+  # branch, because it runs with the job's token.
+  window-windows:
+    name: window smoke (windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install the WebDriver shim and a WebView2-matched msedgedriver
+        run: |
+          cargo install tauri-driver --locked
+          cargo install --locked --git https://github.com/chippers/msedgedriver-tool --rev 8c4b34f51b45f5cf08013366d703de464ab871d1
+          mkdir -p "$RUNNER_TEMP/edgedriver"
+          cd "$RUNNER_TEMP/edgedriver" && msedgedriver-tool
+          ls -la "$RUNNER_TEMP/edgedriver"
+          echo "$RUNNER_TEMP/edgedriver" >> "$GITHUB_PATH"
+
+      - name: Build the app
+        # See the Linux window job: `tauri build`, not `cargo build --release`, for the
+        # custom-protocol feature.
+        run: |
+          npm --prefix frontend ci
+          cd src-tauri && ../frontend/node_modules/.bin/tauri build --no-bundle
+
+      - name: Smoke test the window
+        run: scripts/smoke-test.sh --app "$(cygpath -u "$GITHUB_WORKSPACE")/target/release/skidbladnir.exe"
