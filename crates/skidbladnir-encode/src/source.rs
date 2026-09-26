@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-	encoder::{EncodeError, RgbaImage, encode_rgba_with_progress}, settings::EncodeJob
+	encoder::{EncodeError, RgbaImage, encode_rgba_with_progress}, settings::{EncodeJob, OutputFormat}
 };
 
 /// The input formats Skidbladnir accepts, matching the Electron app's accepted list.
@@ -340,7 +340,7 @@ pub fn scan_directory(root: &Path, recursive: bool) -> Vec<FoundImage> {
 /// whose relatives are built by `strip_prefix`, but this function is public and the
 /// consequence of getting it wrong is writing a file somewhere the user did not choose.
 #[must_use]
-pub fn mirrored_output_path(output_root: &Path, relative: &Path) -> Option<PathBuf> {
+pub fn mirrored_output_path(output_root: &Path, relative: &Path, format: OutputFormat) -> Option<PathBuf> {
 	use std::path::Component;
 
 	let parent = relative.parent().unwrap_or(Path::new(""));
@@ -348,7 +348,7 @@ pub fn mirrored_output_path(output_root: &Path, relative: &Path) -> Option<PathB
 		return None;
 	}
 	let directory = output_root.join(parent);
-	Some(output_path_in(directory, relative))
+	Some(output_path_in(directory, relative, format))
 }
 
 /// What a completed conversion did, for the UI's before/after readout.
@@ -421,18 +421,20 @@ pub enum ConvertError {
 	},
 }
 
-/// The output path the Electron app would derive: the input's file stem, `.webp`, in the
-/// chosen directory.
+/// The output path the Electron app would derive: the input's file stem plus the format's
+/// extension, in the chosen directory.
 ///
-/// Kept identical so a user's converted files land where they already expect.
+/// For WebP this is identical to the Electron app, so a user's converted files land where
+/// they already expect; AVIF follows the same rule with `.avif`.
 #[must_use]
-pub fn output_path_in(directory: PathBuf, input: &Path) -> PathBuf {
+pub fn output_path_in(directory: PathBuf, input: &Path, format: OutputFormat) -> PathBuf {
 	let stem = input.file_stem().unwrap_or_else(|| OsStr::new("image"));
 	// Append rather than `with_extension`, which would treat the stem's own dots as an
 	// extension and turn `archive.tar.gz` into `archive.webp` instead of
 	// `archive.tar.webp`. The Electron app concatenates, so this does too.
 	let mut name = stem.to_os_string();
-	name.push(".webp");
+	name.push(".");
+	name.push(format.extension());
 	let mut path = directory;
 	path.push(name);
 	path
@@ -483,14 +485,18 @@ pub fn encode_file_with_progress(settings: &EncodeJob, input: &Path, output: &Pa
 
 	// A temporary name in the destination directory, so the rename stays on one filesystem
 	// and is therefore atomic.
-	let staging = directory.join(format!(".skidbladnir-{}-{}.webp.part", std::process::id(), output.file_name().and_then(OsStr::to_str).unwrap_or("out")));
+	let staging = directory.join(format!(".skidbladnir-{}-{}.{}.part", std::process::id(), output.file_name().and_then(OsStr::to_str).unwrap_or("out"), settings.format.extension()));
 	fs::write(&staging, &encoded).map_err(|source| ConvertError::Write { path: staging.clone(), source })?;
 	if let Err(source) = fs::rename(&staging, output) {
 		let _ = fs::remove_file(&staging);
 		return Err(ConvertError::Write { path: output.to_path_buf(), source });
 	}
 
-	let (width, height) = encoded_dimensions(&encoded).unwrap_or((image.width, image.height));
+	let (width, height) = match settings.format {
+		OutputFormat::Webp => encoded_dimensions(&encoded),
+		OutputFormat::Avif => crate::avif::dimensions(&encoded),
+	}
+	.unwrap_or((image.width, image.height));
 	Ok(Conversion { source_bytes, output_bytes: encoded.len() as u64, width, height })
 }
 
@@ -513,7 +519,7 @@ mod tests {
 	};
 
 	use super::{Conversion, ConvertError, SourceFormat, encode_file, load, output_path_in};
-	use crate::settings::{EncodeJob, Mode, Resize, WebpSettings};
+	use crate::settings::{AvifSettings, EncodeJob, Mode, OutputFormat, Resize, WebpSettings};
 
 	/// A scratch directory that cleans itself up. Every test in this module writes only
 	/// inside one of these — nothing here touches a path outside the temp directory.
@@ -565,8 +571,9 @@ mod tests {
 
 	#[test]
 	fn output_path_follows_the_electron_naming() {
-		assert_eq!(output_path_in(PathBuf::from("/out"), Path::new("/in/holiday.JPG")), PathBuf::from("/out/holiday.webp"));
-		assert_eq!(output_path_in(PathBuf::from("/out"), Path::new("/in/archive.tar.gz")), PathBuf::from("/out/archive.tar.webp"));
+		assert_eq!(output_path_in(PathBuf::from("/out"), Path::new("/in/holiday.JPG"), OutputFormat::Webp), PathBuf::from("/out/holiday.webp"));
+		assert_eq!(output_path_in(PathBuf::from("/out"), Path::new("/in/archive.tar.gz"), OutputFormat::Webp), PathBuf::from("/out/archive.tar.webp"));
+		assert_eq!(output_path_in(PathBuf::from("/out"), Path::new("/in/holiday.JPG"), OutputFormat::Avif), PathBuf::from("/out/holiday.avif"));
 	}
 
 	#[test]
@@ -609,7 +616,7 @@ mod tests {
 
 		// Now convert that WebP into the same directory: output_path_in derives photo.webp,
 		// which is the input.
-		let derived = output_path_in(scratch.0.clone(), &webp);
+		let derived = output_path_in(scratch.0.clone(), &webp, OutputFormat::Webp);
 		assert_eq!(derived, webp, "this is the dangerous case the guard exists for");
 		let error = encode_file(&EncodeJob::default(), &webp, &derived).expect_err("must refuse");
 		assert!(matches!(error, ConvertError::WouldOverwriteSource { .. }), "got {error}");
@@ -799,8 +806,8 @@ mod tests {
 	#[test]
 	fn mirrors_the_structure_into_the_output_directory() {
 		let out = Path::new("/out");
-		assert_eq!(super::mirrored_output_path(out, Path::new("a.png")), Some(PathBuf::from("/out/a.webp")), "the output is a WebP, not a copy of the input name");
-		assert_eq!(super::mirrored_output_path(out, Path::new("nested/deeper/d.JPG")), Some(PathBuf::from("/out/nested/deeper/d.webp")));
+		assert_eq!(super::mirrored_output_path(out, Path::new("a.png"), OutputFormat::Webp), Some(PathBuf::from("/out/a.webp")), "the output is a WebP, not a copy of the input name");
+		assert_eq!(super::mirrored_output_path(out, Path::new("nested/deeper/d.JPG"), OutputFormat::Webp), Some(PathBuf::from("/out/nested/deeper/d.webp")));
 	}
 
 	/// The guard that matters: a relative path must never be able to write outside the
@@ -808,9 +815,9 @@ mod tests {
 	#[test]
 	fn a_relative_path_cannot_escape_the_output_directory() {
 		let out = Path::new("/out");
-		assert_eq!(super::mirrored_output_path(out, Path::new("../escaped.png")), None);
-		assert_eq!(super::mirrored_output_path(out, Path::new("nested/../../escaped.png")), None);
-		assert_eq!(super::mirrored_output_path(out, Path::new("/absolute/escaped.png")), None);
+		assert_eq!(super::mirrored_output_path(out, Path::new("../escaped.png"), OutputFormat::Webp), None);
+		assert_eq!(super::mirrored_output_path(out, Path::new("nested/../../escaped.png"), OutputFormat::Webp), None);
+		assert_eq!(super::mirrored_output_path(out, Path::new("/absolute/escaped.png"), OutputFormat::Webp), None);
 	}
 
 	/// An animated WebP must be refused with a message that explains itself.
@@ -901,5 +908,23 @@ mod tests {
 		assert_eq!(Conversion { source_bytes: 1000, output_bytes: 250, width: 1, height: 1 }.saving_percent(), Some(75.0));
 		assert_eq!(Conversion { source_bytes: 100, output_bytes: 150, width: 1, height: 1 }.saving_percent(), Some(-50.0));
 		assert_eq!(Conversion { source_bytes: 0, output_bytes: 10, width: 1, height: 1 }.saving_percent(), None);
+	}
+
+	/// The file pipeline writes AVIF when asked, under an `.avif` name, and reports the
+	/// dimensions read back out of the file.
+	#[test]
+	fn converts_to_avif_through_the_file_layer() {
+		let scratch = Scratch::new("avif");
+		let input = scratch.join("in.png");
+		write_png(&input, 48, 32);
+		let output = output_path_in(scratch.0.clone(), &input, OutputFormat::Avif);
+		assert!(output.ends_with("in.avif"));
+		let job = EncodeJob { format: OutputFormat::Avif, resize: Resize { width: 24, height: 0 }, avif: AvifSettings { speed: 10, ..Default::default() }, ..Default::default() };
+		let conversion = encode_file(&job, &input, &output).expect("AVIF conversion succeeds");
+		assert_eq!((conversion.width, conversion.height), (24, 16));
+		let bytes = std::fs::read(&output).expect("read the output");
+		assert_eq!(&bytes[4..12], b"ftypavif");
+		assert_eq!(conversion.output_bytes, bytes.len() as u64);
+		assert_eq!(std::fs::read_dir(&scratch.0).expect("list").count(), 2, "no staging file may be left behind");
 	}
 }

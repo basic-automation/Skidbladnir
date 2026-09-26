@@ -73,10 +73,11 @@ jobs:
         # Needed from Phase 1 onward, when src-tauri/ joins the workspace: Tauri 2 links
         # against webkit2gtk-4.1, and patchelf is what bundles the AppImage. The image
         # libraries are for building the reference cwebp below, which needs a PNG reader.
+        # libavif-bin is libavif's `avifdec`, the reference decoder for the AVIF gate.
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev libpng-dev libjpeg-dev libtiff-dev
+          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev libpng-dev libjpeg-dev libtiff-dev libavif-bin
 
       - uses: actions/setup-node@v4
         with:
@@ -138,7 +139,8 @@ jobs:
           # so the Homebrew prefix is added without overriding the makefile's own
           # variables — passing EXTRA_FLAGS on the command line would replace them.
           if [ "$RUNNER_OS" = "macOS" ]; then
-            brew install jpeg-turbo libpng libtiff
+            # libavif provides `avifdec` for the AVIF gate.
+            brew install jpeg-turbo libpng libtiff libavif
             prefix=$(brew --prefix)
             export CPATH="$prefix/include${CPATH:+:$CPATH}"
             export LIBRARY_PATH="$prefix/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
@@ -161,7 +163,8 @@ jobs:
         #
         # cmyk_jpeg rides along because it also needs the reference: it checks that cwebp
         # still REFUSES CMYK JPEG, the one input Skidbladnir converts and cwebp does not.
-        run: cargo test --package skidbladnir-encode --test parity --test cmyk_jpeg -- --nocapture
+        # avif_reference is the AVIF gate: libavif's avifdec decodes what we write.
+        run: cargo test --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_reference -- --nocapture
 
   # Drives the real window over WebDriver. Separate from the compile matrix because it
   # needs a display, a WebKit driver and a full release build, and because a flaky display
@@ -214,3 +217,98 @@ jobs:
 
       - name: Accessibility audit
         run: xvfb-run -a scripts/a11y-audit.sh
+
+      - name: Capture the README screenshots
+        # The dev host cannot take these (WebKitWebDriver's screenshot hangs under
+        # XWayland), so CI does, on a virtual screen tall enough for every panel. They are
+        # uploaded for a person to review and commit, never committed by CI itself.
+        run: xvfb-run -a -s "-screen 0 1200x3200x24" scripts/screenshot.sh --app target/release/skidbladnir --out screenshots
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screenshots/*.png
+          if-no-files-found: error
+
+  # The same smoke test, on Windows. This is the only place the Windows build is
+  # LAUNCHED rather than just compiled: the dev host cannot run it, and nobody had
+  # opened a Windows build before this job existed. The Electron app is Windows-only,
+  # so ROADMAP.md Phase 6 does not retire it until this job has been green.
+  #
+  # tauri-driver drives Windows through Microsoft's msedgedriver, which must match the
+  # installed WebView2 exactly. msedgedriver-tool reads that version and fetches the
+  # matching driver from Microsoft. It is pinned to a commit (v0.2.2) rather than a
+  # branch, because it runs with the job's token.
+  #
+  # Pinned to windows-2022, not windows-latest: on the windows-2025 image WebView2 never
+  # opens the DevTools port msedgedriver needs, and every session fails with
+  # "DevToolsActivePort file doesn't exist" (seen here with WebView2 153). The reporter of
+  # https://github.com/actions/runner-images/issues/14738 found that switching only the
+  # image to windows-2022 fixes it, and no launch-flag workaround did. Revisit when
+  # windows-2022 is retired.
+  window-windows:
+    name: window smoke (windows)
+    runs-on: windows-2022
+    # A GUI installer that stops to ask a question never returns. Bound the job rather
+    # than let a hang hold a runner for GitHub's six-hour default.
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install the WebDriver shim and a WebView2-matched msedgedriver
+        run: |
+          cargo install tauri-driver --locked
+          cargo install --locked --git https://github.com/chippers/msedgedriver-tool --rev 8c4b34f51b45f5cf08013366d703de464ab871d1
+          mkdir -p "$RUNNER_TEMP/edgedriver"
+          cd "$RUNNER_TEMP/edgedriver" && msedgedriver-tool
+          ls -la "$RUNNER_TEMP/edgedriver"
+          echo "$RUNNER_TEMP/edgedriver" >> "$GITHUB_PATH"
+
+      - name: Build the app and its installer
+        # See the Linux window job: `tauri build`, not `cargo build --release`, for the
+        # custom-protocol feature. The NSIS installer is built too, because what users
+        # run is the installed app, not the bare executable.
+        run: |
+          npm --prefix frontend ci
+          cd src-tauri && ../frontend/node_modules/.bin/tauri build --bundles nsis
+
+      - name: Install it the way a user would, silently
+        # Tauri's NSIS installer defaults to a per-user install under
+        # %LOCALAPPDATA%\<productName>. Find the executable rather than trusting that
+        # path, and fail loudly if the installer put nothing anywhere.
+        run: |
+          installer=$(ls target/release/bundle/nsis/*-setup.exe)
+          echo "installing $installer"
+          # MSYS_NO_PATHCONV: Git Bash rewrites a bare `/S` into a drive path, which turns
+          # a silent install into an interactive one waiting for a click. That hung this
+          # step for half an hour before the fix.
+          MSYS_NO_PATHCONV=1 timeout 300 "$installer" /S
+          app=""
+          for _ in $(seq 1 60); do
+            app=$(find "$(cygpath -u "$LOCALAPPDATA")/Skidbladnir" -maxdepth 1 -iname 'skidbladnir.exe' 2>/dev/null | head -1)
+            [ -n "$app" ] && break
+            sleep 1
+          done
+          if [ -z "$app" ]; then
+            echo "::error::the installer did not put skidbladnir.exe under %LOCALAPPDATA%\Skidbladnir"
+            find "$(cygpath -u "$LOCALAPPDATA")" -maxdepth 3 -iname 'skidbladnir*' || true
+            exit 1
+          fi
+          ls -la "$app"
+          echo "INSTALLED_APP=$app" >> "$GITHUB_ENV"
+
+      - name: Smoke test the installed app
+        run: scripts/smoke-test.sh --app "$INSTALLED_APP"

@@ -41,6 +41,6 @@
     ],
     "category": "Graphics and Design",
     "shortDescription": "Convert images to next-generation formats.",
-    "longDescription": "Skidbladnir converts images to WebP while exposing the encoder's full control surface: modes, quality, alpha quality, compression method, segments, spatial noise shaping, filtering, target size and PSNR, multi-pass, partition limit, sharp YUV, low memory, resize and multi-threading."
+    "longDescription": "Skidbladnir converts images to WebP and AVIF. For WebP it exposes the encoder's full control surface: modes, quality, alpha quality, compression method, segments, spatial noise shaping, filtering, target size and PSNR, multi-pass, partition limit, sharp YUV, low memory, resize and multi-threading. For AVIF: quality, alpha quality, speed, bit depth, colour model and the colour of transparent pixels."
   }
 }

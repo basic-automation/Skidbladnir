@@ -188,7 +188,7 @@ pub fn scan_folder(directory: PathBuf, recursive: bool) -> Vec<FoundImage> {
 /// would write outside the chosen output directory.
 #[tauri::command]
 pub async fn convert_scanned(app: tauri::AppHandle, state: tauri::State<'_, CancelFlag>, settings: EncodeJob, input: PathBuf, relative: PathBuf, output_root: PathBuf) -> Result<ConversionReport, String> {
-	let Some(output_path) = mirrored_output_path(&output_root, &relative) else {
+	let Some(output_path) = mirrored_output_path(&output_root, &relative, settings.format) else {
 		return Err(format!("refusing to write `{}`: it would land outside the chosen folder", relative.display()));
 	};
 	let Some(parent) = output_path.parent().map(Path::to_path_buf) else {
@@ -224,10 +224,13 @@ pub async fn convert_scanned(app: tauri::AppHandle, state: tauri::State<'_, Canc
 ///
 /// Returns the failure as a string for display, including a refusal for images too large
 /// to hold two copies of in the webview.
+///
+/// `async`, with the encode on a blocking thread, for the same reason as
+/// [`convert_image`]: a synchronous command holds the event loop, and an AVIF encode at
+/// its default speed takes long enough to freeze the window visibly.
 #[tauri::command]
-#[expect(clippy::needless_pass_by_value, reason = "Tauri deserializes command arguments into owned values; the preview borrows them")]
-pub fn preview_encode(settings: EncodeJob, input: PathBuf) -> Result<Preview, String> {
-	preview::preview(&settings, &input)
+pub async fn preview_encode(settings: EncodeJob, input: PathBuf) -> Result<Preview, String> {
+	tauri::async_runtime::spawn_blocking(move || preview::preview(&settings, &input)).await.map_err(|error| format!("the preview thread failed: {error}"))?
 }
 
 /// The user's saved presets, sorted by name.
@@ -276,7 +279,7 @@ pub fn delete_preset(app: tauri::AppHandle, name: String) -> Result<Vec<Preset>,
 ///
 /// Returns the failure as a string for display.
 pub fn convert_one(settings: &EncodeJob, input: PathBuf, output_directory: PathBuf, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<ConversionReport, String> {
-	let output_path = output_path_in(output_directory, &input);
+	let output_path = output_path_in(output_directory, &input, settings.format);
 	let conversion = encode_file_with_progress(settings, &input, &output_path, on_progress).map_err(|error| error.to_string())?;
 	Ok(ConversionReport::new(input, output_path, conversion))
 }

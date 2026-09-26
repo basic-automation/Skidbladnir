@@ -11,7 +11,7 @@
 // Help text is libwebp's own wording from `cwebp -longhelp`. The Electron app was not a
 // source for it: its `-info` spans are live value readouts and it has one tooltip in total.
 import { computed, onMounted, onUnmounted, ref, toRaw, watch } from 'vue'
-import type { ConversionReport, EncodeJob, Mode, Preset } from '~/composables/useSettings'
+import type { AvifSettings, ConversionReport, EncodeJob, Mode, OutputFormat, Preset } from '~/composables/useSettings'
 import { formatBytes, usesLossyOptions, usesManualFilter } from '~/composables/useSettings'
 import { invokeCommand, isTauri } from '~/composables/useTauri'
 
@@ -62,6 +62,27 @@ const FALLBACK_MESSAGES: Record<string, string> = {
 	invalidSettings: 'Your saved settings were out of range, so the defaults were loaded.',
 }
 
+const FORMATS: { value: OutputFormat, label: string, help: string }[] = [
+	{ value: 'webp', label: 'WebP', help: 'libwebp, with every cwebp control. Byte-identical to cwebp.' },
+	{ value: 'avif', label: 'AVIF', help: 'AV1 stills: smaller files, slower to encode. Encoded by ravif.' },
+]
+
+const BIT_DEPTH_ITEMS = [
+	{ label: '10-bit', value: 'ten' },
+	{ label: '8-bit', value: 'eight' },
+] satisfies { label: string, value: AvifSettings['bitDepth'] }[]
+
+const COLOR_MODEL_ITEMS = [
+	{ label: 'YCbCr', value: 'ycbcr' },
+	{ label: 'RGB', value: 'rgb' },
+] satisfies { label: string, value: AvifSettings['colorModel'] }[]
+
+const ALPHA_MODE_ITEMS = [
+	{ label: 'Clean', value: 'clean', description: 'Recolour fully transparent pixels to whatever encodes cheapest.' },
+	{ label: 'Keep', value: 'dirty', description: 'Keep the colour under transparency exactly as it is.' },
+	{ label: 'Premultiplied', value: 'premultiplied', description: 'Store colour premultiplied by alpha.' },
+] satisfies { label: string, value: AvifSettings['alphaMode'], description: string }[]
+
 const MODES: { value: Mode, label: string, help: string }[] = [
 	{ value: 'lossy', label: 'Lossy', help: 'Ordinary WebP. The only mode with the advanced controls.' },
 	{ value: 'lossless', label: 'Lossless', help: 'Exact pixels, larger files. Keeps colour under transparency.' },
@@ -92,7 +113,10 @@ const TARGET_ITEMS = [
 	{ label: 'Target PSNR', value: 'psnr' },
 ]
 
-const lossy = computed(() => (settings.value ? usesLossyOptions(settings.value.webp.mode) : false))
+const isWebp = computed(() => settings.value?.format === 'webp')
+const isAvif = computed(() => settings.value?.format === 'avif')
+const extension = computed(() => settings.value?.format ?? 'webp')
+const lossy = computed(() => (settings.value && isWebp.value ? usesLossyOptions(settings.value.webp.mode) : false))
 const manualFilter = computed(() => (settings.value ? usesManualFilter(settings.value.webp.filter) : false))
 const basicOnly = computed(() => settings.value?.webp.mode === 'nearLossless' || settings.value?.webp.mode === 'preset')
 
@@ -219,7 +243,8 @@ async function chooseOutput() {
 const canConvert = computed(() => {
 	if (!settings.value || busy.value) return false
 	if (inputPaths.value.length === 0 || !outputDirectory.value) return false
-	return !(settings.value.webp.mode === 'preset' && !settings.value.webp.preset)
+	// The preset requirement belongs to WebP's preset mode; it does not block an AVIF run.
+	return !(isWebp.value && settings.value.webp.mode === 'preset' && !settings.value.webp.preset)
 })
 
 async function convert() {
@@ -320,6 +345,53 @@ async function cancel() {
 
 const converted = computed(() => reports.value.length > 0 && failures.value.length === 0 && !busy.value)
 
+// Preview: encode one of the selected files into memory with the current settings and
+// show it beside the original. Nothing is written to disk. The core returns both sides as
+// data: URLs and computes the saving itself.
+interface Preview { original: string, encoded: string, sourceBytes: number, encodedBytes: number, width: number, height: number, savingPercent: number | null }
+const preview = ref<Preview | null>(null)
+const previewFormat = ref<OutputFormat>('webp')
+const previewPath = ref('')
+const previewing = ref(false)
+const previewError = ref('')
+// Set when the settings or the chosen file change after a preview, so an out-of-date
+// comparison is labelled as such rather than passed off as current.
+const previewStale = ref(false)
+// Not every webview can decode AVIF: WebKitGTK is built without it on some Linux
+// distributions (Ubuntu 24.04's is one, and the AppImage bundles that build). The file
+// itself is fine; only the on-screen comparison is lost, and the window says so.
+const encodedUndisplayable = ref(false)
+const previewItems = computed(() => inputPaths.value.map(path => ({ label: basename(path), value: path })))
+
+watch(inputPaths, (paths) => {
+	preview.value = null
+	previewError.value = ''
+	previewPath.value = paths[0] ?? ''
+})
+watch([settings, previewPath], () => {
+	if (preview.value) previewStale.value = true
+}, { deep: true })
+
+async function runPreview() {
+	if (!settings.value || !previewPath.value) return
+	previewing.value = true
+	previewError.value = ''
+	try {
+		const format = settings.value.format
+		encodedUndisplayable.value = false
+		preview.value = await invokeCommand<Preview>('preview_encode', { settings: settings.value, input: previewPath.value })
+		previewFormat.value = format
+		previewStale.value = false
+	}
+	catch (error) {
+		preview.value = null
+		previewError.value = String(error)
+	}
+	finally {
+		previewing.value = false
+	}
+}
+
 function basename(path: string): string {
 	return path.split(/[\\/]/).pop() ?? path
 }
@@ -411,12 +483,32 @@ function basename(path: string): string {
 						</p>
 						<p class="text-center text-xs text-palenight-muted">
 							PNG, JPEG, TIFF and WebP — drop them anywhere on the window, or use the button.
-							Converted files are written as <code class="text-palenight-cyan">&lt;name&gt;.webp</code>
+							Converted files are written as <code class="text-palenight-cyan">&lt;name&gt;.{{ extension }}</code>
 							in the destination. Your originals are never written over.
 						</p>
 					</ControlPanel>
 
-					<ControlPanel title="Mode">
+					<ControlPanel title="Format">
+						<div class="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Output format">
+							<button
+								v-for="format in FORMATS"
+								:key="format.value"
+								type="button"
+								role="radio"
+								:aria-checked="settings.format === format.value"
+								class="rounded-md border px-3 py-2 text-left transition-colors"
+								:class="settings.format === format.value
+									? 'border-palenight-green bg-palenight-green/10'
+									: 'border-palenight-selection hover:border-palenight-comment'"
+								@click="settings.format = format.value"
+							>
+								<span class="block text-sm font-semibold" :class="settings.format === format.value ? 'text-palenight-green' : 'text-palenight-bright'">{{ format.label }}</span>
+								<span class="block text-xs text-palenight-fg">{{ format.help }}</span>
+							</button>
+						</div>
+					</ControlPanel>
+
+					<ControlPanel v-if="isWebp" title="Mode">
 						<div class="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Encoding mode">
 							<button
 								v-for="mode in MODES"
@@ -469,11 +561,45 @@ function basename(path: string): string {
 						</p>
 					</ControlPanel>
 
-					<ControlPanel title="Quality">
+					<ControlPanel v-if="isWebp" title="Quality">
 						<div class="grid gap-5 sm:grid-cols-2">
 							<ControlSlider v-model="settings.webp.quality" :label="qualityLabel" :min="0" :max="100" :help="qualityHelp" />
 							<ControlSlider v-model="settings.webp.alphaQuality" label="Alpha quality" :min="0" :max="100" help="transparency-compression quality (0..100)" :disabled="basicOnly" />
 							<ControlSlider v-model="settings.webp.method" label="Compression method" :min="0" :max="6" help="0 = fast, 6 = slowest and smallest" :disabled="basicOnly" />
+						</div>
+					</ControlPanel>
+
+					<ControlPanel v-if="isAvif" title="AVIF">
+						<div class="grid gap-5 sm:grid-cols-2">
+							<ControlSlider v-model="settings.avif.quality" label="Quality" :min="1" :max="100" help="colour quality (1: small .. 100: big)" />
+							<ControlSlider v-model="settings.avif.alphaQuality" label="Alpha quality" :min="1" :max="100" help="transparency quality (1..100)" />
+							<ControlSlider v-model="settings.avif.speed" label="Speed" :min="1" :max="10" help="1 = slowest and smallest, 10 = fastest and largest" />
+							<ControlToggle v-model="settings.avif.multiThreading" label="Multi-threading" help="encode on every core" />
+						</div>
+						<div class="grid gap-5 border-t border-dotted border-palenight-selection pt-5 sm:grid-cols-2">
+							<div class="text-left">
+								<span class="text-sm font-medium text-palenight-bright">Bit depth</span>
+								<URadioGroup v-model="settings.avif.bitDepth" :items="BIT_DEPTH_ITEMS" orientation="horizontal" class="mt-2" aria-label="AVIF bit depth" />
+								<p class="mt-1 text-xs text-palenight-muted">
+									10-bit keeps more precision through the colour conversion, even for 8-bit images.
+								</p>
+							</div>
+							<div class="text-left">
+								<span class="text-sm font-medium text-palenight-bright">Colour model</span>
+								<URadioGroup v-model="settings.avif.colorModel" :items="COLOR_MODEL_ITEMS" orientation="horizontal" class="mt-2" aria-label="AVIF colour model" />
+								<p class="mt-1 text-xs text-palenight-muted">
+									RGB skips the colour conversion at a large size cost.
+								</p>
+							</div>
+						</div>
+						<div class="border-t border-dotted border-palenight-selection pt-5 text-left">
+							<span class="text-sm font-medium text-palenight-bright">Colour under transparency</span>
+							<URadioGroup v-model="settings.avif.alphaMode" :items="ALPHA_MODE_ITEMS" class="mt-2" aria-label="AVIF colour under transparency" />
+						</div>
+					</ControlPanel>
+
+					<ControlPanel title="Resize">
+						<div class="mx-auto w-full max-w-md">
 							<div class="grid grid-cols-2 gap-3 text-left">
 								<div>
 									<span class="text-sm font-medium text-palenight-bright">Resize width</span>
@@ -484,8 +610,8 @@ function basename(path: string): string {
 									<UInput v-model.number="settings.resize.height" type="number" :min="0" aria-label="Resize height in pixels" class="mt-1 w-full" />
 								</div>
 								<p class="col-span-2 text-xs text-palenight-muted">
-									Applied before encoding. Both 0 means no resize; set one to 0 to derive it
-									and keep the aspect ratio.
+									Applied before encoding, the same way for either format. Both 0 means no
+									resize; set one to 0 to derive it and keep the aspect ratio.
 								</p>
 							</div>
 						</div>
@@ -538,6 +664,48 @@ function basename(path: string): string {
 						</div>
 					</ControlPanel>
 
+					<ControlPanel v-if="inputPaths.length > 0 && !busy" title="Preview">
+						<div class="mx-auto flex w-full max-w-md flex-wrap items-center justify-center gap-2">
+							<USelect v-if="previewItems.length > 1" v-model="previewPath" :items="previewItems" aria-label="File to preview" class="min-w-0 flex-1" />
+							<UButton color="neutral" variant="subtle" :loading="previewing" :disabled="!previewPath" @click="runPreview">
+								{{ preview ? 'Preview again' : 'Preview' }}
+							</UButton>
+						</div>
+						<p class="text-center text-xs text-palenight-muted">
+							Encodes {{ previewItems.length > 1 ? 'the chosen file' : 'the file' }} in memory with the current settings. Nothing is written to disk.
+						</p>
+						<p v-if="previewError" class="text-center text-xs text-palenight-red" role="alert" data-selectable>
+							{{ previewError }}
+						</p>
+						<div v-if="preview" class="flex flex-col gap-2" aria-live="polite">
+							<p v-if="previewStale" class="text-center text-xs text-palenight-yellow">
+								The settings or the file have changed since this preview. Preview again to see them.
+							</p>
+							<div class="grid gap-3 sm:grid-cols-2">
+								<figure class="text-left">
+									<img :src="preview.original" alt="The original image" class="checkerboard w-full rounded border border-palenight-selection object-contain">
+									<figcaption class="mt-1 text-xs text-palenight-fg">
+										Original · {{ formatBytes(preview.sourceBytes) }}
+									</figcaption>
+								</figure>
+								<figure class="text-left">
+									<img v-if="!encodedUndisplayable" :src="preview.encoded" :alt="`The image encoded as ${previewFormat.toUpperCase()}`" class="checkerboard w-full rounded border border-palenight-selection object-contain" @error="encodedUndisplayable = true">
+									<p v-else class="rounded border border-dotted border-palenight-selection p-4 text-xs text-palenight-yellow" role="note">
+										This system's web view cannot display {{ previewFormat.toUpperCase() }}, so the encoded
+										image cannot be shown here. The file Skidbladnir writes is unaffected, and the size and
+										saving below are exact.
+									</p>
+									<figcaption class="mt-1 text-xs text-palenight-fg">
+										{{ previewFormat.toUpperCase() }} · {{ formatBytes(preview.encodedBytes) }} · {{ preview.width }}×{{ preview.height }}
+										<template v-if="preview.savingPercent !== null">
+											· <span :class="preview.savingPercent >= 0 ? 'text-palenight-green' : 'text-palenight-orange'">{{ preview.savingPercent >= 0 ? '−' : '+' }}{{ Math.abs(preview.savingPercent).toFixed(1) }}%</span>
+										</template>
+									</figcaption>
+								</figure>
+							</div>
+						</div>
+					</ControlPanel>
+
 					<ControlPanel v-if="busy" title="Converting">
 						<div class="text-left" role="status" aria-live="polite">
 							<div class="flex items-baseline justify-between gap-3">
@@ -550,8 +718,15 @@ function basename(path: string): string {
 							</div>
 							<UProgress v-model="currentPercent" :max="100" class="mt-2" />
 							<p class="mt-1 text-xs text-palenight-muted">
-								libwebp does not always report a final 100%, so the bar can stop short of
-								the end before a file finishes.
+								<template v-if="isAvif">
+									The AVIF encoder reports no progress while it works, so the bar moves only
+									when a file starts and when it finishes. Cancel cannot stop a file mid-encode,
+									but that file is then discarded rather than written.
+								</template>
+								<template v-else>
+									libwebp does not always report a final 100%, so the bar can stop short of
+									the end before a file finishes.
+								</template>
 							</p>
 						</div>
 						<div class="flex justify-center">

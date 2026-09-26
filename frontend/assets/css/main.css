@@ -134,3 +134,11 @@
 	background-image: radial-gradient(var(--color-palenight-comment) 1px, transparent 1px);
 	background-size: 10px 10px;
 }
+
+/* Behind the preview images, so transparency reads as transparency rather than as the
+   panel colour showing through. */
+@utility checkerboard {
+	background-color: var(--color-palenight-panel);
+	background-image: conic-gradient(var(--color-palenight-selection) 25%, transparent 0 50%, var(--color-palenight-selection) 0 75%, transparent 0);
+	background-size: 16px 16px;
+}

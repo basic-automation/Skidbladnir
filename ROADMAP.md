@@ -145,10 +145,20 @@ building and running the Electron app until Phase 6 retires it.
       `execute/sync`, not `execute/async`: the async endpoint waits for a completion
       callback, so a script that simply returns hangs until the driver times out (this
       cost a debugging round already).
-- [ ] Run the smoke test on the **Windows** runner too. `tauri-driver` supports Windows
-      through Microsoft's `msedgedriver` (it has no macOS support at all), so this is the
-      one way the Windows build can be *launched* rather than only compiled before a
-      human does it.
+- [x] Run the smoke test on the **Windows** runner too — the `window smoke (windows)` job.
+      `tauri-driver` drives Windows through Microsoft's `msedgedriver`, fetched by the
+      pinned `msedgedriver-tool` to match the installed WebView2. Four traps, each found
+      by a failing run rather than by reading:
+      - Git Bash paths (`/d/a/...`) reach native Windows programs unreadable; the harness
+        converts with `cygpath`.
+      - On the `windows-2025` image WebView2 never opens its DevTools port ("DevToolsActivePort
+        file doesn't exist"); the job is pinned to `windows-2022`, per
+        <https://github.com/actions/runner-images/issues/14738>.
+      - Git Bash rewrites the installer's `/S` into a drive path, turning a silent install
+        into one waiting for a click; `MSYS_NO_PATHCONV=1`, plus a 45-minute job ceiling.
+      - Windows serves the bundled frontend from `http://tauri.localhost`, not
+        `tauri://localhost`.
+      tauri-driver has no macOS support, so the macOS build still cannot be launched this way.
 
 ## Phase 2 — Encode core in Rust (the real work)
 
@@ -335,6 +345,14 @@ prettier subset.
       while the reference image stays pixel-exact — and any resize is applied to both, so
       the comparison is like for like instead of a big image beside a small one.
       Refused above 24 megapixels: two base64 copies in the webview is real memory.
+      **Correction (2026-09-26): this was ticked when only the backend existed.** The
+      `preview_encode` command and its tests landed in 343f7c0, but nothing in the window
+      ever called it, so the README's "preview the result" was untrue until the Preview
+      panel was built. It now exists: pick one of the selected files, see both sides with
+      the size, dimensions and the core's saving figure, and a notice when the settings
+      have changed since. `preview_encode` is now `async` too — as a synchronous command
+      an AVIF preview froze the window while it encoded. Verified in the running window,
+      for both formats, by dropping a file through Tauri's own drop event.
 - [x] Persist settings between launches. `src-tauri/src/preferences.rs` stores the last
       used settings and destination as JSON in the OS's per-app config directory, saved
       after a conversion run rather than on every slider drag.
@@ -389,9 +407,10 @@ prettier subset.
 - [x] Speed up the `window` CI job. It now uses the **prebuilt** `@tauri-apps/cli` from the
       frontend's lockfile instead of `cargo install tauri-cli`: **10m42s → 1m41s** for the
       whole job on its first run with the change.
-- [ ] Use the prebuilt CLI in `release.yml` as well. Left on `cargo install` on purpose —
-      a tag-triggered workflow cannot be exercised before a tag, so change it in the run
-      that cuts the next release, where the release itself proves it.
+- [x] Use the prebuilt CLI in `release.yml` as well — done, and **tested before a tag**:
+      the workflow gained a `dry_run` dispatch input that builds the dispatching branch and
+      attaches nothing. The dry run built all four installers in 7m44s (the 0.5.0 release
+      took 13m36s).
 - [x] Run `scripts/a11y-audit.sh` in CI alongside the smoke test — same job.
 
 ## Phase 5 — Tri-platform packaging and release
@@ -412,12 +431,16 @@ prettier subset.
       `release.yml` for 0.5.0. **Compiled and bundled, never launched** — see below.
 - [x] `cargo tauri build` green on **macOS** (`.dmg`) — built by `release.yml` for 0.5.0,
       **Apple Silicon only** and never launched.
-- [ ] First-launch verification of the Windows and macOS builds. Nobody has opened either.
-      Windows can be automated (see the Windows smoke-test item in Phase 1); macOS cannot,
-      because `tauri-driver` does not support it, so the `.dmg` needs a human.
-- [ ] An Intel macOS build. The `macos-latest` runner is Apple Silicon, so the only
-      `.dmg` is `aarch64`; Intel Macs need an explicit `x86_64-apple-darwin` target (or a
-      universal binary) in the release matrix, if they are in scope at all.
+- [x] First launch of the **Windows** build — and of the *installed* app, not just the bare
+      executable. CI builds the NSIS installer, installs it silently to
+      `%LOCALAPPDATA%\Skidbladnir`, and runs the full smoke test (13 checks) against the
+      installed `skidbladnir.exe`. WebView2 displays AVIF there.
+- [ ] First launch of the **macOS** build. `tauri-driver` does not support macOS, so the
+      `.dmg` still needs a human to open it once.
+- [x] An Intel macOS build. `release.yml` cross-builds `x86_64-apple-darwin` on the Apple
+      Silicon runner as a fourth matrix entry; the dry run produced
+      `Skidbladnir_<version>_x64.dmg` beside the `aarch64` one. Never launched, like the
+      Apple Silicon build.
 - [ ] Stop attaching a locally-built `.deb` to a release that CI then overwrites with
       `--clobber`. Attach CI's artifacts only, and verify the published files after the
       fact as was done for 0.5.0 — the downloadable file is the one that matters.
@@ -460,7 +483,10 @@ in `index.html`). That is as far as this host can verify it — actually *runnin
 Windows and a downloaded `cwebp.exe`. So "master still has a working app" holds to the level
 that can be checked here, and no further claim is made.
 
-- [ ] **Gate added: do not retire Electron until the Windows build has been launched.**
+- [x] **Gate added: do not retire Electron until the Windows build has been launched.**
+      **Cleared 2026-09-26** — the installed Windows app passes the smoke test in CI.
+      Retiring Electron is now unblocked; it is a product decision worth an owner's nod,
+      since the README still calls the Electron app the one for production work.
       Both stated preconditions now hold (Phase 3 parity is ticked and a Tauri release
       has shipped), but the Electron app is **Windows-only**, and the Tauri Windows build
       has been compiled and never opened. Retiring the one Windows app that is known to
@@ -491,7 +517,9 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       16% to usable, and it is the trigger to re-open this item.
 - [ ] Add AVIF output. **Design decided here so the work can start; no code yet.**
 
-      *Which encoder.* **`libavif-sys`** (BSD-2-Clause, libavif 1.0.4), not `ravif`.
+      *Which encoder.* ~~`libavif-sys`~~ — **superseded 2026-09-26 by `ravif`; see the
+      re-check item below.** The original reasoning, kept for the record:
+      **`libavif-sys`** (BSD-2-Clause, libavif 1.0.4), not `ravif`.
       Parity is not the constraint — there is no existing AVIF behaviour to preserve — so
       the question is control surface versus build complexity, and Skidbladnir exists to
       expose the control surface. `ravif` wraps `rav1e` and offers quality, speed and
@@ -526,22 +554,72 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
          on-disk type; it **reads the old flat shape too**, so preset and preferences files
          saved by 0.5.0 load with every value intact — verified in the running window with
          a hand-written 0.5.0-shape preferences file, not only by unit test.
-      2. Add `AvifSettings` and the `libavif-sys` encode path behind the new variant, with
-         its own fixture tests (round-trip and dimension checks, **not** parity — there is
-         no reference CLI contract to hold to).
-      3. UI: a format selector, and the per-format control groups the mode logic already
-         knows how to show and hide.
-      4. Output naming, `SourceFormat` sniffing for `.avif` input, and the preview.
+      2. **Done (core only).** `AvifSettings` (quality, alpha quality, speed, bit depth,
+         colour model, alpha mode, multi-threading — `ravif`'s defaults), `OutputFormat::Avif`,
+         and `crates/skidbladnir-encode/src/avif.rs`. The shared resize runs through
+         **libwebp's rescaler**, so a resize gives identical dimensions in either format.
+         Output is named `.avif`, dimensions are read back from the file's `ispe` box, and
+         the preview labels its encoded side `image/avif`.
+         **The gate is a reference decoder, not a reference encoder:**
+         `tests/avif_reference.rs` has libavif's own `avifdec` decode seven of our files
+         and checks size, transparency and PSNR (47.5 dB at the defaults; quality 20 → 40.8
+         dB, 95 → 50.6 dB, so quality demonstrably means something). It was
+         mutation-tested — swapping R and B in the encode path drops it to 16.0 dB and
+         fails it. Enforced in CI's parity step (`libavif-bin` / brew `libavif`).
+         WebP parity was unchanged through it (76/76).
+         **An AVIF encode cannot be cancelled mid-way:** `ravif` has no progress hook, so
+         cancel is honoured before and after the encode only.
+      3. **Done.** A Format selector (WebP / AVIF) above Mode; WebP's Mode, Quality and
+         Advanced panels show only for WebP, and an AVIF panel (quality, alpha quality,
+         speed, multi-threading, bit depth, colour model, colour under transparency) only
+         for AVIF. Resize moved into its own panel because both formats share it. The file
+         extension and the progress note follow the format. Verified in the running window:
+         switching shows 3 AVIF sliders and hides Mode; **WebKitGTK displays the AVIF
+         preview**; an AVIF conversion writes a file `avifdec` reads as 10-bit 4:4:4 with
+         alpha. The axe audit now covers the AVIF panel and an on-screen preview too, and
+         caught one contrast failure (a 3.91:1 description on the Format cards), fixed.
+      4. Output naming and the preview — **done in slices 2 and 3**. What is left:
+- [ ] Read AVIF **input** (`SourceFormat` sniffing for `ftypavif`, and a decoder). No
+      decoder is in the tree; `ravif` only encodes. Options: `dav1d` via bindings (a C
+      library again) or leave AVIF output-only and say so.
+- [ ] **Show the AVIF preview on every platform.** Found by CI, not by reading: Ubuntu
+      24.04's WebKitGTK cannot decode AVIF (the smoke test's image load fails there),
+      while Arch's can, and the AppImage bundles the Ubuntu build. The window now says so
+      instead of showing a broken image, but the comparison is lost. The fix is the same
+      AV1 decoder the AVIF-input item needs: decode the preview in Rust and send it to the
+      webview as lossless WebP, as the original side already is. The two items should be
+      solved together.
+      **Blocked on `nasm` (owner-gated), found 2026-09-26.** The right decoder exists:
+      `avif-decode` 3.0.0 (20 September 2026, by `ravif`'s author) is pure Rust over
+      `rav1d`, the Rust port of dav1d — no C library. But on x86 it depends on `rav1d` with
+      default features, which include `asm`, and rav1d's build script then panics with
+      "NASM build failed. Make sure you have nasm installed". Cargo feature unification
+      means Skidbladnir cannot switch that off from its side. `sudo pacman -S nasm` on the
+      dev host (and `nasm` on the three CI runners: apt, brew, choco) unblocks this **and**
+      the rav1e `asm` speed-up at once.
+      <https://crates.io/crates/avif-decode> · <https://crates.io/crates/rav1d>
 
       Do **not** start at step 2. Step 1 is the one that can silently change WebP output,
       and it is the one the existing parity tests can prove innocent.
-- [ ] **Re-check the AVIF encoder choice before slice 2.** `libavif-sys` — the binding
-      chosen above — was last published in July 2024 as `0.17.0+libavif.1.0.4`, while
-      upstream libavif has moved on to **1.4.2** (26 May 2026). Starting a new format on a
-      two-year-old vendored encoder is the wrong baseline. Compare: a maintained binding
-      at a current libavif, linking a system libavif where one exists, or `ravif` after
-      all. Decide before writing the encode path.
-      <https://crates.io/crates/libavif-sys> · <https://github.com/AOMediaCodec/libavif/releases>
+- [x] **Re-check the AVIF encoder choice before slice 2. Decided: `ravif` 0.13**, with
+      `default-features = false, features = ["threading"]`.
+      - `libavif-sys` was last published July 2024 as `0.17.0+libavif.1.0.4`; upstream
+        libavif is at **1.4.2** (26 May 2026). No maintained binding tracks it.
+        <https://crates.io/crates/libavif-sys> · <https://github.com/AOMediaCodec/libavif/releases>
+      - `ravif` 0.13.0 was published January 2026 and is the AVIF encoder under the
+        `image` crate (~15M downloads in 90 days). It is pure Rust over `rav1e`, so
+        there is no C toolchain to stand up on the Windows runner.
+      - What it exposes: quality, alpha quality, speed, bit depth, internal colour model,
+        alpha colour mode and thread count. What it does **not**: chroma subsampling
+        (always 4:4:4 — its docs call subsampling "a bad idea for AVIF anyway"), AV1 tune,
+        or a choice of codec. That is a smaller surface than libavif's, accepted in
+        exchange for a maintained, current encoder.
+        <https://docs.rs/ravif/latest/ravif/struct.Encoder.html>
+      - Default features are off because `asm` needs `nasm` at build time, which the dev
+        host lacks (owner-gated) and would be one more thing for each CI runner.
+- [ ] Turn `rav1e`'s `asm` feature back on for speed once `nasm` is available on the dev
+      host (owner-gated: `sudo pacman -S nasm`) and installed on all three CI runners.
+      The pure-Rust path is correct but slower.
 - [ ] Watch **Tauri 3**, do not adopt it. `3.0.0-alpha` releases began appearing in
       September 2026, bringing a CEF runtime option, plugin-API changes
       (`js_init_script` → `initialization_script`) and removed deprecated APIs. Adopting an
@@ -615,9 +693,14 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       `basicautomation.io`, so it cannot rot independently of the code. Captured from the
       running release binary over the WebDriver harness and encoded by `cwebp` at the
       app's own default settings — 91 KB for 1892x1720.
-- [ ] Re-capture the screenshot whenever the UI changes materially. It is now a scripted
-      step (WebDriver screenshot → crop → encode), so this is cheap; the risk is
-      forgetting, not effort.
+- [x] Re-captured for 0.6.0 (Format selector, AVIF panel, Preview panel), and the capture
+      is now **genuinely scripted**: `scripts/screenshot.sh` runs in CI's window job and
+      uploads the PNGs as the `screenshots` artifact. It has to be CI — on the dev host
+      WebKitWebDriver's screenshot endpoint hangs under XWayland. The README images are
+      those PNGs cropped to their content and encoded by the reference `cwebp` at the
+      app's defaults. The preview is shot in WebP because CI's WebKitGTK cannot show AVIF.
+- [ ] Re-capture whenever the UI changes materially: download the `screenshots` artifact
+      from the change's CI run, crop, encode. Cheap; the risk is forgetting.
 - [x] Dependabot now has an in-tree config (`.github/dependabot.yml`) covering cargo,
       the Nuxt frontend's npm tree, the Electron app's npm tree and github-actions, with
       the Tauri and Nuxt crates/packages grouped so they update together instead of

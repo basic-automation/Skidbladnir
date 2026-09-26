@@ -13,7 +13,7 @@ use std::path::Path;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::Serialize;
 use skidbladnir_encode::{
-	encoder::encode_rgba, settings::{EncodeJob, Mode, WebpSettings}, source
+	encoder::encode_rgba, settings::{EncodeJob, Mode, OutputFormat, WebpSettings}, source::{self, Conversion}
 };
 
 /// Above this many pixels a preview is refused rather than attempted.
@@ -39,6 +39,9 @@ pub struct Preview {
 	pub width: u32,
 	/// Height after any resize.
 	pub height: u32,
+	/// [`Conversion::saving_percent`] for this preview, so the window shows the core's
+	/// figure rather than recomputing it. `null` for a zero-byte source.
+	pub saving_percent: Option<f64>,
 }
 
 /// Encode `input` with `settings` and return it beside a faithful copy of the original.
@@ -67,9 +70,16 @@ pub fn preview(settings: &EncodeJob, input: &Path) -> Result<Preview, String> {
 	let original_settings = EncodeJob { resize: settings.resize, webp: WebpSettings { mode: Mode::Lossless, quality: 100, ..Default::default() }, ..Default::default() };
 	let original = encode_rgba(&original_settings, &image.as_rgba()).map_err(|error| error.to_string())?;
 
-	let (width, height) = dimensions(&encoded).unwrap_or((image.width, image.height));
+	let (width, height) = match settings.format {
+		OutputFormat::Webp => dimensions(&encoded),
+		OutputFormat::Avif => skidbladnir_encode::avif::dimensions(&encoded),
+	}
+	.unwrap_or((image.width, image.height));
 
-	Ok(Preview { original: data_url(&original), encoded: data_url(&encoded), source_bytes, encoded_bytes: encoded.len() as u64, width, height })
+	// The original side is always lossless WebP; the encoded side is whatever format the
+	// job writes, and its `data:` URL has to say so or the webview will not decode it.
+	let saving_percent = Conversion { source_bytes, output_bytes: encoded.len() as u64, width, height }.saving_percent();
+	Ok(Preview { original: data_url(&original, OutputFormat::Webp), encoded: data_url(&encoded, settings.format), source_bytes, encoded_bytes: encoded.len() as u64, width, height, saving_percent })
 }
 
 /// Whether an image is too large to hold two base64 copies of in the webview, and the
@@ -83,9 +93,9 @@ fn too_large_to_preview(width: u32, height: u32) -> Option<String> {
 	(pixels > MAX_PREVIEW_PIXELS).then(|| format!("{width}x{height} is too large to preview ({} megapixels; the limit is {}). Convert it and compare the files instead.", pixels / 1_000_000, MAX_PREVIEW_PIXELS / 1_000_000))
 }
 
-/// Wrap WebP bytes as a `data:` URL the webview can put in an `<img src>`.
-fn data_url(webp: &[u8]) -> String {
-	format!("data:image/webp;base64,{}", STANDARD.encode(webp))
+/// Wrap encoded bytes as a `data:` URL the webview can put in an `<img src>`.
+fn data_url(bytes: &[u8], format: OutputFormat) -> String {
+	format!("data:{};base64,{}", format.mime_type(), STANDARD.encode(bytes))
 }
 
 /// Read the dimensions back out of an encoded WebP.
@@ -104,7 +114,7 @@ mod tests {
 	use std::{fs, path::PathBuf};
 
 	use base64::Engine as _;
-	use skidbladnir_encode::settings::{EncodeJob, Resize, WebpSettings};
+	use skidbladnir_encode::settings::{AvifSettings, EncodeJob, OutputFormat, Resize, WebpSettings};
 
 	use super::preview;
 
@@ -150,6 +160,19 @@ mod tests {
 
 		let after: Vec<_> = fs::read_dir(&scratch.0).expect("list").filter_map(Result::ok).map(|e| e.file_name()).collect();
 		assert_eq!(before, after, "a preview must not write anything to disk");
+	}
+
+	/// An AVIF preview is labelled as AVIF, or the webview cannot decode it; the original
+	/// side stays lossless WebP.
+	#[test]
+	fn an_avif_preview_says_it_is_avif() {
+		let scratch = Scratch::new("avif");
+		let input = scratch.join_png();
+		let job = EncodeJob { format: OutputFormat::Avif, avif: AvifSettings { speed: 10, ..Default::default() }, ..Default::default() };
+		let result = preview(&job, &input).expect("preview");
+		assert!(result.encoded.starts_with("data:image/avif;base64,"), "{}", &result.encoded[..40]);
+		assert!(result.original.starts_with("data:image/webp;base64,"));
+		assert!(result.width > 0 && result.height > 0);
 	}
 
 	/// A resize must apply to both sides, or the comparison is a big image next to a small

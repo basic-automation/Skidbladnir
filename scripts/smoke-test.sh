@@ -33,21 +33,42 @@ if [ ! -x "$HARNESS" ]; then
 	exit 1
 fi
 
+# The platform differences, all in one place. On Windows (Git Bash) the native driver is
+# msedgedriver, Python is `python`, the binary has an .exe suffix, the embedded frontend
+# is served from http://tauri.localhost rather than tauri://localhost, and the app needs
+# Windows paths — it cannot open the POSIX /tmp paths Git Bash hands out.
+case "$(uname -s)" in
+	MINGW* | MSYS* | CYGWIN*) ON_WINDOWS=1 ;;
+	*) ON_WINDOWS=0 ;;
+esac
+if command -v python3 >/dev/null && python3 -c '' 2>/dev/null; then PY=python3; else PY=python; fi
+if [ "$ON_WINDOWS" = 1 ]; then
+	NATIVE_DRIVER=msedgedriver EXE=.exe BUNDLED_ORIGIN=http://tauri.localhost
+else
+	NATIVE_DRIVER=WebKitWebDriver EXE="" BUNDLED_ORIGIN=tauri://localhost
+fi
+# A path as the app should receive it: forward-slashed Windows form (C:/...) on Windows,
+# which also needs no escaping inside the JavaScript strings below.
+app_path() {
+	if [ "$ON_WINDOWS" = 1 ]; then cygpath -m "$1"; else printf '%s' "$1"; fi
+}
+
 # Without these the window cannot be driven at all. Say so and skip, rather than
 # reporting a pass that checked nothing.
-for tool in tauri-driver WebKitWebDriver curl python3; do
+for tool in tauri-driver "$NATIVE_DRIVER" curl "$PY"; do
 	if ! command -v "$tool" >/dev/null; then
 		echo "SKIP: $tool is not installed, so the window is UNVERIFIED by this run." >&2
 		echo "      tauri-driver: cargo install tauri-driver" >&2
 		echo "      WebKitWebDriver: webkit2gtk-driver (Debian/Ubuntu) or webkitgtk-6.0 (Arch)" >&2
+		echo "      msedgedriver: msedgedriver-tool, which matches the installed WebView2" >&2
 		exit 0
 	fi
 done
 
 if [ -z "$APP" ]; then
 	# Honour the shared CARGO_TARGET_DIR rather than assuming ./target.
-	target=$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
-	APP="$target/release/skidbladnir"
+	target=$(cargo metadata --format-version 1 --no-deps | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
+	APP="$target/release/skidbladnir$EXE"
 fi
 
 if [ ! -x "$APP" ]; then
@@ -81,7 +102,7 @@ check() {
 
 # The window is serving the EMBEDDED frontend, not a dev server. This is the check that
 # would have caught the custom-protocol bug.
-check "loads from the bundled frontend" 'return location.href' 'tauri://localhost'
+check "loads from the bundled frontend" 'return location.href' "$BUNDLED_ORIGIN"
 check "renders the app" 'return document.querySelector("h1")?.textContent?.trim()' 'Skidbladnir'
 check "IPC returns the linked encoder version" \
 	'const I=window.__TAURI_INTERNALS__; return await I.invoke("encoder_version")' 'libwebp encoder'
@@ -96,7 +117,7 @@ check "every focusable control has a name" \
 
 # A real conversion, end to end, through the running app: a genuine PNG in, a genuine
 # WebP out, checked on disk. Anything less is a check that cannot fail.
-python3 - "$scratch/smoke.png" <<'PNG'
+"$PY" - "$scratch/smoke.png" <<'PNG'
 import struct, sys, zlib
 
 width = height = 48
@@ -120,10 +141,12 @@ open(sys.argv[1], 'wb').write(png)
 PNG
 
 mkdir -p "$scratch/out"
+in_png=$(app_path "$scratch/smoke.png")
+out_dir=$(app_path "$scratch/out")
 check "converts an image end to end" \
 	"const I=window.__TAURI_INTERNALS__;
 	 const s=await I.invoke('default_settings');
-	 const r=await I.invoke('convert_image', { settings: s, input: '$scratch/smoke.png', outputDirectory: '$scratch/out' });
+	 const r=await I.invoke('convert_image', { settings: s, input: '$in_png', outputDirectory: '$out_dir' });
 	 return r.width + 'x' + r.height + ' ' + (r.outputBytes > 0) + ' ' + typeof r.savingPercent" '48x48 true number'
 
 if [ -s "$scratch/out/smoke.webp" ]; then
@@ -137,8 +160,40 @@ fi
 check "refuses to overwrite the source" \
 	"const I=window.__TAURI_INTERNALS__;
 	 const s=await I.invoke('default_settings');
-	 try { await I.invoke('convert_image', { settings: s, input: '$scratch/out/smoke.webp', outputDirectory: '$scratch/out' }); return 'NOT REFUSED'; }
+	 try { await I.invoke('convert_image', { settings: s, input: '$out_dir/smoke.webp', outputDirectory: '$out_dir' }); return 'NOT REFUSED'; }
 	 catch (e) { return String(e); }" 'refusing to overwrite the source'
+
+# AVIF: the format switch, a real conversion checked on disk, and whether this platform's
+# webview can display the AVIF preview at all (WebKitGTK and WebView2 each decide that).
+check "switches to AVIF" \
+	'[...document.querySelectorAll("[aria-label=\"Output format\"] [role=radio]")][1].click();
+	 await new Promise(r => setTimeout(r, 300));
+	 return String(document.querySelectorAll("[role=slider]").length) + " " + String(!!document.querySelector("[aria-label=\"Encoding mode\"]"))' '3 false'
+check "converts an image to AVIF end to end" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const s=await I.invoke('default_settings'); s.format='avif'; s.avif.speed=10;
+	 const r=await I.invoke('convert_image', { settings: s, input: '$in_png', outputDirectory: '$out_dir' });
+	 return r.outputPath.split(/[\\\\/]/).pop() + ' ' + r.width + 'x' + r.height" 'smoke.avif 48x48'
+if [ "$(head -c 12 "$scratch/out/smoke.avif" 2>/dev/null | tail -c 8)" = "ftypavif" ]; then
+	printf 'ok   %s\n' "wrote a real AVIF to disk ($(wc -c < "$scratch/out/smoke.avif") bytes)"
+else
+	printf 'FAIL %s\n' "no AVIF file at $scratch/out/smoke.avif"
+	failures=$((failures + 1))
+fi
+check "the AVIF preview is labelled AVIF" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const s=await I.invoke('default_settings'); s.format='avif'; s.avif.speed=10;
+	 const p=await I.invoke('preview_encode', { settings: s, input: '$in_png' });
+	 return p.encoded.slice(5,15) + ' ' + p.width + 'x' + p.height" 'image/avif 48x48'
+# Whether this webview can DISPLAY AVIF is a property of the platform's web engine, not of
+# the app — WebKitGTK is built without AVIF on some distributions — so it is reported
+# rather than failed. The window shows a notice instead of the image when it cannot.
+avif_display=$("$HARNESS" exec --script \
+	"const I=window.__TAURI_INTERNALS__;
+	 const s=await I.invoke('default_settings'); s.format='avif'; s.avif.speed=10;
+	 const p=await I.invoke('preview_encode', { settings: s, input: '$in_png' });
+	 return await new Promise(res => { const i=new Image(); i.onload=()=>res('displays AVIF (' + i.naturalWidth + 'x' + i.naturalHeight + ')'); i.onerror=()=>res('CANNOT display AVIF; the preview shows a notice instead'); i.src=p.encoded; })" 2>&1 | tail -1)
+printf 'info this webview %s\n' "$avif_display"
 
 echo
 if [ "$failures" -gt 0 ]; then

@@ -12,27 +12,38 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: An existing tag to build and attach artifacts to (e.g. v0.5.0)
-        required: true
+        description: An existing tag to build and attach artifacts to (e.g. v0.5.0). Ignored for a dry run.
+        required: false
         type: string
+      dry_run:
+        description: Build the branch this was dispatched on and keep the installers as workflow artifacts, attaching nothing to any release. How a change to this workflow is tested before a tag exists.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 jobs:
   bundle:
-    name: bundle / ${{ matrix.os }}
+    name: bundle / ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
       # One platform failing must not deny the release the artifacts the others produced.
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - { name: linux, os: ubuntu-latest, target: "" }
+          - { name: windows, os: windows-latest, target: "" }
+          # macos-latest is Apple Silicon, so its native build is aarch64 only. Intel Macs
+          # get their own .dmg, cross-built on the same runner.
+          - { name: macos-arm64, os: macos-latest, target: "" }
+          - { name: macos-x64, os: macos-latest, target: x86_64-apple-darwin }
 
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ (inputs.dry_run && github.ref) || inputs.tag || github.ref }}
 
       - name: Install the Linux system dependencies Tauri needs
         # patchelf is what bundles the AppImage. It is unavailable on the dev host, which
@@ -50,6 +61,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
 
@@ -59,9 +72,18 @@ jobs:
           npm --prefix frontend run generate
 
       - name: Bundle
-        # `cargo tauri build` enables the custom-protocol feature, which is what makes the
-        # binary serve the embedded frontend rather than the dev server.
-        run: cargo install tauri-cli --locked --version '^2' && cargo tauri build
+        # `tauri build` enables the custom-protocol feature, which is what makes the binary
+        # serve the embedded frontend rather than the dev server. The CLI is the prebuilt
+        # `@tauri-apps/cli` from the frontend's lockfile, as in ci.yml, rather than
+        # `cargo install tauri-cli`, which compiled it from source on every platform.
+        shell: bash
+        run: |
+          cd src-tauri
+          if [ -n "${{ matrix.target }}" ]; then
+            ../frontend/node_modules/.bin/tauri build --target "${{ matrix.target }}"
+          else
+            ../frontend/node_modules/.bin/tauri build
+          fi
 
       - name: Collect the artifacts
         shell: bash
@@ -69,25 +91,33 @@ jobs:
           mkdir -p dist-artifacts
           # `find` rather than a fixed list: the bundle layout differs per platform and a
           # missing glob must not silently produce an empty upload.
-          find target/release/bundle -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.msi' -o -name '*-setup.exe' \) -exec cp {} dist-artifacts/ \;
+          # target/<triple>/release/bundle for a cross build, target/release/bundle otherwise.
+          find target -path '*/release/bundle/*' -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.msi' -o -name '*-setup.exe' \) -exec cp {} dist-artifacts/ \;
           ls -la dist-artifacts
           if [ -z "$(ls -A dist-artifacts)" ]; then
-            echo "::error::No installers were produced on ${{ matrix.os }}"
+            echo "::error::No installers were produced for ${{ matrix.name }}"
             exit 1
           fi
 
       - uses: actions/upload-artifact@v4
         with:
-          name: skidbladnir-${{ matrix.os }}
+          name: skidbladnir-${{ matrix.name }}
           path: dist-artifacts/*
           if-no-files-found: error
 
       - name: Attach to the release
+        if: ${{ !inputs.dry_run }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
+          # A manual run that is not a dry run must name its tag; otherwise TAG would fall
+          # back to the branch name and create a stray draft release named after it.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -z "${{ inputs.tag }}" ]; then
+            echo "::error::a manual run needs a tag, or dry_run"
+            exit 1
+          fi
           # The workflow can be reached two ways: a tag pushed on its own, or a tag created
           # alongside a release. In the first case there is no release to upload to yet, and
           # `gh release upload` would simply fail — so create a draft prerelease to hold the
