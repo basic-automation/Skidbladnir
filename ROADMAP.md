@@ -564,6 +564,13 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
 - [ ] Read AVIF **input** (`SourceFormat` sniffing for `ftypavif`, and a decoder). No
       decoder is in the tree; `ravif` only encodes. Options: `dav1d` via bindings (a C
       library again) or leave AVIF output-only and say so.
+- [ ] **Show the AVIF preview on every platform.** Found by CI, not by reading: Ubuntu
+      24.04's WebKitGTK cannot decode AVIF (the smoke test's image load fails there),
+      while Arch's can, and the AppImage bundles the Ubuntu build. The window now says so
+      instead of showing a broken image, but the comparison is lost. The fix is the same
+      AV1 decoder the AVIF-input item needs: decode the preview in Rust and send it to the
+      webview as lossless WebP, as the original side already is. The two items should be
+      solved together.
 
       Do **not** start at step 2. Step 1 is the one that can silently change WebP output,
       and it is the one the existing parity tests can prove innocent.

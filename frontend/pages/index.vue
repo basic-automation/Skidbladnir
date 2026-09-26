@@ -357,6 +357,10 @@ const previewError = ref('')
 // Set when the settings or the chosen file change after a preview, so an out-of-date
 // comparison is labelled as such rather than passed off as current.
 const previewStale = ref(false)
+// Not every webview can decode AVIF: WebKitGTK is built without it on some Linux
+// distributions (Ubuntu 24.04's is one, and the AppImage bundles that build). The file
+// itself is fine; only the on-screen comparison is lost, and the window says so.
+const encodedUndisplayable = ref(false)
 const previewItems = computed(() => inputPaths.value.map(path => ({ label: basename(path), value: path })))
 
 watch(inputPaths, (paths) => {
@@ -374,6 +378,7 @@ async function runPreview() {
 	previewError.value = ''
 	try {
 		const format = settings.value.format
+		encodedUndisplayable.value = false
 		preview.value = await invokeCommand<Preview>('preview_encode', { settings: settings.value, input: previewPath.value })
 		previewFormat.value = format
 		previewStale.value = false
@@ -684,7 +689,12 @@ function basename(path: string): string {
 									</figcaption>
 								</figure>
 								<figure class="text-left">
-									<img :src="preview.encoded" :alt="`The image encoded as ${previewFormat.toUpperCase()}`" class="checkerboard w-full rounded border border-palenight-selection object-contain">
+									<img v-if="!encodedUndisplayable" :src="preview.encoded" :alt="`The image encoded as ${previewFormat.toUpperCase()}`" class="checkerboard w-full rounded border border-palenight-selection object-contain" @error="encodedUndisplayable = true">
+									<p v-else class="rounded border border-dotted border-palenight-selection p-4 text-xs text-palenight-yellow" role="note">
+										This system's web view cannot display {{ previewFormat.toUpperCase() }}, so the encoded
+										image cannot be shown here. The file Skidbladnir writes is unaffected, and the size and
+										saving below are exact.
+									</p>
 									<figcaption class="mt-1 text-xs text-palenight-fg">
 										{{ previewFormat.toUpperCase() }} · {{ formatBytes(preview.encodedBytes) }} · {{ preview.width }}×{{ preview.height }}
 										<template v-if="preview.savingPercent !== null">

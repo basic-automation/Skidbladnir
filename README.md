@@ -179,6 +179,10 @@ Known gaps:
   cancelled mid-file: the encoder reports no progress, so Cancel takes effect when the
   current file finishes (which is then discarded, not written). AVIF input is not read
   yet, and there is no chroma subsampling control — AVIF is always written 4:4:4.
+- The AVIF **preview** needs a web engine that can display AVIF. On Linux, WebKitGTK is
+  built without it on some distributions — Ubuntu 24.04's, which is also what the
+  AppImage bundles — and there the window shows a notice in place of the encoded image.
+  The AVIF files themselves are unaffected.
 - JPEG XL is being watched until browsers enable it without a flag. The long-promised
   JPEG 2000 was dropped as a goal; it has no momentum outside medical and archival
   imaging.

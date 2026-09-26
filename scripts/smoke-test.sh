@@ -180,11 +180,20 @@ else
 	printf 'FAIL %s\n' "no AVIF file at $scratch/out/smoke.avif"
 	failures=$((failures + 1))
 fi
-check "the webview displays an AVIF preview" \
+check "the AVIF preview is labelled AVIF" \
 	"const I=window.__TAURI_INTERNALS__;
 	 const s=await I.invoke('default_settings'); s.format='avif'; s.avif.speed=10;
 	 const p=await I.invoke('preview_encode', { settings: s, input: '$in_png' });
-	 return await new Promise(res => { const i=new Image(); i.onload=()=>res(p.encoded.slice(5,15)+' '+i.naturalWidth+'x'+i.naturalHeight); i.onerror=()=>res('cannot display'); i.src=p.encoded; })" 'image/avif 48x48'
+	 return p.encoded.slice(5,15) + ' ' + p.width + 'x' + p.height" 'image/avif 48x48'
+# Whether this webview can DISPLAY AVIF is a property of the platform's web engine, not of
+# the app — WebKitGTK is built without AVIF on some distributions — so it is reported
+# rather than failed. The window shows a notice instead of the image when it cannot.
+avif_display=$("$HARNESS" exec --script \
+	"const I=window.__TAURI_INTERNALS__;
+	 const s=await I.invoke('default_settings'); s.format='avif'; s.avif.speed=10;
+	 const p=await I.invoke('preview_encode', { settings: s, input: '$in_png' });
+	 return await new Promise(res => { const i=new Image(); i.onload=()=>res('displays AVIF (' + i.naturalWidth + 'x' + i.naturalHeight + ')'); i.onerror=()=>res('CANNOT display AVIF; the preview shows a notice instead'); i.src=p.encoded; })" 2>&1 | tail -1)
+printf 'info this webview %s\n' "$avif_display"
 
 echo
 if [ "$failures" -gt 0 ]; then
