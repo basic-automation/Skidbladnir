@@ -189,17 +189,23 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Install the Tauri CLI and WebDriver shim
-        run: cargo install tauri-cli --locked --version '^2' && cargo install tauri-driver --locked
+      - name: Install the WebDriver shim
+        run: cargo install tauri-driver --locked
 
       - name: Build the app
-        # `cargo tauri build` rather than `cargo build --release`: only the former enables
-        # the custom-protocol feature that makes the binary serve the embedded frontend.
-        # A binary built the other way opens showing "Connection refused" and every check
+        # `tauri build` rather than `cargo build --release`: only the former enables the
+        # custom-protocol feature that makes the binary serve the embedded frontend. A
+        # binary built the other way opens showing "Connection refused" and every check
         # below would fail for the wrong reason.
+        #
+        # The CLI is the prebuilt `@tauri-apps/cli` from the frontend's lockfile, not
+        # `cargo install tauri-cli`: compiling the CLI from source took about ten minutes
+        # of this job on a cold cache, and the npm package is the same CLI as a download.
+        # It is run from src-tauri/ because the CLI finds the app from its working
+        # directory.
         run: |
           npm --prefix frontend ci
-          cd src-tauri && cargo tauri build --no-bundle
+          cd src-tauri && ../frontend/node_modules/.bin/tauri build --no-bundle
 
       - name: Smoke test the window
         # xvfb-run because there is no display on the runner. The harness forces the X11
