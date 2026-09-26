@@ -218,6 +218,18 @@ jobs:
       - name: Accessibility audit
         run: xvfb-run -a scripts/a11y-audit.sh
 
+      - name: Capture the README screenshots
+        # The dev host cannot take these (WebKitWebDriver's screenshot hangs under
+        # XWayland), so CI does, on a virtual screen tall enough for every panel. They are
+        # uploaded for a person to review and commit, never committed by CI itself.
+        run: xvfb-run -a -s "-screen 0 1200x2400x24" scripts/screenshot.sh --app target/release/skidbladnir --out screenshots
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screenshots/*.png
+          if-no-files-found: error
+
   # The same smoke test, on Windows. This is the only place the Windows build is
   # LAUNCHED rather than just compiled: the dev host cannot run it, and nobody had
   # opened a Windows build before this job existed. The Electron app is Windows-only,
