@@ -144,7 +144,8 @@ What the new app can already do:
   dotted option groups, two-column controls and the circular action button — restyled
   in the Palenight palette.
 - Read PNG, JPEG, TIFF and WebP input, identifying the format by its contents rather
-  than by its file extension.
+  than by its file extension. That includes **CMYK JPEGs** as Photoshop writes them,
+  which `cwebp` itself refuses to read.
 - Refuse to overwrite your source image, and stage every write through a temporary
   file so a failed conversion cannot damage a file that was already there.
 - Report the before and after sizes, and the dimensions actually produced.

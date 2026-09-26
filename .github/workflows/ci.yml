@@ -158,7 +158,10 @@ jobs:
         # On Linux and macOS SKIDBLADNIR_REQUIRE_PARITY is set by the step above, so a
         # missing or mismatched reference FAILS rather than skipping. On Windows it is
         # unset and the result is reported only.
-        run: cargo test --package skidbladnir-encode --test parity -- --nocapture
+        #
+        # cmyk_jpeg rides along because it also needs the reference: it checks that cwebp
+        # still REFUSES CMYK JPEG, the one input Skidbladnir converts and cwebp does not.
+        run: cargo test --package skidbladnir-encode --test parity --test cmyk_jpeg -- --nocapture
 
   # Drives the real window over WebDriver. Separate from the compile matrix because it
   # needs a display, a WebKit driver and a full release build, and because a flaky display

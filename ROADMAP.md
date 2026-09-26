@@ -232,9 +232,21 @@ The Electron app shells out to `cwebp.exe`. The Rust port should not.
       16-bit RGBA, 16-bit RGB, 8-bit grayscale and 8-bit grayscale+alpha so it cannot drift
       back. 8-bit palette was verified identical by hand (the `image` crate cannot write
       one, so it is not in the test).
-- [ ] CMYK JPEG input is still **untested** against libjpeg as `cwebp` drives it. The same
-      class of bug as the 16-bit PNG one above, in a decoder path nothing has exercised —
-      it needs a real CMYK JPEG fixture, which the `image` crate cannot write.
+- [x] CMYK JPEG input. **Tested, and it is not a parity question after all: `cwebp`
+      refuses CMYK JPEG outright.** It asks libjpeg for `JCS_RGB`, which libjpeg cannot
+      produce from four channels, so `cwebp` 1.6.0 exits with "libjpeg error: Unsupported
+      color conversion request". There is no reference output to match. What
+      `tests/cmyk_jpeg.rs` pins instead, against a 439-byte Adobe/YCCK fixture made with
+      `magick` (provenance and SHA-256 in the test):
+      - our decoder produces the **right colours**, not their inverse — within 3 levels of
+        ImageMagick's own CMYK→sRGB conversion at both ends and the middle of a ramp;
+      - the file converts end to end;
+      - the reference `cwebp` **still refuses** it — after first proving that `cwebp` reads
+        RGB JPEG at all, so a build without libjpeg cannot pass it vacuously. If a future
+        libwebp starts converting CMYK, this fails, and agreement becomes a parity test.
+      Runs in CI's enforced parity step alongside `parity.rs`.
+- [ ] CMYK JPEG **without** an Adobe marker (plain, non-inverted CMYK) is untested. Rarer
+      than Photoshop's inverted form, and nothing on this host writes one on request.
 
 ## Phase 3 — Frontend parity (Nuxt + Tailwind)
 
