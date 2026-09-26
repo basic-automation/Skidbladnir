@@ -535,6 +535,13 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
 
       Do **not** start at step 2. Step 1 is the one that can silently change WebP output,
       and it is the one the existing parity tests can prove innocent.
+- [ ] **Re-check the AVIF encoder choice before slice 2.** `libavif-sys` — the binding
+      chosen above — was last published in July 2024 as `0.17.0+libavif.1.0.4`, while
+      upstream libavif has moved on to **1.4.2** (26 May 2026). Starting a new format on a
+      two-year-old vendored encoder is the wrong baseline. Compare: a maintained binding
+      at a current libavif, linking a system libavif where one exists, or `ravif` after
+      all. Decide before writing the encode path.
+      <https://crates.io/crates/libavif-sys> · <https://github.com/AOMediaCodec/libavif/releases>
 - [ ] Watch **Tauri 3**, do not adopt it. `3.0.0-alpha` releases began appearing in
       September 2026, bringing a CEF runtime option, plugin-API changes
       (`js_init_script` → `initialization_script`) and removed deprecated APIs. Adopting an
@@ -544,7 +551,7 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
 - [x] Confirm the encoder is current. **No libwebp upgrade is pending:** 1.6.0
       (9 July 2025) is still the newest release, and it is exactly what `libwebp-sys`
       vendors and what the parity test compares against, so the parity claim is against
-      current upstream. Re-check each run.
+      current upstream. Re-check each run. Re-checked 2026-09-25: still 1.6.0.
       <https://github.com/webmproject/libwebp/tags>
 - [x] Strike the JPEG 2000 claim from the README — done; the Status section now lists
       WebP as the only output format rather than promising JPEG 2000.
