@@ -25,7 +25,7 @@ repository = "https://github.com/basic-automation/Skidbladnir"
 # none of the advanced controls, which is why libwebp-sys does the encoding. Default
 # features are off so the binary carries the four formats the app accepts and no more.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tiff"] }
-base64 = "0.22"
+base64 = "0.23"
 # The AVIF encoder (ROADMAP.md Phase 7). Rust over rav1e: no C library on any platform.
 # Default features on: `asm` is rav1e's hand-written SIMD, assembled with `nasm`, which is
 # therefore a build requirement (README "Build from source"; installed on every CI
