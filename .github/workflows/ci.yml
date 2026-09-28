@@ -73,7 +73,8 @@ jobs:
         # Needed from Phase 1 onward, when src-tauri/ joins the workspace: Tauri 2 links
         # against webkit2gtk-4.1, and patchelf is what bundles the AppImage. The image
         # libraries are for building the reference cwebp below, which needs a PNG reader.
-        # libavif-bin is libavif's `avifdec`, the reference decoder for the AVIF gate.
+        # libavif-bin is libavif's `avifdec` and `avifenc`, for the AVIF gates; libgif-dev is for
+        # building the reference gif2webp.
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
@@ -144,7 +145,8 @@ jobs:
           # so the Homebrew prefix is added without overriding the makefile's own
           # variables — passing EXTRA_FLAGS on the command line would replace them.
           if [ "$RUNNER_OS" = "macOS" ]; then
-            # libavif provides `avifdec` for the AVIF gate; giflib is for the reference gif2webp.
+            # libavif provides `avifdec` and `avifenc` for the AVIF gates; giflib is for the
+            # reference gif2webp.
             brew install jpeg-turbo libpng libtiff giflib libavif
             prefix=$(brew --prefix)
             export CPATH="$prefix/include${CPATH:+:$CPATH}"
@@ -174,8 +176,10 @@ jobs:
         # still REFUSES CMYK JPEG, the one input Skidbladnir converts and cwebp does not.
         # avif_reference is the AVIF gate: libavif's avifdec decodes what we write.
         # animation is the animated-WebP gate, byte for byte against img2webp.
-        # gif is the GIF-input gate, byte for byte against gif2webp.
-        run: cargo test --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_reference --test animation --test gif -- --nocapture
+        # gif is the GIF-input gate, byte for byte against gif2webp. avif_input is the wide
+        # AVIF-input gate: avifenc writes 17 colour encodings and our decoder must agree
+        # with avifdec's reading of them.
+        run: cargo test --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_reference --test animation --test gif --test avif_input -- --nocapture
 
   # Drives the real window over WebDriver. Separate from the compile matrix because it
   # needs a display, a WebKit driver and a full release build, and because a flaky display
