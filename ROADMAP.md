@@ -644,6 +644,21 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
         `dav1d_dr_intra_derivative`). The Tauri library's `staticlib`/`cdylib` crate types
         existed only for mobile targets and were dropped; it is `rlib` only now.
       Animated AVIF (`avis`) is sniffed but only its first frame would decode — not tested.
+- [x] **Widen the AVIF-input gate** beyond two files. `tests/avif_input.rs` has `avifenc`
+      write 17 encodings — 8/10/12-bit; 4:4:4, 4:2:2, 4:2:0, monochrome; full and limited
+      range; BT.601/709/2020 and identity; straight and premultiplied alpha; lossless — and
+      `decode_avif` must agree with `avifdec` (mean ≤ 2, worst ≤ 20) **and never land
+      further from the original than libavif does**. All 17 pass. Mutation-tested against
+      `decode_avif` itself: an off-by-12 narrowing fails 8 of 17. What it established:
+      avif-decode upsamples chroma nearest-neighbour (bilinear decoders disagree on siting
+      by up to 50 levels at a hard edge); at saturated limited-range pixels libavif is the
+      one further from the original (pure blue: libavif 237, ours 250); and **libavif's and
+      libheif's greyscale output leaves limited-range monochrome unexpanded** (black comes
+      out as 16) while ours expands it, so that case is held to libavif's raw Y plane.
+      Enforced in CI's parity step.
+- [ ] AVIF input ignores the `clap`/`irot`/`imir` (crop, rotate, mirror) properties and
+      refuses grid (tiled) images — `avif-parse` exposes neither. Camera AVIFs can use both;
+      honouring the transforms means reading the item properties ourselves.
 - [x] **Show the AVIF preview on every platform** (done 2026-09-27). The encoded AVIF is
       decoded in Rust and sent to the webview as lossless WebP, so no web engine has to
       decode AVIF; the smoke test's "displays the AVIF preview" is a hard check again. The
@@ -827,12 +842,10 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
 
 ## Cross-cutting
 
-- [ ] The saving percentage is computed **twice** — `Conversion::saving_percent()` in Rust
-      and `savingOf()` in `pages/index.vue`. Exactly the duplication this project avoids
-      for defaults and validation, and the two can disagree at the rounding edges. Fix by
-      serializing the computed value on `Conversion` and deleting the TypeScript copy;
-      note that adds an `f64` field, so `Conversion` loses its `Eq` derive. Left for the
-      next run rather than churned in during a release.
+- [x] The saving percentage is computed **once**, in Rust. `savingOf()` is gone from
+      `pages/index.vue`; the conversion report and the preview both carry the core's
+      `saving_percent`, and the window only formats it (commit 235dbc0 — this box was left
+      unticked when it landed).
 
 - [x] Every new Rust dependency goes in `[workspace.dependencies]`, consumed with
       `{ workspace = true }`. Holds for all of them: `base64`, `image`, `libwebp-sys`,
