@@ -260,8 +260,15 @@ The Electron app shells out to `cwebp.exe`. The Rust port should not.
         RGB JPEG at all, so a build without libjpeg cannot pass it vacuously. If a future
         libwebp starts converting CMYK, this fails, and agreement becomes a parity test.
       Runs in CI's enforced parity step alongside `parity.rs`.
-- [ ] CMYK JPEG **without** an Adobe marker (plain, non-inverted CMYK) is untested. Rarer
-      than Photoshop's inverted form, and nothing on this host writes one on request.
+- [x] CMYK JPEG **without** an Adobe marker. Tested with a hand-made fixture
+      (`tests/fixtures/cmyk-plain.jpg`: written by the `jpeg-encoder` crate, APP14 cut out).
+      **Finding:** strictly by libjpeg's convention such a file is not inverted, but our
+      decoder reads it as Photoshop-inverted — and so do `magick` 7.1.2 and Chrome's Skia,
+      which inverts CMYK with no marker check
+      (<https://github.com/google/skia/blob/main/src/codec/SkSwizzler.cpp>). Matching what
+      the user's browser shows is the right call, so the test pins our decode to `magick`'s
+      reading of the file, and fails if the decoder ever starts honouring the missing
+      marker. The reference `cwebp` refuses this file too, now checked alongside the Adobe one.
 
 ## Phase 3 — Frontend parity (Nuxt + Tailwind)
 
