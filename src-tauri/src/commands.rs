@@ -30,7 +30,8 @@ use crate::{
 pub fn encoder_version() -> String {
 	let (emajor, eminor, erevision) = linked_encoder_version();
 	let (dmajor, dminor, drevision) = linked_decoder_version();
-	format!("Skidbladnir {} · libwebp encoder {emajor}.{eminor}.{erevision} · decoder {dmajor}.{dminor}.{drevision}", env!("CARGO_PKG_VERSION"))
+	let (jmajor, jminor, jpatch) = skidbladnir_encode::jxl::linked_version();
+	format!("Skidbladnir {} · libwebp encoder {emajor}.{eminor}.{erevision} · decoder {dmajor}.{dminor}.{drevision} · libjxl {jmajor}.{jminor}.{jpatch}", env!("CARGO_PKG_VERSION"))
 }
 
 /// The settings a freshly opened window starts from.

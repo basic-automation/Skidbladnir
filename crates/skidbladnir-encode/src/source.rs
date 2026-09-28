@@ -41,6 +41,8 @@ pub enum SourceFormat {
 	Webp,
 	/// AVIF, decoded by `avif-decode` (rav1d). Still images only.
 	Avif,
+	/// JPEG XL, as a bare codestream or in its ISO-BMFF container, decoded by `jxl-oxide`.
+	Jxl,
 }
 
 impl SourceFormat {
@@ -56,6 +58,7 @@ impl SourceFormat {
 			[b'I', b'I', 42, 0, ..] | [b'M', b'M', 0, 42, ..] => Some(Self::Tiff),
 			[b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => Some(Self::Webp),
 			[_, _, _, _, b'f', b't', b'y', b'p', ..] if is_avif_ftyp(bytes) => Some(Self::Avif),
+			[0xff, 0x0a, ..] | [0, 0, 0, 0x0c, b'J', b'X', b'L', b' ', 0x0d, 0x0a, 0x87, 0x0a, ..] => Some(Self::Jxl),
 			_ => None,
 		}
 	}
@@ -69,6 +72,7 @@ impl SourceFormat {
 			Self::Tiff => "TIFF",
 			Self::Webp => "WebP",
 			Self::Avif => "AVIF",
+			Self::Jxl => "JPEG XL",
 		}
 	}
 }
@@ -117,7 +121,7 @@ pub enum SourceError {
 		source: io::Error,
 	},
 	/// The leading bytes match none of the accepted formats.
-	#[error("`{path}` is not a PNG, JPEG, TIFF or WebP image")]
+	#[error("`{path}` is not a PNG, JPEG, TIFF, WebP, AVIF or JPEG XL image")]
 	Unsupported {
 		/// The path that failed.
 		path: PathBuf,
@@ -169,6 +173,7 @@ pub fn load(path: &Path) -> Result<SourceImage, SourceError> {
 			decode_webp(&bytes).ok_or_else(|| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: "libwebp rejected the file".to_owned() })?
 		}
 		SourceFormat::Avif => decode_avif(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?,
+		SourceFormat::Jxl => crate::jxl::decode(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?,
 		SourceFormat::Png | SourceFormat::Jpeg | SourceFormat::Tiff => {
 			let decoded = image::load_from_memory(&bytes).map_err(|error| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: error.to_string() })?;
 			let rgba = to_rgba8(decoded);
@@ -552,8 +557,18 @@ pub fn encode_file_with_progress(settings: &EncodeJob, input: &Path, output: &Pa
 	}
 
 	let source_bytes = fs::metadata(input).map(|meta| meta.len()).map_err(|source| SourceError::Read { path: input.to_path_buf(), source })?;
-	let image = load(input)?;
-	let encoded = encode_rgba_with_progress(settings, &image.as_rgba(), on_progress)?;
+	let transcoded = if settings.format == OutputFormat::Jxl && settings.jxl.lossless_jpeg {
+		let bytes = fs::read(input).map_err(|source| SourceError::Read { path: input.to_path_buf(), source })?;
+		transcode_jpeg(settings, &bytes, on_progress)?
+	} else {
+		None
+	};
+	let (encoded, fallback_dimensions) = if let Some(encoded) = transcoded {
+		(encoded, (0, 0))
+	} else {
+		let image = load(input)?;
+		(encode_rgba_with_progress(settings, &image.as_rgba(), on_progress)?, (image.width, image.height))
+	};
 
 	// A temporary name in the destination directory, so the rename stays on one filesystem
 	// and is therefore atomic.
@@ -567,9 +582,32 @@ pub fn encode_file_with_progress(settings: &EncodeJob, input: &Path, output: &Pa
 	let (width, height) = match settings.format {
 		OutputFormat::Webp => encoded_dimensions(&encoded),
 		OutputFormat::Avif => crate::avif::dimensions(&encoded),
+		OutputFormat::Jxl => crate::jxl::dimensions(&encoded),
 	}
-	.unwrap_or((image.width, image.height));
+	.unwrap_or(fallback_dimensions);
 	Ok(Conversion { source_bytes, output_bytes: encoded.len() as u64, width, height })
+}
+
+/// The lossless JPEG XL recompression of `bytes`, when the job asks for it and it applies:
+/// the job writes JPEG XL with [`JxlSettings::lossless_jpeg`] on, the input is a JPEG, and
+/// no resize takes effect for it (a resize needs pixels, and recompression never decodes
+/// any). `Ok(None)` means "encode the pixels instead", including when libjxl declines a
+/// particular JPEG.
+///
+/// # Errors
+///
+/// Returns [`EncodeError`] if libjxl fails outright or the encode was cancelled.
+///
+/// [`JxlSettings::lossless_jpeg`]: crate::settings::JxlSettings::lossless_jpeg
+pub fn transcode_jpeg(settings: &EncodeJob, bytes: &[u8], on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Option<Vec<u8>>, EncodeError> {
+	if settings.format != OutputFormat::Jxl || !settings.jxl.lossless_jpeg || SourceFormat::sniff(bytes) != Some(SourceFormat::Jpeg) {
+		return Ok(None);
+	}
+	let Ok((width, height)) = image::ImageReader::with_format(io::Cursor::new(bytes), image::ImageFormat::Jpeg).into_dimensions() else { return Ok(None) };
+	if !settings.resize.for_source(width, height).is_noop() {
+		return Ok(None);
+	}
+	crate::jxl::recompress_jpeg(&settings.jxl, bytes, on_progress)
 }
 
 /// Read the dimensions back out of an encoded WebP, which is the only way to learn what a
@@ -639,6 +677,8 @@ mod tests {
 		assert_eq!(SourceFormat::sniff(b"\0\0\0\x1cftypmif1\0\0\0\0mif1avifmiaf"), Some(SourceFormat::Avif), "AVIF declared as a compatible brand");
 		assert_eq!(SourceFormat::sniff(b"\0\0\0\x18ftypheic\0\0\0\0mif1heic"), None, "HEIC shares the container but is not AVIF");
 		assert_eq!(SourceFormat::sniff(b"\0\0\0\x10ftypmif1\0\0\0\0avif"), None, "a brand past the end of the ftyp box does not count");
+		assert_eq!(SourceFormat::sniff(b"\xff\x0a\x00\x00...."), Some(SourceFormat::Jxl), "a bare JPEG XL codestream");
+		assert_eq!(SourceFormat::sniff(b"\0\0\0\x0cJXL \r\n\x87\n\0\0"), Some(SourceFormat::Jxl), "a JPEG XL container");
 		assert_eq!(SourceFormat::sniff(b"GIF89a......"), None);
 		assert_eq!(SourceFormat::sniff(b"RIFF\x00\x00\x00\x00WAVEfmt "), None, "a RIFF container that is not WebP");
 		assert_eq!(SourceFormat::sniff(b"\x89PN"), None, "a truncated header must not match");
@@ -735,13 +775,39 @@ mod tests {
 		assert!(!missing.exists(), "the directory must not have been created");
 	}
 
+	/// A JPEG going to JPEG XL is recompressed, not re-encoded: the file rebuilds the
+	/// original JPEG exactly. With a resize in effect there is no JPEG left to keep, so
+	/// the pixels are encoded instead and the dimensions follow the resize.
+	#[test]
+	fn a_jpeg_to_jpeg_xl_is_recompressed_losslessly_unless_resized() {
+		let scratch = Scratch::new("jxl-jpeg");
+		let input = scratch.join("photo.jpg");
+		let rgb: Vec<u8> = (0..40 * 30).flat_map(|i: u32| [u8::try_from(i % 256).unwrap_or(0), 90, u8::try_from(i / 5 % 256).unwrap_or(0)]).collect();
+		let mut jpeg = Vec::new();
+		image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 80).encode(&rgb, 40, 30, image::ExtendedColorType::Rgb8).expect("write a JPEG");
+		fs::write(&input, &jpeg).expect("write the input");
+
+		let job = EncodeJob { format: OutputFormat::Jxl, ..Default::default() };
+		let output = scratch.join("photo.jxl");
+		let conversion = encode_file(&job, &input, &output).expect("convert");
+		assert_eq!((conversion.width, conversion.height), (40, 30));
+		let written = fs::read(&output).expect("read the output");
+		let mut rebuilt = Vec::new();
+		jxl_oxide::JxlImage::builder().read(written.as_slice()).expect("parse").reconstruct_jpeg(&mut rebuilt).expect("the file carries the JPEG");
+		assert_eq!(rebuilt, jpeg);
+
+		let resized = EncodeJob { resize: Resize { width: 20, height: 0, no_enlarge: false }, ..job };
+		let conversion = encode_file(&resized, &input, &output).expect("convert resized");
+		assert_eq!((conversion.width, conversion.height), (20, 15));
+	}
+
 	#[test]
 	fn a_non_image_is_rejected_with_a_useful_error() {
 		let scratch = Scratch::new("notimage");
 		let input = scratch.join("notes.txt");
 		fs::write(&input, b"this is not an image").expect("write the file");
 		let error = load(&input).expect_err("must refuse");
-		assert!(error.to_string().contains("not a PNG, JPEG, TIFF or WebP"), "got {error}");
+		assert!(error.to_string().contains("not a PNG, JPEG, TIFF, WebP, AVIF or JPEG XL"), "got {error}");
 	}
 
 	/// WebP input goes through libwebp itself, so a WebP -> WebP conversion does not

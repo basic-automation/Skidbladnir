@@ -24,6 +24,10 @@ on:
 permissions:
   contents: write
 
+env:
+  # Every installer carries its own static libjxl, built from source; never the runner's.
+  SKIDBLADNIR_LIBJXL: vendored
+
 jobs:
   bundle:
     name: bundle / ${{ matrix.name }}

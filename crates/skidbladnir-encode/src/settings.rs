@@ -271,6 +271,9 @@ pub enum OutputFormat {
 	/// AVIF, through `ravif` (AV1 by rav1e). There is no reference CLI whose output this
 	/// has to match, so it is checked by decoding with libavif's `avifdec` instead.
 	Avif,
+	/// JPEG XL, through libjxl, the reference encoder. Checked by decoding with libjxl's
+	/// `djxl`, as AVIF is with `avifdec`.
+	Jxl,
 }
 
 impl OutputFormat {
@@ -280,6 +283,7 @@ impl OutputFormat {
 		match self {
 			Self::Webp => "webp",
 			Self::Avif => "avif",
+			Self::Jxl => "jxl",
 		}
 	}
 
@@ -289,6 +293,7 @@ impl OutputFormat {
 		match self {
 			Self::Webp => "image/webp",
 			Self::Avif => "image/avif",
+			Self::Jxl => "image/jxl",
 		}
 	}
 }
@@ -375,6 +380,48 @@ impl AvifSettings {
 	}
 }
 
+/// Every JPEG XL control. Defaults are `cjxl`'s own: quality 90 is distance 1.0, which
+/// libjxl calls visually lossless, at effort 7, with JPEG input recompressed losslessly.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct JxlSettings {
+	/// Quality, `0..=100`, mapped to libjxl's distance by its own
+	/// `JxlEncoderDistanceFromQuality`. Ignored when [`JxlSettings::lossless`] is set.
+	pub quality: u8,
+	/// Encoder effort, `1..=10`: 1 is fastest, 10 slowest and smallest.
+	pub effort: u8,
+	/// Encode the pixels exactly, as modular lossless.
+	pub lossless: bool,
+	/// Recompress a JPEG input losslessly instead of re-encoding its pixels: about a fifth
+	/// smaller, and the original JPEG can be rebuilt from the JPEG XL bit for bit. Applies
+	/// only to JPEG input with no resize in effect; anything else is encoded from pixels.
+	pub lossless_jpeg: bool,
+	/// Encode on every core, or on one.
+	pub multi_threading: bool,
+}
+
+impl Default for JxlSettings {
+	fn default() -> Self {
+		Self { quality: 90, effort: 7, lossless: false, lossless_jpeg: true, multi_threading: true }
+	}
+}
+
+impl JxlSettings {
+	/// Check every control against the range libjxl accepts.
+	///
+	/// # Errors
+	///
+	/// Returns the first [`ValidationError`] found, checking in field order.
+	pub fn validate(&self) -> Result<(), ValidationError> {
+		for (field, value, min, max) in [("jxl.quality", self.quality, 0, 100), ("jxl.effort", self.effort, 1, 10)] {
+			if value < min || value > max {
+				return Err(ValidationError::OutOfRange { field, value: u32::from(value), min: u32::from(min), max: u32::from(max) });
+			}
+		}
+		Ok(())
+	}
+}
+
 /// A complete encode job: the output format, the shared resize, and each format's own
 /// settings.
 ///
@@ -396,6 +443,8 @@ pub struct EncodeJob {
 	/// The AVIF controls. Kept alongside the WebP ones rather than replacing them, so
 	/// trying the other format does not throw away this one's tuning.
 	pub avif: AvifSettings,
+	/// The JPEG XL controls, kept alongside the others for the same reason.
+	pub jxl: JxlSettings,
 }
 
 impl From<WebpSettings> for EncodeJob {
@@ -420,12 +469,14 @@ impl<'de> Deserialize<'de> for EncodeJob {
 			webp: Option<WebpSettings>,
 			#[serde(default)]
 			avif: AvifSettings,
+			#[serde(default)]
+			jxl: JxlSettings,
 			#[serde(flatten)]
 			flat: WebpSettings,
 		}
 
 		let wire = Wire::deserialize(deserializer)?;
-		Ok(Self { format: wire.format, resize: wire.resize, webp: wire.webp.unwrap_or(wire.flat), avif: wire.avif })
+		Ok(Self { format: wire.format, resize: wire.resize, webp: wire.webp.unwrap_or(wire.flat), avif: wire.avif, jxl: wire.jxl })
 	}
 }
 
@@ -439,6 +490,7 @@ impl EncodeJob {
 		match self.format {
 			OutputFormat::Webp => self.webp.validate(),
 			OutputFormat::Avif => self.avif.validate(),
+			OutputFormat::Jxl => self.jxl.validate(),
 		}
 	}
 }
@@ -664,7 +716,7 @@ mod tests {
 	fn the_flat_shape_from_before_the_split_still_loads() {
 		let legacy = r#"{"mode":"lossless","preset":null,"quality":92,"alphaQuality":80,"alphaFiltering":"fast","method":6,"segments":2,"partitionLimit":10,"sns":30,"passes":3,"filter":"strong","filterStrength":40,"filterSharpness":5,"target":{"kind":"size","value":5000},"sharpYuv":true,"lowMemory":true,"multiThreading":false,"resize":{"width":640,"height":0}}"#;
 		let job: EncodeJob = serde_json::from_str(legacy).expect("the legacy shape deserializes");
-		let expected = EncodeJob { format: OutputFormat::Webp, avif: AvifSettings::default(), resize: Resize { width: 640, height: 0, no_enlarge: false }, webp: WebpSettings { mode: Mode::Lossless, preset: None, quality: 92, alpha_quality: 80, alpha_filtering: Some(AlphaFiltering::Fast), method: 6, segments: 2, partition_limit: 10, sns: 30, passes: 3, filter: FilterType::Strong, filter_strength: 40, filter_sharpness: 5, target: Some(TargetMetric::Size(5000)), sharp_yuv: true, low_memory: true, multi_threading: false } };
+		let expected = EncodeJob { format: OutputFormat::Webp, avif: AvifSettings::default(), jxl: JxlSettings::default(), resize: Resize { width: 640, height: 0, no_enlarge: false }, webp: WebpSettings { mode: Mode::Lossless, preset: None, quality: 92, alpha_quality: 80, alpha_filtering: Some(AlphaFiltering::Fast), method: 6, segments: 2, partition_limit: 10, sns: 30, passes: 3, filter: FilterType::Strong, filter_strength: 40, filter_sharpness: 5, target: Some(TargetMetric::Size(5000)), sharp_yuv: true, low_memory: true, multi_threading: false } };
 		assert_eq!(job, expected);
 
 		// And it is rewritten in the current shape, which reads back identically.

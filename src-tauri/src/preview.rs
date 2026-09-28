@@ -63,7 +63,13 @@ pub fn preview(settings: &EncodeJob, input: &Path) -> Result<Preview, String> {
 		return Err(refusal);
 	}
 
-	let encoded = encode_rgba(settings, &image.as_rgba()).map_err(|error| error.to_string())?;
+	// A JPEG going to JPEG XL is previewed the way it will be converted: recompressed
+	// losslessly when that applies, so the size shown is the size that will be written.
+	let bytes = std::fs::read(input).map_err(|error| format!("could not read `{}`: {error}", input.display()))?;
+	let encoded = match source::transcode_jpeg(settings, &bytes, &mut |_| true).map_err(|error| error.to_string())? {
+		Some(encoded) => encoded,
+		None => encode_rgba(settings, &image.as_rgba()).map_err(|error| error.to_string())?,
+	};
 
 	// The original is shown at the same dimensions as the encoded side when a resize is in
 	// play, so the comparison is like for like rather than a big image next to a small one.
@@ -72,6 +78,7 @@ pub fn preview(settings: &EncodeJob, input: &Path) -> Result<Preview, String> {
 	let (width, height) = match settings.format {
 		OutputFormat::Webp => dimensions(&encoded),
 		OutputFormat::Avif => skidbladnir_encode::avif::dimensions(&encoded),
+		OutputFormat::Jxl => skidbladnir_encode::jxl::dimensions(&encoded),
 	}
 	.unwrap_or((image.width, image.height));
 
@@ -84,6 +91,11 @@ pub fn preview(settings: &EncodeJob, input: &Path) -> Result<Preview, String> {
 		OutputFormat::Webp => encoded.clone(),
 		OutputFormat::Avif => {
 			let (decoded_width, decoded_height, pixels) = source::decode_avif(&encoded).map_err(|error| format!("could not decode the AVIF preview: {error}"))?;
+			encode_rgba(&lossless(Resize::default()), &RgbaImage { width: decoded_width, height: decoded_height, pixels: &pixels }).map_err(|error| error.to_string())?
+		}
+		// The same for JPEG XL, which most web engines cannot display at all yet.
+		OutputFormat::Jxl => {
+			let (decoded_width, decoded_height, pixels) = skidbladnir_encode::jxl::decode(&encoded).map_err(|error| format!("could not decode the JPEG XL preview: {error}"))?;
 			encode_rgba(&lossless(Resize::default()), &RgbaImage { width: decoded_width, height: decoded_height, pixels: &pixels }).map_err(|error| error.to_string())?
 		}
 	};

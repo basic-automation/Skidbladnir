@@ -10,7 +10,7 @@ export type FilterType = 'auto' | 'simple' | 'strong'
 export type AlphaFiltering = 'off' | 'fast' | 'best'
 export type TargetMetric = { kind: 'size', value: number } | { kind: 'psnr', value: number } | null
 
-export type OutputFormat = 'webp' | 'avif'
+export type OutputFormat = 'webp' | 'avif' | 'jxl'
 
 /** `noEnlarge` leaves an image smaller than the target at its own size. */
 export interface Resize { width: number, height: number, noEnlarge: boolean }
@@ -22,6 +22,16 @@ export interface EncodeJob {
 	resize: Resize
 	webp: WebpSettings
 	avif: AvifSettings
+	jxl: JxlSettings
+}
+
+/** The JPEG XL controls, as libjxl exposes them. Defaults come from the Rust core. */
+export interface JxlSettings {
+	quality: number
+	effort: number
+	lossless: boolean
+	losslessJpeg: boolean
+	multiThreading: boolean
 }
 
 /** The AVIF controls, as `ravif` exposes them. Defaults come from the Rust core. */
