@@ -485,17 +485,27 @@ that can be checked here, and no further claim is made.
 
 - [x] **Gate added: do not retire Electron until the Windows build has been launched.**
       **Cleared 2026-09-26** — the installed Windows app passes the smoke test in CI.
-      Retiring Electron is now unblocked; it is a product decision worth an owner's nod,
-      since the README still calls the Electron app the one for production work.
+      Retiring Electron is now unblocked. **The owner gave the go-ahead on 2026-09-27.**
       Both stated preconditions now hold (Phase 3 parity is ticked and a Tauri release
       has shipped), but the Electron app is **Windows-only**, and the Tauri Windows build
       has been compiled and never opened. Retiring the one Windows app that is known to
       have run, in favour of one that never has, would risk leaving Windows users with
       nothing. Clears when the Windows first-launch item in Phase 5 is ticked.
-- [ ] Remove `main.js`, `index.html`, `index.css` and the Electron dependencies.
-- [ ] Remove the `resources/win/bin` cwebp-download step from the README.
-- [ ] Final Electron release tagged as the last of its line, so users on it have a
-      pinned artifact.
+- [x] Remove `main.js`, `index.html`, `index.css` and the Electron `package.json` (its
+      dependencies went with it — there was no committed lockfile), the three SVGs only
+      `index.html` used, and Dependabot's root npm entry. `build/icon.png`, the 2363 px
+      master the Tauri icon set was generated from, moved to `resources/icons/icon.png`
+      rather than being deleted. Nothing in the Cargo workspace referenced any of it, as
+      Phase 1 required, so `cargo build` was unaffected.
+      The product version now lives in `src-tauri/Cargo.toml` alone (`tauri.conf.json`
+      inherits it); the root `package.json` was the second copy.
+- [x] Remove the `resources/win/bin` cwebp-download step from the README — the whole
+      Electron build section went, and the README now describes one app.
+- [x] Pin the Electron line for anyone still on it. **The last Electron *binary* stays
+      v0.4.3 (2019)**; no new Electron build was made, because it could not be verified —
+      running it needs Windows plus a hand-downloaded `cwebp.exe`, and nothing in CI
+      exercises it. Its **last source** is the `electron-final` tag, on the final commit
+      before removal (477dade), which carries the years of unreleased Electron work.
 
 ## Phase 7 — Beyond WebP
 
@@ -579,10 +589,26 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
          alpha. The axe audit now covers the AVIF panel and an on-screen preview too, and
          caught one contrast failure (a 3.91:1 description on the Format cards), fixed.
       4. Output naming and the preview — **done in slices 2 and 3**. What is left:
-- [ ] Read AVIF **input** (`SourceFormat` sniffing for `ftypavif`, and a decoder). No
-      decoder is in the tree; `ravif` only encodes. Options: `dav1d` via bindings (a C
-      library again) or leave AVIF output-only and say so.
-- [ ] **Show the AVIF preview on every platform.** Found by CI, not by reading: Ubuntu
+- [x] Read AVIF **input** (done 2026-09-27, once `nasm` was installed). `SourceFormat::Avif`
+      is sniffed from the `ftyp` box — major *or* compatible brand `avif`/`avis`, and a
+      HEIC with the same container is refused. `decode_avif` uses `avif-decode` 3.0 over
+      rav1d; 16-bit output (10/12-bit AVIF) drops its low byte, as 16-bit PNG does.
+      **Gate:** `our_avif_decoder_agrees_with_avifdec` decodes the same 10- and 8-bit files
+      with ours and with libavif's `avifdec` — 49.5 and 50.5 dB agreement, alpha identical.
+      Mutation-tested: a wrong bit-depth reduction drops it to 4.7 dB and fails.
+      **Two findings on the way:**
+      - `avif-parse` **panics** on a malformed box (a `debug_assert` — found by the
+        corrupt-file test). `decode_avif` catches the panic and returns a decode error, so
+        a user's damaged file can never take a conversion down.
+      - rav1d's x86 assembly cannot be linked into a `cdylib` (non-PIC relocation against
+        `dav1d_dr_intra_derivative`). The Tauri library's `staticlib`/`cdylib` crate types
+        existed only for mobile targets and were dropped; it is `rlib` only now.
+      Animated AVIF (`avis`) is sniffed but only its first frame would decode — not tested.
+- [x] **Show the AVIF preview on every platform** (done 2026-09-27). The encoded AVIF is
+      decoded in Rust and sent to the webview as lossless WebP, so no web engine has to
+      decode AVIF; the smoke test's "displays the AVIF preview" is a hard check again. The
+      "cannot display" notice remains in the window as a fallback that should now never
+      show. History: Found by CI, not by reading: Ubuntu
       24.04's WebKitGTK cannot decode AVIF (the smoke test's image load fails there),
       while Arch's can, and the AppImage bundles the Ubuntu build. The window now says so
       instead of showing a broken image, but the comparison is lost. The fix is the same
@@ -617,9 +643,11 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
         <https://docs.rs/ravif/latest/ravif/struct.Encoder.html>
       - Default features are off because `asm` needs `nasm` at build time, which the dev
         host lacks (owner-gated) and would be one more thing for each CI runner.
-- [ ] Turn `rav1e`'s `asm` feature back on for speed once `nasm` is available on the dev
-      host (owner-gated: `sudo pacman -S nasm`) and installed on all three CI runners.
-      The pure-Rust path is correct but slower.
+- [x] `rav1e`'s `asm` is back on (`ravif` default features), now that `nasm` is on the dev
+      host (installed 2026-09-27 at the owner's request) and on every CI runner via
+      `ilammy/setup-nasm`. Measured on the dev host: a 1600x1200 AVIF at the defaults went
+      from 818 ms (0.6.0, pure Rust) to 595 ms, **byte-identical output** (180,742 bytes).
+      `nasm` is now a build requirement, stated in the README.
 - [ ] Watch **Tauri 3**, do not adopt it. `3.0.0-alpha` releases began appearing in
       September 2026, bringing a CEF runtime option, plugin-API changes
       (`js_init_script` → `initialization_script`) and removed deprecated APIs. Adopting an

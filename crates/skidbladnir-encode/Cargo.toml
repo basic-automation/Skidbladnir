@@ -11,6 +11,7 @@ repository.workspace = true
 image = { workspace = true }
 libwebp-sys = { workspace = true }
 ravif = { workspace = true }
+avif-decode = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 

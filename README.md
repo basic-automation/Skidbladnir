@@ -7,8 +7,7 @@ without memorising the command line.
 
 ![The Skidbladnir window with WebP selected: the format and mode selectors, the quality, resize and advanced encoder controls, and a preview of the result beside the original](resources/images/screenshot.webp)
 
-*The Tauri app with WebP selected and a file previewed. The Electron app it replaces
-looks different; see Status below.*
+*WebP selected, with a file previewed.*
 
 <details>
 <summary>With AVIF selected</summary>
@@ -22,7 +21,7 @@ looks different; see Status below.*
 **Output formats**
 
 - **WebP**, through libwebp, byte-for-byte identical to `cwebp` at the same settings
-- **AVIF** (Tauri app only), through `ravif`: quality, alpha quality, speed, 8- or 10-bit,
+- **AVIF**, through `ravif`: quality, alpha quality, speed, 8- or 10-bit,
   YCbCr or RGB, and what happens to colour under transparency
 
 **WebP encoding modes**
@@ -47,7 +46,6 @@ looks different; see Status below.*
 **Workflow**
 
 - Preview the result beside the original, in either format, before anything is written
-  (Tauri app only)
 - Batch conversion across multiple input files
 - Original and converted file sizes reported after each conversion
 - Advanced options hidden behind a disclosure so the common path stays simple
@@ -56,34 +54,29 @@ looks different; see Status below.*
 
 Grab a build from the [releases page](https://github.com/basic-automation/Skidbladnir/releases).
 
-Two applications are released from this repository while the migration is under way:
+Each release carries a Linux `.deb` and AppImage, a Windows installer, and macOS `.dmg`s
+for Apple Silicon and Intel. Releases are still marked **prerelease**; see Status for
+which builds have actually been run.
 
-- **The Electron app** — the one to use for production work. Windows only; the last
-  release of it is v0.4.3.
-- **The Tauri app** — the rewrite, released as a **prerelease**: a Linux `.deb` and
-  AppImage, a Windows installer, and macOS `.dmg`s for Apple Silicon and Intel. See
-  Status for which of those have actually been run.
-
-Each release says which of the two it contains.
+Skidbladnir used to be an Electron app for Windows. That app has been retired: its last
+binary release is [v0.4.3](https://github.com/basic-automation/Skidbladnir/releases/tag/v0.4.3)
+(2019), and its last source is the
+[`electron-final`](https://github.com/basic-automation/Skidbladnir/tree/electron-final) tag.
 
 ## Build from source
 
-The repository currently holds two applications: the Electron app that ships today,
-and the Rust + Tauri 2 app replacing it. Both build from a clean checkout.
-
-### The Tauri app (in progress)
-
-Requires a stable Rust toolchain, Node.js and npm. On Linux you also need
+Requires a stable Rust toolchain, Node.js and npm, and **`nasm`** — the AV1 encoder and
+decoder assemble their SIMD code with it (Arch: `nasm`; Debian/Ubuntu: `nasm`; macOS:
+`brew install nasm`; Windows: `choco install nasm`). On Linux you also need
 `webkit2gtk-4.1` and its development headers.
 
 ```bash
-cargo install tauri-cli --locked --version '^2'
-npm --prefix frontend install
-cargo tauri build --no-bundle
+npm --prefix frontend install        # also installs the Tauri CLI
+cd src-tauri && ../frontend/node_modules/.bin/tauri build --no-bundle
 ```
 
-Run it from the workspace root with `cargo tauri dev`, which starts the Nuxt dev
-server and the window together. Release builds must go through `cargo tauri build`
+Run it with `../frontend/node_modules/.bin/tauri dev` from `src-tauri/`, which starts the
+Nuxt dev server and the window together. Release builds must go through `tauri build`
 rather than `cargo build --release`: the `custom-protocol` feature that embeds the
 frontend is only enabled by the former.
 
@@ -108,34 +101,13 @@ The two scripts need `tauri-driver` (`cargo install tauri-driver`) and `WebKitWe
 (`webkit2gtk-driver` on Debian/Ubuntu, `webkitgtk-6.0` on Arch). They skip, loudly, when
 those are missing.
 
-### The Electron app (shipping today)
-
-Requires Node.js and npm.
-
-```bash
-npm install
-```
-
-It shells out to the `cwebp` binary, which is not vendored in this repository.
-Download the [WebP precompiled
-binaries](https://developers.google.com/speed/webp/docs/precompiled) and place
-`cwebp.exe` at `./resources/win/bin/cwebp.exe`.
-
-Then:
-
-```bash
-npm start          # run the app
-npm run dist       # build a distributable into ./dist
-```
-
 ## Status
 
-The Electron app remains the shipping application. The **Rust + Tauri 2** rewrite,
-with a **Nuxt + Tailwind** frontend and targeting Windows, Linux and macOS, now has a
-working window and a complete encode core; the work queue lives in
+Skidbladnir is a **Rust + Tauri 2** app with a **Nuxt + Tailwind** frontend, for Windows,
+Linux and macOS. It replaced an Electron app, now retired. The work queue lives in
 [ROADMAP.md](ROADMAP.md).
 
-What the new app can already do:
+What it can do:
 
 - Encode with libwebp linked directly into the binary, exposing every control listed
   above — and its output is **byte-for-byte identical to `cwebp`** across 76 settings
@@ -164,9 +136,10 @@ What the new app can already do:
 - Look like Skidbladnir: the original layout — dot-textured header and footer bands,
   dotted option groups, two-column controls and the circular action button — restyled
   in the Palenight palette.
-- Read PNG, JPEG, TIFF and WebP input, identifying the format by its contents rather
-  than by its file extension. That includes **CMYK JPEGs** as Photoshop writes them,
-  which `cwebp` itself refuses to read.
+- Read PNG, JPEG, TIFF, WebP and **AVIF** input, identifying the format by its contents
+  rather than by its file extension. That includes **CMYK JPEGs** as Photoshop writes
+  them, which `cwebp` itself refuses to read. AVIF input is checked against libavif's
+  own `avifdec`, which must decode the same files to the same pixels.
 - Refuse to overwrite your source image, and stage every write through a temporary
   file so a failed conversion cannot damage a file that was already there.
 - Report the before and after sizes, and the dimensions actually produced.
@@ -180,22 +153,14 @@ Known gaps:
 - No AppImage is produced on the maintainer's machine, because bundling one needs
   `patchelf`, which is not installed there. CI has it.
 - The app is not code-signed on any platform, and there is no auto-updater.
-- The Electron app still requires a manually downloaded `cwebp.exe`, and it will
-  silently overwrite your original if you convert a WebP into the folder it already
-  lives in. The Tauri app refuses that conversion instead.
-- AVIF encoding is slow at the default speed on large images, and it cannot be
-  cancelled mid-file: the encoder reports no progress, so Cancel takes effect when the
-  current file finishes (which is then discarded, not written). AVIF input is not read
-  yet, and there is no chroma subsampling control — AVIF is always written 4:4:4.
-- The AVIF **preview** needs a web engine that can display AVIF. On Linux, WebKitGTK is
-  built without it on some distributions — Ubuntu 24.04's, which is also what the
-  AppImage bundles — and there the window shows a notice in place of the encoded image.
-  The AVIF files themselves are unaffected.
+- An AVIF encode cannot be cancelled mid-file: the encoder reports no progress, so
+  Cancel takes effect when the current file finishes (which is then discarded, not
+  written). There is no chroma subsampling control — AVIF is always written 4:4:4 — and
+  animated AVIF is not read.
 - JPEG XL is being watched until browsers enable it without a flag. The long-promised
   JPEG 2000 was dropped as a goal; it has no momentum outside medical and archival
   imaging.
-- The Electron app looks different from the screenshot above, which is the Tauri app.
 
 ## License
 
-ISC. See [LICENSE](LICENSE) if present, or the `license` field in `package.json`.
+ISC, as declared in the workspace `Cargo.toml`.

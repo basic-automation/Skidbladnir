@@ -28,7 +28,7 @@ use crate::{
 	encoder::{EncodeError, RgbaImage, encode_rgba_with_progress}, settings::{EncodeJob, OutputFormat}
 };
 
-/// The input formats Skidbladnir accepts, matching the Electron app's accepted list.
+/// The input formats Skidbladnir accepts: the Electron app's list, plus AVIF.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SourceFormat {
 	/// PNG.
@@ -39,6 +39,8 @@ pub enum SourceFormat {
 	Tiff,
 	/// WebP, decoded by libwebp itself rather than a third-party decoder.
 	Webp,
+	/// AVIF, decoded by `avif-decode` (rav1d). Still images only.
+	Avif,
 }
 
 impl SourceFormat {
@@ -53,6 +55,7 @@ impl SourceFormat {
 			[0xff, 0xd8, 0xff, ..] => Some(Self::Jpeg),
 			[b'I', b'I', 42, 0, ..] | [b'M', b'M', 0, 42, ..] => Some(Self::Tiff),
 			[b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => Some(Self::Webp),
+			[_, _, _, _, b'f', b't', b'y', b'p', ..] if is_avif_ftyp(bytes) => Some(Self::Avif),
 			_ => None,
 		}
 	}
@@ -65,8 +68,20 @@ impl SourceFormat {
 			Self::Jpeg => "JPEG",
 			Self::Tiff => "TIFF",
 			Self::Webp => "WebP",
+			Self::Avif => "AVIF",
 		}
 	}
+}
+
+/// Whether an ISO-BMFF `ftyp` box names an AVIF brand, as its major brand or among the
+/// compatible brands that fit in `bytes`. HEIC files share the container, so the brand
+/// is what tells them apart; a HEIC must not be accepted and then fail to decode.
+fn is_avif_ftyp(bytes: &[u8]) -> bool {
+	let Some(declared) = bytes.get(0..4).and_then(|len| len.try_into().ok()).map(u32::from_be_bytes) else { return false };
+	let end = usize::try_from(declared).unwrap_or(usize::MAX).min(bytes.len());
+	// Major brand at 8..12, minor version at 12..16, compatible brands from 16 on.
+	let is_avif = |brand: &[u8]| brand == b"avif" || brand == b"avis";
+	bytes.get(8..12).is_some_and(is_avif) || bytes.get(16..end).unwrap_or_default().as_chunks::<4>().0.iter().any(|brand| is_avif(brand))
 }
 
 /// An image decoded into the 8-bit RGBA the encoder wants.
@@ -153,6 +168,7 @@ pub fn load(path: &Path) -> Result<SourceImage, SourceError> {
 			}
 			decode_webp(&bytes).ok_or_else(|| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: "libwebp rejected the file".to_owned() })?
 		}
+		SourceFormat::Avif => decode_avif(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?,
 		SourceFormat::Png | SourceFormat::Jpeg | SourceFormat::Tiff => {
 			let decoded = image::load_from_memory(&bytes).map_err(|error| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: error.to_string() })?;
 			let rgba = to_rgba8(decoded);
@@ -186,6 +202,60 @@ fn to_rgba8(decoded: image::DynamicImage) -> image::RgbaImage {
 	// `sample >> 8` of a u16 is always within u8, so this cannot lose anything further.
 	let narrowed: Vec<u8> = wide.into_raw().into_iter().map(|sample| u8::try_from(sample >> 8).unwrap_or(u8::MAX)).collect();
 	image::RgbaImage::from_raw(width, height, narrowed).unwrap_or_else(|| image::RgbaImage::new(width, height))
+}
+
+/// Decode an AVIF file to `(width, height, rgba)`.
+///
+/// 16-bit output (from a 10- or 12-bit AVIF) is reduced by dropping the low byte, the
+/// same reduction `to_rgba8` makes for 16-bit PNG, so a deep source is narrowed the same
+/// way whatever container it came in.
+///
+/// # Errors
+///
+/// Returns the decoder's message if the file is not a decodable AVIF still.
+pub fn decode_avif(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
+	use avif_decode::{Decoder, Image};
+
+	// The parser underneath is not panic-free on hostile input: a malformed box trips a
+	// `debug_assert` in `avif-parse` (found by this crate's corrupt-file test), and a user's
+	// damaged file must come back as an error, never take the conversion down. Release
+	// builds unwind (no `panic = "abort"` anywhere in the workspace), so this holds there too.
+	let decoded = std::panic::catch_unwind(|| Decoder::from_avif(bytes).and_then(Decoder::to_image));
+	let image = match decoded {
+		Ok(result) => result.map_err(|error| error.to_string())?,
+		Err(_) => return Err("the AVIF decoder could not read this file".to_owned()),
+	};
+	let narrow = |value: u16| u8::try_from(value >> 8).unwrap_or(u8::MAX);
+	let (width, height, pixels): (usize, usize, Vec<u8>) = match image {
+		Image::Rgb8(img) => (img.width(), img.height(), img.pixels().flat_map(|p| [p.r, p.g, p.b, 255]).collect()),
+		Image::Rgba8(img) => (img.width(), img.height(), img.pixels().flat_map(|p| [p.r, p.g, p.b, p.a]).collect()),
+		Image::Gray8(img) => (
+			img.width(),
+			img.height(),
+			img.pixels()
+				.flat_map(|p| {
+					let v = p.value();
+					[v, v, v, 255]
+				})
+				.collect(),
+		),
+		Image::Rgb16(img) => (img.width(), img.height(), img.pixels().flat_map(|p| [narrow(p.r), narrow(p.g), narrow(p.b), 255]).collect()),
+		Image::Rgba16(img) => (img.width(), img.height(), img.pixels().flat_map(|p| [narrow(p.r), narrow(p.g), narrow(p.b), narrow(p.a)]).collect()),
+		Image::Gray16(img) => (
+			img.width(),
+			img.height(),
+			img.pixels()
+				.flat_map(|p| {
+					let v = narrow(p.value());
+					[v, v, v, 255]
+				})
+				.collect(),
+		),
+	};
+	let (Ok(width), Ok(height)) = (u32::try_from(width), u32::try_from(height)) else {
+		return Err(format!("{width}x{height} is too large"));
+	};
+	Ok((width, height, pixels))
 }
 
 /// Decode a WebP file with libwebp, returning `(width, height, rgba)`.
@@ -256,7 +326,9 @@ fn read_prefix(path: &Path) -> Option<Vec<u8>> {
 		return None;
 	}
 	let mut file = fs::File::open(path).ok()?;
-	let mut prefix = vec![0_u8; 16];
+	// 64 bytes: enough for every fixed signature, and for an ISO-BMFF `ftyp` box's
+	// compatible-brand list, which is where an AVIF may declare itself.
+	let mut prefix = vec![0_u8; 64];
 	let read = file.read(&mut prefix).ok()?;
 	prefix.truncate(read);
 	Some(prefix)
@@ -563,6 +635,10 @@ mod tests {
 		assert_eq!(SourceFormat::sniff(b"II\x2a\x00...."), Some(SourceFormat::Tiff));
 		assert_eq!(SourceFormat::sniff(b"MM\x00\x2a...."), Some(SourceFormat::Tiff));
 		assert_eq!(SourceFormat::sniff(b"RIFF\x00\x00\x00\x00WEBPVP8 "), Some(SourceFormat::Webp));
+		assert_eq!(SourceFormat::sniff(b"\0\0\0\x1cftypavif\0\0\0\0avifmif1miaf"), Some(SourceFormat::Avif));
+		assert_eq!(SourceFormat::sniff(b"\0\0\0\x1cftypmif1\0\0\0\0mif1avifmiaf"), Some(SourceFormat::Avif), "AVIF declared as a compatible brand");
+		assert_eq!(SourceFormat::sniff(b"\0\0\0\x18ftypheic\0\0\0\0mif1heic"), None, "HEIC shares the container but is not AVIF");
+		assert_eq!(SourceFormat::sniff(b"\0\0\0\x10ftypmif1\0\0\0\0avif"), None, "a brand past the end of the ftyp box does not count");
 		assert_eq!(SourceFormat::sniff(b"GIF89a......"), None);
 		assert_eq!(SourceFormat::sniff(b"RIFF\x00\x00\x00\x00WAVEfmt "), None, "a RIFF container that is not WebP");
 		assert_eq!(SourceFormat::sniff(b"\x89PN"), None, "a truncated header must not match");
@@ -926,5 +1002,56 @@ mod tests {
 		assert_eq!(&bytes[4..12], b"ftypavif");
 		assert_eq!(conversion.output_bytes, bytes.len() as u64);
 		assert_eq!(std::fs::read_dir(&scratch.0).expect("list").count(), 2, "no staging file may be left behind");
+	}
+
+	/// AVIF input through the whole file layer: sniffed by content, decoded, re-encoded.
+	#[test]
+	fn reads_avif_input() {
+		let scratch = Scratch::new("avif-in");
+		let png = scratch.join("in.png");
+		write_png(&png, 48, 32);
+		let avif = scratch.join("in.avif");
+		let job = EncodeJob { format: OutputFormat::Avif, avif: AvifSettings { speed: 10, ..Default::default() }, ..Default::default() };
+		encode_file(&job, &png, &avif).expect("write an AVIF to read back");
+
+		let loaded = load(&avif).expect("an AVIF must load");
+		assert_eq!(loaded.format, SourceFormat::Avif);
+		assert_eq!((loaded.width, loaded.height), (48, 32));
+
+		let inspected = super::inspect_paths(std::slice::from_ref(&avif));
+		assert!(inspected[0].supported, "the window must accept a dropped AVIF");
+		assert_eq!(inspected[0].format, Some("AVIF"));
+
+		// AVIF to WebP, and AVIF to AVIF into another folder.
+		encode_file(&EncodeJob::default(), &avif, &scratch.join("from-avif.webp")).expect("AVIF converts to WebP");
+		std::fs::create_dir_all(scratch.join("out")).expect("create out");
+		encode_file(&job, &avif, &scratch.join("out").join("in.avif")).expect("AVIF re-encodes to AVIF elsewhere");
+	}
+
+	/// Converting an AVIF to AVIF in its own folder derives its own name, and must be
+	/// refused exactly as WebP-to-WebP is.
+	#[test]
+	fn avif_to_avif_in_place_is_refused() {
+		let scratch = Scratch::new("avif-same");
+		let png = scratch.join("photo.png");
+		write_png(&png, 16, 16);
+		let job = EncodeJob { format: OutputFormat::Avif, avif: AvifSettings { speed: 10, ..Default::default() }, ..Default::default() };
+		let avif = scratch.join("photo.avif");
+		encode_file(&job, &png, &avif).expect("write the AVIF");
+		let before = std::fs::read(&avif).expect("read it");
+		let derived = output_path_in(scratch.0.clone(), &avif, OutputFormat::Avif);
+		let error = encode_file(&job, &avif, &derived).expect_err("must refuse");
+		assert!(matches!(error, ConvertError::WouldOverwriteSource { .. }), "{error:?}");
+		assert_eq!(std::fs::read(&avif).expect("read it again"), before, "the source must be untouched");
+	}
+
+	/// A file that claims AVIF but is not one fails with a decode error naming the format.
+	#[test]
+	fn a_corrupt_avif_is_a_decode_error() {
+		let scratch = Scratch::new("avif-bad");
+		let path = scratch.join("bad.avif");
+		std::fs::write(&path, b"\0\0\0\x14ftypavif\0\0\0\0avifgarbage-not-a-box").expect("write");
+		let error = load(&path).expect_err("must not decode");
+		assert!(error.to_string().contains("AVIF"), "{error}");
 	}
 }

@@ -5,8 +5,9 @@
 //! with it. It is deliberately free of any Tauri dependency: everything here is
 //! testable from `cargo test` with no window, no IPC and no frontend.
 //!
-//! The authority for what the surface *is* is the Electron app still at the repo root
-//! (`index.html` builds the settings, `main.js` assembles the `cwebp` command line).
+//! The authority for what the surface *is* was the Electron app this replaced
+//! (`index.html` built the settings, `main.js` assembled the `cwebp` command line). It was
+//! retired in Phase 6; its last source is at the `electron-final` tag.
 //! Every control it exposes is represented in [`EncodeJob`]; see ROADMAP.md Phase 2.
 
 pub mod avif;
