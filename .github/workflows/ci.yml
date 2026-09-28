@@ -37,7 +37,7 @@ jobs:
     name: rustfmt (nightly)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
@@ -49,7 +49,7 @@ jobs:
     name: cargo deny
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@v2
         with:
@@ -67,7 +67,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install the Linux system dependencies Tauri needs
         # Needed from Phase 1 onward, when src-tauri/ joins the workspace: Tauri 2 links
@@ -79,7 +79,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev libpng-dev libjpeg-dev libtiff-dev libavif-bin
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -89,7 +89,7 @@ jobs:
         # npm's own cache (above) only covers downloads. Nuxt 4 keeps its build cache in
         # node_modules/.cache, so this is what stops all three runners regenerating an
         # unchanged frontend from scratch. Keyed on the lockfile and the frontend sources.
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: frontend/node_modules/.cache
           key: nuxt-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}-${{ hashFiles('frontend/**/*.vue', 'frontend/**/*.ts', 'frontend/**/*.css') }}
@@ -178,7 +178,7 @@ jobs:
     name: window smoke + accessibility
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install the system dependencies
         run: |
@@ -187,7 +187,7 @@ jobs:
             libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev \
             webkit2gtk-driver xvfb
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -234,7 +234,7 @@ jobs:
         # uploaded for a person to review and commit, never committed by CI itself.
         run: xvfb-run -a -s "-screen 0 1400x3200x24" scripts/screenshot.sh --app target/release/skidbladnir --out screenshots
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: screenshots
           path: screenshots/*.png
@@ -266,9 +266,9 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
