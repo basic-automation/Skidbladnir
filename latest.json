@@ -1,0 +1,27 @@
+{
+  "version": "0.8.0",
+  "pub_date": "2026-09-28T18:33:33Z",
+  "platforms": {
+    "darwin-aarch64-app": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDFtUUhkOW1ZNEsyTmlYbHcxN3VHQnJkdVZUb3AxZEw2aWlUVkQyUEJpMEZoMFkwL2RyS2ZYRElIaU1TeHZRZitGRHpidDZOSHJlYUNnemJjb0dMbVVsbmNhRFN0RndRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNjE5OTQ5CWZpbGU6U2tpZGJsYWRuaXIuYXBwLnRhci5negl2ZXJzaW9uOjAuOC4wCjNnV3FJejk2RVhPa0t0eEhaK0hBbEdaQlRNaWh4WE1sMzBqa1l6SHlXcll2NzlIekJFRk9GdVFpMnpNMVRINEtTc0Z3cThpc2xDNEpST0lWVmZWQ0J3PT0K",
+      "url": "https://github.com/basic-automation/Skidbladnir/releases/download/v0.8.0/Skidbladnir_0.8.0_aarch64.app.tar.gz"
+    },
+    "linux-x86_64-appimage": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDFtUUhkOW1ZNEVKaGtZWnV0bzAyaDJjM1Q5YTk1RmhjR3REa3RpanQrcDRBU1hRdU9nRXlEb21vSWZicnVKclJJOTNpcnROa3d1Q2ZXMnJWVVZsTWxXbUhyY0h6SlFnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNjIwMDg0CWZpbGU6U2tpZGJsYWRuaXJfMC44LjBfYW1kNjQuQXBwSW1hZ2UJdmVyc2lvbjowLjguMApBNzA1YTU0dGlPQTFlZ2V2dHdhUTVmemMwMU1GNSs4NU5SSG1JNE5oVmZkVlJsUkVoeVc0V3dwaURCdVBWYlNZRE90UWxrZlljMUZzS0pUVUtsMGZEQT09Cg==",
+      "url": "https://github.com/basic-automation/Skidbladnir/releases/download/v0.8.0/Skidbladnir_0.8.0_amd64.AppImage"
+    },
+    "linux-x86_64-deb": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDFtUUhkOW1ZNENKcEdKTDJyM1dDK1J4VE5WMjlpV0dHOVJDenV6TmFqUHN6bUJjYUZ5bmsxQmQzVVlhQTN3SjdKNjkzaWJSOFIzL21ma2lLT0QrbzFoWGlsRDR1K0EwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNjIwMDg0CWZpbGU6U2tpZGJsYWRuaXJfMC44LjBfYW1kNjQuZGViCXZlcnNpb246MC44LjAKUmt3dEhObGw5L0VVM0lKQ2laWEZta3psa0ZETVUvQ0xmcmpZcDdZdnVydFBsQVN4V3FYbkJyZy95eFNlakRWOThaRDBPZEYrdW1CZU1lNkVmZXVSRGc9PQo=",
+      "url": "https://github.com/basic-automation/Skidbladnir/releases/download/v0.8.0/Skidbladnir_0.8.0_amd64.deb"
+    },
+    "windows-x86_64-nsis": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDFtUUhkOW1ZNE1UdE5zUVZrdS84d0Z3THJ2VUdBOHNHeVNxSmJnNGthcHhOVkNQL0RPZHRtZjh6RGcyYXJ4NEx3UHlna1pCcmpFTHNEVUo2alRUUFhhN0JmZjhWWEFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNjIwMzQ4CWZpbGU6U2tpZGJsYWRuaXJfMC44LjBfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjAuOC4wCm9NY1JCL2F3V2s5U2xpTjkrNEdHWnJ3LzgyU0Zxa1Y2Z0xWaHdkNXBnOFZSWWxnRlRIcWhpRWVvZVBWUkJtN0ZTNHZycGpENTlRU3ZvcDg4TVZZZ0JRPT0K",
+      "url": "https://github.com/basic-automation/Skidbladnir/releases/download/v0.8.0/Skidbladnir_0.8.0_x64-setup.exe"
+    },
+    "darwin-x86_64-app": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDFtUUhkOW1ZNE91VXEyREFVRTdFREsvbWFpZHN3R21oOCtLdlpzRDViN2x0dmJFRjZuMlVPYUg4RE5iZnE2OXlDWG00M0hCUTgzTlZ1bVpVR1c2bTE4UjlSQ3hqR3dzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNjE5OTM2CWZpbGU6U2tpZGJsYWRuaXIuYXBwLnRhci5negl2ZXJzaW9uOjAuOC4wCjJPeG1HT2FvRnVRZjhsNDdsYUF5anNlR25HRFZvSmhZa0gxRzl5T0gxWnlmK0xoanJvUkcweDR2OVZHc0kwMVI1SE55MGFsQ1c3eS9aQ2IrM0xHVkNRPT0K",
+      "url": "https://github.com/basic-automation/Skidbladnir/releases/download/v0.8.0/Skidbladnir_0.8.0_x64.app.tar.gz"
+    }
+  },
+  "notes": "Skidbladnir now keeps itself up to date.\n\nWhen it starts, the app checks whether a newer release exists and offers it in a banner. Nothing is downloaded until you click **Install and restart**. Every update is verified against the project's signing key before it is installed, and a download that fails verification is refused.\n\nEach install updates in its own format:\n- **AppImage**, **Windows installer** and **macOS app** update in place.\n- A **`.deb`** install updates with a `.deb`, and asks for your password to do it.\n\n**This is the first release with the updater, so moving to it from 0.7.0 or earlier is a manual download, once.** From here on, the app offers new releases itself.\n\nInstallers: Linux `.deb` and AppImage, Windows `x64-setup.exe`, macOS `.dmg` for Apple Silicon and Intel \u2014 attached by CI as each platform finishes. The `.sig` files and `latest.json` beside them are for the updater."
+}
