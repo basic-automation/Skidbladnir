@@ -1,7 +1,5 @@
-# Skidbladnir is mid-migration: this workspace is the Rust + Tauri 2 app that will
-# replace the Electron app at the repo root. Both live here until Phase 6 of
-# ROADMAP.md retires Electron, so nothing in this workspace may depend on
-# main.js / index.html, and removing them must not break `cargo build`.
+# Skidbladnir is a Rust + Tauri 2 app. It replaced an Electron app, retired in Phase 6
+# of ROADMAP.md; that app's last source is at the `electron-final` tag.
 #
 # Layout (the Phase 1 decision, recorded in ROADMAP.md):
 #   crates/*    pure-Rust logic with no Tauri dependency — testable offline
@@ -19,7 +17,7 @@ repository = "https://github.com/basic-automation/Skidbladnir"
 
 [workspace.dependencies]
 # Binds libwebp's WebPConfig, which carries a 1:1 field for every encoder control the
-# Electron UI exposes — the reason this is the encode backend rather than a pure-Rust
+# Electron UI exposed — the reason this is the encode backend rather than a pure-Rust
 # encoder (which reaches none of the advanced knobs) or a bundled cwebp sidecar.
 # Vendored and statically linked by default, so there is no system libwebp to find on
 # Windows or macOS.
