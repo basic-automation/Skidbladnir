@@ -1,7 +1,7 @@
 # Skidbladnir
 
-A desktop GUI for converting images to next-generation open-source formats — **WebP**
-and **AVIF**. For WebP it drives libwebp with `cwebp`'s full control surface — not just a
+A desktop GUI for converting images to next-generation open-source formats — **WebP**,
+**AVIF** and **JPEG XL**. For WebP it drives libwebp with `cwebp`'s full control surface — not just a
 quality slider — so you can tune an encode the way the command-line tool allows,
 without memorising the command line.
 
@@ -23,6 +23,9 @@ without memorising the command line.
 - **WebP**, through libwebp, byte-for-byte identical to `cwebp` at the same settings
 - **AVIF**, through `ravif`: quality, alpha quality, speed, 8- or 10-bit,
   YCbCr or RGB, and what happens to colour under transparency
+- **JPEG XL**, through libjxl, the reference encoder: quality, effort, lossless, and
+  **lossless JPEG recompression** — a JPEG is repacked about 20% smaller without being
+  decoded, and the original JPEG can be rebuilt from it bit for bit
 
 **WebP encoding modes**
 
@@ -72,10 +75,15 @@ binary release is [v0.4.3](https://github.com/basic-automation/Skidbladnir/relea
 
 ## Build from source
 
-Requires a stable Rust toolchain, Node.js and npm, and **`nasm`** — the AV1 encoder and
+Requires a stable Rust toolchain, Node.js and npm, **`nasm`** — the AV1 encoder and
 decoder assemble their SIMD code with it (Arch: `nasm`; Debian/Ubuntu: `nasm`; macOS:
-`brew install nasm`; Windows: `choco install nasm`). On Linux you also need
+`brew install nasm`; Windows: `choco install nasm`) — and **CMake** with a C++ compiler,
+which build libjxl from source so it is linked statically. On Linux you also need
 `webkit2gtk-4.1` and its development headers.
+
+Without CMake, the build links the system libjxl (0.11 or newer, with its development
+files) through `pkg-config` instead, and says so. Set `SKIDBLADNIR_LIBJXL=vendored` to
+insist on the static build, or `=system` to insist on the system library.
 
 ```bash
 npm --prefix frontend install        # also installs the Tauri CLI
@@ -127,26 +135,30 @@ What it can do:
   at their contents rather than their file extension.
 - Convert a batch of files, showing progress per file, with a Cancel button that stops
   without leaving a half-converted image behind.
-- Convert a whole folder, including subfolders, recreating its structure in the
-  destination.
+- Convert a whole folder, optionally including its subfolders and recreating their
+  structure in the destination.
 - Write **AVIF** as well as WebP, with its own panel of controls. Each format keeps its
   own settings while you try the other. AVIF output is checked by decoding it with
   libavif's own `avifdec`, measuring how close the pixels come back, and confirming
   transparency survives.
-- Preview the result beside the original, in either format, before anything is
-  written to disk.
+- Write **JPEG XL**, ahead of browsers enabling it by default, so a library can be
+  converted in anticipation. JPEGs are recompressed losslessly by default. JPEG XL output
+  is checked by libjxl's own `djxl`: it must decode our files at the right size and
+  alpha, lossless files exactly, and rebuild a recompressed JPEG byte for byte.
+- Preview the result beside the original, in any format, before anything is written to
+  disk. AVIF and JPEG XL previews are decoded in Rust, so they show on every web engine.
 - Tell you what an existing WebP already is — size, lossy or lossless, alpha — and say
   plainly when a file is an animation it cannot re-encode, rather than failing obscurely.
 - Remember your settings and destination between launches, and save named presets of
   your own.
 - Be driven entirely from the keyboard, with every control labelled for a screen reader.
-- Look like Skidbladnir: the original layout — dot-textured header and footer bands,
-  dotted option groups, two-column controls and the circular action button — restyled
-  in the Palenight palette.
-- Read PNG, JPEG, TIFF, WebP and **AVIF** input, identifying the format by its contents
+- A frameless window with a format rail, a sidebar for the queue, destination and
+  presets, and one column of settings with Convert at its head.
+- Read PNG, JPEG, TIFF, WebP, **AVIF** and **JPEG XL** input, identifying the format by its contents
   rather than by its file extension. That includes **CMYK JPEGs** as Photoshop writes
   them, which `cwebp` itself refuses to read. AVIF input is checked against libavif's
-  own `avifdec`, which must decode the same files to the same pixels.
+  own `avifdec`, and JPEG XL input against libjxl's `djxl`; each must decode the same
+  files to the same pixels.
 - Refuse to overwrite your source image, and stage every write through a temporary
   file so a failed conversion cannot damage a file that was already there.
 - Report the before and after sizes, and the dimensions actually produced.
@@ -159,14 +171,14 @@ Known gaps:
   by CI on every change, and the Linux `.deb` and AppImage have been run.
 - No AppImage is produced on the maintainer's machine, because bundling one needs
   `patchelf`, which is not installed there. CI has it.
-- The app is not code-signed on any platform, and there is no auto-updater.
-- An AVIF encode cannot be cancelled mid-file: the encoder reports no progress, so
+- The app is not code-signed on any platform.
+- An AVIF or JPEG XL encode cannot be cancelled mid-file: neither encoder reports progress, so
   Cancel takes effect when the current file finishes (which is then discarded, not
   written). There is no chroma subsampling control — AVIF is always written 4:4:4 — and
   animated AVIF is not read.
-- JPEG XL is being watched until browsers enable it without a flag. The long-promised
-  JPEG 2000 was dropped as a goal; it has no momentum outside medical and archival
-  imaging.
+- JPEG XL files open in Safari, and in Firefox and Chrome as each enables it by default;
+  until then, most web pages cannot show them. The long-promised JPEG 2000 was dropped
+  as a goal; it has no momentum outside medical and archival imaging.
 
 ## License
 

@@ -721,7 +721,22 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
         offer anyone who wants HEIF.
       - *Carry over from HEIC:* EXIF orientation (iPhone photos rely on it) and the
         embedded colour profile. Check whether the AVIF path already honours either.
-- [ ] **JPEG XL input, then output.** Supersedes the "watch item" in the format decision
+- [x] **JPEG XL output and input** (done 2026-09-28, ahead of Chrome at the owner's
+      request, so libraries can be converted in anticipation). libjxl 0.12 is bound
+      directly in `src/jxl.rs` — `jpegxl-rs`/`jpegxl-sys` are GPL-3.0 and cannot be linked
+      into an ISC app — and built statically from `jpegxl-src`'s source via CMake
+      (`SKIDBLADNIR_LIBJXL=vendored` in CI and releases; a CMake-less dev host links the
+      system libjxl through `pkg-config`). Controls: quality (libjxl's own quality→distance
+      map), effort, lossless, **lossless JPEG recompression** (on by default, as in `cjxl`;
+      skipped when a resize takes effect) and multi-threading. `jxl-oxide` decodes for the
+      preview, the reported dimensions and JPEG XL input. **Gate:** `tests/jxl_reference.rs`
+      has `djxl` decode our files (size, alpha, PSNR rising with quality, lossless exact),
+      rebuild a recompressed JPEG byte for byte, and agree with `jxl-oxide` (54 dB lossy,
+      exact lossless). Note: `jpegxl-src`'s crates.io metadata says BSD-3-Clause but its
+      `lib.rs` carries a GPL header; it only runs at build time and nothing of it is
+      linked, but replacing it with our own CMake invocation over a pinned libjxl source
+      would remove the question entirely.
+      *Original plan, kept for the record:* **JPEG XL input, then output.** Supersedes the "watch item" in the format decision
       above: the trigger it named is close. Firefox 157 enables JXL by default (due the
       end of September 2026), and Chrome/Edge have formalised their intent to enable it by
       default after shipping it behind a flag in Chrome 145.

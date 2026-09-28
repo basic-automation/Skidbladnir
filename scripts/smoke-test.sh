@@ -187,6 +187,24 @@ check "the webview displays the AVIF preview" \
 	 const s=await I.invoke('default_settings'); s.format='avif'; s.avif.speed=10;
 	 const p=await I.invoke('preview_encode', { settings: s, input: '$in_png' });
 	 return await new Promise(res => { const i=new Image(); i.onload=()=>res('displays ' + i.naturalWidth + 'x' + i.naturalHeight); i.onerror=()=>res('cannot display'); i.src=p.encoded; })" 'displays 48x48'
+# JPEG XL: a real conversion checked on disk, and the preview, which is decoded in Rust
+# because most web engines cannot display JPEG XL yet.
+check "converts an image to JPEG XL end to end" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const s=await I.invoke('default_settings'); s.format='jxl'; s.jxl.effort=3;
+	 const r=await I.invoke('convert_image', { settings: s, input: '$in_png', outputDirectory: '$out_dir' });
+	 return r.outputPath.split(/[\\\\/]/).pop() + ' ' + r.width + 'x' + r.height" 'smoke.jxl 48x48'
+if [ "$(head -c 2 "$scratch/out/smoke.jxl" 2>/dev/null | od -An -tx1 | tr -d ' ')" = "ff0a" ]; then
+	printf 'ok   %s\n' "wrote a real JPEG XL to disk ($(wc -c < "$scratch/out/smoke.jxl") bytes)"
+else
+	printf 'FAIL %s\n' "no JPEG XL file at $scratch/out/smoke.jxl"
+	failures=$((failures + 1))
+fi
+check "the webview displays the JPEG XL preview" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const s=await I.invoke('default_settings'); s.format='jxl'; s.jxl.effort=3;
+	 const p=await I.invoke('preview_encode', { settings: s, input: '$in_png' });
+	 return await new Promise(res => { const i=new Image(); i.onload=()=>res('displays ' + i.naturalWidth + 'x' + i.naturalHeight); i.onerror=()=>res('cannot display'); i.src=p.encoded; })" 'displays 48x48'
 # AVIF input: the AVIF written above, converted back to WebP in another folder.
 mkdir -p "$scratch/from-avif"
 check "reads AVIF input" \

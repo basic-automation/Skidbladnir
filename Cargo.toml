@@ -37,6 +37,16 @@ ravif = "0.13"
 # `binary` is off: it only adds a PNG writer for the crate's own command-line tool.
 avif-decode = { version = "3", default-features = false }
 libwebp-sys = "0.14"
+# The JPEG XL encoder is libjxl itself (BSD-3), bound directly in `src/jxl.rs`. The
+# existing Rust wrappers (`jpegxl-rs`, `jpegxl-sys`) are GPL-3.0, which an ISC app cannot
+# link, so they are not used. `jpegxl-src` carries libjxl's source and its CMake build;
+# it runs at build time only and nothing of it is linked. `pkg-config` is the fallback
+# for a dev host without CMake, which links the system libjxl instead (see build.rs).
+jpegxl-src = "0.12"
+pkg-config = "0.3"
+# The JPEG XL decoder: our own output for the preview and the reported dimensions, and
+# JPEG XL input. Pure Rust, so no second copy of libjxl's decoder is needed.
+jxl-oxide = { version = "0.12", default-features = false }
 # The version is not redundant with the path: a path dependency without one resolves as a
 # wildcard `*`, which `cargo deny` rejects and which would publish as an unbounded range.
 skidbladnir-encode = { path = "crates/skidbladnir-encode", version = "0.1" }

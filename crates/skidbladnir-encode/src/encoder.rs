@@ -120,6 +120,9 @@ pub enum EncodeError {
 	/// The AVIF encoder failed.
 	#[error("AVIF encoding failed: {0}")]
 	Avif(String),
+	/// libjxl failed.
+	#[error("JPEG XL encoding failed: {0}")]
+	Jxl(String),
 }
 
 /// Translate settings into a libwebp `WebPConfig`.
@@ -358,6 +361,7 @@ pub fn encode_rgba_with_progress(job: &EncodeJob, image: &RgbaImage<'_>, on_prog
 		OutputFormat::Webp if resize == job.resize => encode_webp(job, image, on_progress),
 		OutputFormat::Webp => encode_webp(&EncodeJob { resize, ..job.clone() }, image, on_progress),
 		OutputFormat::Avif => crate::avif::encode(&job.avif, resize, image, on_progress),
+		OutputFormat::Jxl => crate::jxl::encode(&job.jxl, resize, image, on_progress),
 	}
 }
 

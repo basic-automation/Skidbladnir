@@ -22,6 +22,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+  # Build libjxl from source and link it statically, as releases do, and fail if that
+  # cannot happen rather than quietly linking whatever libjxl the runner has.
+  SKIDBLADNIR_LIBJXL: vendored
 
 jobs:
   # Formatting gets its own job on **nightly rustfmt**, deliberately, while everything
@@ -73,11 +76,12 @@ jobs:
         # Needed from Phase 1 onward, when src-tauri/ joins the workspace: Tauri 2 links
         # against webkit2gtk-4.1, and patchelf is what bundles the AppImage. The image
         # libraries are for building the reference cwebp below, which needs a PNG reader.
-        # libavif-bin is libavif's `avifdec`, the reference decoder for the AVIF gate.
+        # libavif-bin is libavif's `avifdec`, the reference decoder for the AVIF gate, and
+        # libjxl-tools is libjxl's `djxl`, the reference decoder for the JPEG XL gate.
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev libpng-dev libjpeg-dev libtiff-dev libavif-bin
+          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev libpng-dev libjpeg-dev libtiff-dev libavif-bin libjxl-tools
 
       - uses: actions/setup-node@v7
         with:
@@ -144,8 +148,8 @@ jobs:
           # so the Homebrew prefix is added without overriding the makefile's own
           # variables — passing EXTRA_FLAGS on the command line would replace them.
           if [ "$RUNNER_OS" = "macOS" ]; then
-            # libavif provides `avifdec` for the AVIF gate.
-            brew install jpeg-turbo libpng libtiff libavif
+            # libavif provides `avifdec` for the AVIF gate, jpeg-xl `djxl` for JPEG XL's.
+            brew install jpeg-turbo libpng libtiff libavif jpeg-xl
             prefix=$(brew --prefix)
             export CPATH="$prefix/include${CPATH:+:$CPATH}"
             export LIBRARY_PATH="$prefix/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
@@ -168,8 +172,9 @@ jobs:
         #
         # cmyk_jpeg rides along because it also needs the reference: it checks that cwebp
         # still REFUSES CMYK JPEG, the one input Skidbladnir converts and cwebp does not.
-        # avif_reference is the AVIF gate: libavif's avifdec decodes what we write.
-        run: cargo test --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_reference -- --nocapture
+        # avif_reference is the AVIF gate: libavif's avifdec decodes what we write, and
+        # jxl_reference is JPEG XL's: libjxl's djxl decodes it and rebuilds recompressed JPEGs.
+        run: cargo test --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_reference --test jxl_reference -- --nocapture
 
   # Drives the real window over WebDriver. Separate from the compile matrix because it
   # needs a display, a WebKit driver and a full release build, and because a flaky display

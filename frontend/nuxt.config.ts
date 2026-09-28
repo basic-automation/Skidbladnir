@@ -19,7 +19,9 @@ export default defineNuxtConfig({
 	// Bundle the icon set rather than letting Nuxt UI fetch icons from the Iconify API at
 	// runtime. A desktop app cannot assume network access, and an icon that silently fails
 	// to load offline is a broken window.
-	icon: { provider: 'iconify', clientBundle: { scan: true, includeCustomCollections: true } },
+	// `skid` holds the few icons no bundled collection has: today, a JPEG XL mark drawn in
+	// the style of iconoir's WebP one, since the only published JXL icon is CC BY.
+	icon: { provider: 'iconify', customCollections: [{ prefix: 'skid', dir: './assets/icons' }], clientBundle: { scan: true, includeCustomCollections: true } },
 
 	css: ['~/assets/css/main.css'],
 	vite: { clearScreen: false },

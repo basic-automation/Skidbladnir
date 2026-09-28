@@ -1,7 +1,7 @@
 [package]
 name = "skidbladnir-encode"
 version = "0.1.0"
-description = "The encode core for Skidbladnir: the settings model and WebP encoder behind the GUI."
+description = "The encode core for Skidbladnir: the settings model and the WebP, AVIF and JPEG XL encoders behind the GUI."
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
@@ -12,8 +12,13 @@ image = { workspace = true }
 libwebp-sys = { workspace = true }
 ravif = { workspace = true }
 avif-decode = { workspace = true }
+jxl-oxide = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
+
+[build-dependencies]
+jpegxl-src = { workspace = true }
+pkg-config = { workspace = true }
 
 [dev-dependencies]
 # The parity test writes PNG fixtures; integration tests do not inherit [dependencies].
