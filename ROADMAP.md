@@ -565,7 +565,16 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
         "coming soon" claim has already been struck.
       Revisit JPEG XL once Chrome ships it unflagged — that single event moves it from
       16% to usable, and it is the trigger to re-open this item.
-- [ ] Add AVIF output. **Design decided here so the work can start; no code yet.**
+- [ ] **JPEG XL is close to its trigger — prepare, do not build yet.** Mozilla announced
+      (August 2026) that Firefox is shipping JPEG XL, decoded by Google Research's Rust
+      `jxl-rs`, and that "Chrome are also intending to ship", expecting cross-browser
+      support "before the end of the year". Chrome has not unflagged it yet, so the trigger
+      above still stands; but when it fires, the first question is the **encoder** — the
+      Rust side has decoders (`jxl-rs`, `jxl-oxide`), and encoding the full control surface
+      likely means libjxl again. Research the encoder options (control surface, licence,
+      build on all three runners) so the decision is ready.
+      <https://hacks.mozilla.org/2026/08/intent-to-ship-jpeg-xl/>
+- [x] Add AVIF output. **Design decided here so the work can start; no code yet.**
 
       *Which encoder.* ~~`libavif-sys`~~ — **superseded 2026-09-26 by `ravif`; see the
       re-check item below.** The original reasoning, kept for the record:
@@ -647,8 +656,10 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
 - [x] **Widen the AVIF-input gate** beyond two files. `tests/avif_input.rs` has `avifenc`
       write 17 encodings — 8/10/12-bit; 4:4:4, 4:2:2, 4:2:0, monochrome; full and limited
       range; BT.601/709/2020 and identity; straight and premultiplied alpha; lossless — and
-      `decode_avif` must agree with `avifdec` (mean ≤ 2, worst ≤ 20) **and never land
-      further from the original than libavif does**. All 17 pass. Mutation-tested against
+      `decode_avif` must agree with `avifdec` (mean ≤ 2, worst ≤ 20) **and land no further
+      from the original than libavif does**, within half a level of mean error (macOS
+      CI's Homebrew libavif is 0.27 closer on 8-bit 4:4:4, a rounding difference). All 17
+      pass on Arch (libavif 1.4.2), Ubuntu (1.0.4) and macOS. Mutation-tested against
       `decode_avif` itself: an off-by-12 narrowing fails 8 of 17. What it established:
       avif-decode upsamples chroma nearest-neighbour (bilinear decoders disagree on siting
       by up to 50 levels at a hard edge); at saturated limited-range pixels libavif is the
@@ -656,9 +667,18 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       libheif's greyscale output leaves limited-range monochrome unexpanded** (black comes
       out as 16) while ours expands it, so that case is held to libavif's raw Y plane.
       Enforced in CI's parity step.
-- [ ] AVIF input ignores the `clap`/`irot`/`imir` (crop, rotate, mirror) properties and
-      refuses grid (tiled) images — `avif-parse` exposes neither. Camera AVIFs can use both;
-      honouring the transforms means reading the item properties ourselves.
+- [x] AVIF input honours the `clap`/`irot`/`imir` (crop, rotate, mirror) properties.
+      `avif-parse` does not expose them, so `crates/skidbladnir-encode/src/avif_transform.rs`
+      reads `pitm`/`iprp`/`ipco`/`ipma` itself and applies the primary item's properties in
+      association order (MIAF: crop, rotate, mirror). A `clap` that is not whole pixels
+      inside the image is ignored, as libavif does. Never panics on malformed boxes.
+      **Gate:** `honours_crop_rotation_and_mirror` in `tests/avif_input.rs` — lossless
+      `avifenc` fixtures for each `irot`, each `imir` axis, a crop and all three combined,
+      checked **exactly** against the `image` crate's own rotate/flip/crop of the source (an
+      independent implementation) *and* against `avifdec`. Mutation-tested: clockwise
+      rotation fails `irot` 1 and 3; swapped mirror axes fail both `imir`.
+- [ ] AVIF input refuses grid (tiled) images — `avif-parse` does not support `grid` items.
+      Some cameras tile large captures. Needs the grid's tiles decoded and stitched.
 - [x] **Show the AVIF preview on every platform** (done 2026-09-27). The encoded AVIF is
       decoded in Rust and sent to the webview as lossless WebP, so no web engine has to
       decode AVIF; the smoke test's "displays the AVIF preview" is a hard check again. The
@@ -709,10 +729,15 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       alpha mid-migration would be trading a known platform for an unknown one; the app
       stays on Tauri 2.x until 3 is stable and the migration has shipped.
       <https://github.com/tauri-apps/tauri/releases>
+      Re-checked 2026-09-27: `3.0.0-alpha.3` shipped beside `2.12.0` (26 September). Its
+      breaking changes that would touch this app: `Plugin` must be `Sync` and its hooks take
+      `&self`; plugin closures must be `Fn + Send + Sync`; `run_on_main_thread` is removed in
+      favour of a trait. Still an alpha — no change to the decision.
+      <https://github.com/tauri-apps/tauri/releases>
 - [x] Confirm the encoder is current. **No libwebp upgrade is pending:** 1.6.0
       (9 July 2025) is still the newest release, and it is exactly what `libwebp-sys`
       vendors and what the parity test compares against, so the parity claim is against
-      current upstream. Re-check each run. Re-checked 2026-09-25: still 1.6.0.
+      current upstream. Re-check each run. Re-checked 2026-09-25 and 2026-09-27: still 1.6.0.
       <https://github.com/webmproject/libwebp/tags>
 - [x] Strike the JPEG 2000 claim from the README — done; the Status section now lists
       WebP as the only output format rather than promising JPEG 2000.

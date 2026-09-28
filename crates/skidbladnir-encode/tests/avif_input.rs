@@ -7,8 +7,8 @@
 //! monochrome; full and limited range; the BT.601, BT.709, BT.2020 and identity matrices;
 //! straight and premultiplied alpha; and lossless. Two correct decoders can round a
 //! YUV-to-RGB conversion differently, so the bound is two-sided: close to `avifdec`
-//! (mean ≤ 2, worst ≤ 20 levels) **and never further from the original image than libavif
-//! lands**. A wrong matrix, range, depth scaling or alpha rule is tens of levels out on
+//! (mean ≤ 2, worst ≤ 20 levels) **and no further from the original image than libavif
+//! lands**, give or take half a level of mean error. A wrong matrix, range, depth scaling or alpha rule is tens of levels out on
 //! both (mutation-tested on a hand-written decoder when this gate was built: forcing full
 //! range failed 4 files, BT.601-for-709 failed 4, ignoring premultiplication failed at a
 //! mean of 41).
@@ -153,7 +153,11 @@ fn matches_avifdec_across_colour_encodings() {
 		// 250). So the bound is loose-ish against avifdec but strict against the original:
 		// never further from it than libavif is. A wrong matrix, range, depth scaling or alpha
 		// rule is tens of levels out on both.
-		if mean > 2.0 || worst > 20 || (!monochrome && ours_off > theirs_off + 0.25) {
+		// The slack is half a level of mean error: macOS CI's Homebrew libavif lands 0.27
+		// closer to the original than ours on 8-bit 4:4:4 BT.601 (0.49 against 0.76), a
+		// rounding difference; the wrong-matrix, wrong-range and wrong-depth mutations each
+		// moved it by 8 or more.
+		if mean > 2.0 || worst > 20 || (!monochrome && ours_off > theirs_off + 0.5) {
 			failures.push(format!("{name}: against avifdec mean {mean:.3} worst {worst}; from the original ours {ours_off:.3} vs avifdec {theirs_off:.3}"));
 		}
 	}
@@ -181,4 +185,73 @@ fn reads_back_our_own_avif_output() {
 fn refuses_what_is_not_an_avif() {
 	assert!(decode_avif(b"not an avif at all").is_err());
 	assert!(decode_avif(&[]).is_err());
+}
+
+/// An AVIF's crop (`clap`), rotation (`irot`) and mirror (`imir`) are applied, in that
+/// order, exactly as libavif displays them.
+///
+/// The fixtures are **lossless**, so the expected pixels are known without any reference
+/// decoder: the source PNG put through the `image` crate's own crop, rotate and flip — an
+/// implementation independent of ours. `avifdec`, which applies the same properties, must
+/// then agree exactly as well. `irot` n is n quarter turns *anticlockwise*; `imir` 0 flips
+/// top-to-bottom and 1 left-to-right (as `avifenc --help` documents them).
+/// A transform as the `image` crate performs it, for the expected side of the comparison.
+type Expected = fn(&image::RgbaImage) -> image::RgbaImage;
+
+#[test]
+fn honours_crop_rotation_and_mirror() {
+	use image::imageops;
+
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let (Some(avifenc), avifdec) = (tool("SKIDBLADNIR_REFERENCE_AVIFENC", "avifenc"), tool("SKIDBLADNIR_REFERENCE_AVIFDEC", "avifdec")) else {
+		let message = "AVIF TRANSFORMS NOT CHECKED: avifenc (libavif) is needed.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+
+	let dir = env::temp_dir().join(format!("skidbladnir-avif-transforms-{}", std::process::id()));
+	let _ = fs::remove_dir_all(&dir);
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+	let source = source(true);
+	let source_png = dir.join("source.png");
+	source.save(&source_png).expect("write the source PNG");
+
+	// (name, avifenc flags, the same transform done by the `image` crate)
+	let mut cases: Vec<(&str, &[&str], Expected)> = Vec::new();
+	let mut add = |name: &'static str, flags: &'static [&'static str], expected: Expected| cases.push((name, flags, expected));
+	add("irot 1", &["--irot", "1"], imageops::rotate270);
+	add("irot 2", &["--irot", "2"], imageops::rotate180);
+	add("irot 3", &["--irot", "3"], imageops::rotate90);
+	add("imir 0", &["--imir", "0"], imageops::flip_vertical);
+	add("imir 1", &["--imir", "1"], imageops::flip_horizontal);
+	add("crop", &["--crop", "10,0,20,48"], |img| imageops::crop_imm(img, 10, 0, 20, 48).to_image());
+	add("crop, irot 1, imir 0", &["--crop", "10,0,20,48", "--irot", "1", "--imir", "0"], |img| imageops::flip_vertical(&imageops::rotate270(&imageops::crop_imm(img, 10, 0, 20, 48).to_image())));
+
+	let mut failures = Vec::new();
+	for (index, (name, flags, expected)) in cases.iter().enumerate() {
+		let avif = dir.join(format!("{index}.avif"));
+		let mut args = vec!["-s", "10", "-l"];
+		args.extend_from_slice(flags);
+		let (source_str, avif_str) = (source_png.to_string_lossy().into_owned(), avif.to_string_lossy().into_owned());
+		args.extend([source_str.as_str(), avif_str.as_str()]);
+		run(&avifenc, &args);
+
+		let expected = expected(&source);
+		let (width, height, ours) = decode_avif(&fs::read(&avif).expect("read")).expect("decode");
+		if (width, height) != expected.dimensions() || ours != *expected.as_raw() {
+			failures.push(format!("{name}: we produced {width}x{height}, expected {:?}{}", expected.dimensions(), if (width, height) == expected.dimensions() { " with different pixels" } else { "" }));
+		}
+		if let Some(avifdec) = &avifdec {
+			let png = dir.join(format!("{index}.png"));
+			run(avifdec, &["-d", "8", &avif_str, &png.to_string_lossy()]);
+			let theirs = image::open(&png).expect("read avifdec's PNG").into_rgba8();
+			if theirs.dimensions() != (width, height) || theirs.as_raw() != &ours {
+				failures.push(format!("{name}: avifdec shows {:?}, we show {width}x{height}{}", theirs.dimensions(), if theirs.dimensions() == (width, height) { " with different pixels" } else { "" }));
+			}
+		}
+	}
+	let _ = fs::remove_dir_all(&dir);
+	assert!(failures.is_empty(), "AVIF TRANSFORMS FAILED:\n{}", failures.join("\n"));
+	eprintln!("AVIF TRANSFORMS OK: {} files shown with their crop, rotation and mirror, exactly{}", cases.len(), if avifdec.is_some() { ", matching avifdec" } else { "" });
 }

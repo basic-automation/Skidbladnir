@@ -177,10 +177,11 @@ What it can do:
   system. Checked by the runner's own libheif (`heif-dec`), a separate build.
 - Read PNG, JPEG, TIFF, WebP, **AVIF**, **JPEG XL**, **HEIC** and **GIF** input,
   identifying the format by its contents rather than by its file extension. That
-  includes **CMYK JPEGs** as Photoshop writes
-  them, which `cwebp` itself refuses to read. AVIF input is checked against libavif's
-  own `avifdec`, and JPEG XL input against libjxl's `djxl`; each must decode the same
-  files to the same pixels.
+  includes **CMYK JPEGs** as Photoshop writes them, which `cwebp` itself refuses to read.
+  AVIF input is checked against libavif's own `avifdec` across 17 colour encodings (bit
+  depths, chroma subsampling, range, colour matrices, alpha), and an AVIF's crop,
+  rotation and mirror are applied, so a sideways-stored portrait converts upright. JPEG
+  XL input is checked against libjxl's `djxl`.
 - Refuse to overwrite your source image, and stage every write through a temporary
   file so a failed conversion cannot damage a file that was already there.
 - Report the before and after sizes, and the dimensions actually produced.
@@ -196,8 +197,8 @@ Known gaps:
 - The app is not code-signed on any platform.
 - An AVIF, JPEG XL or HEIC encode cannot be cancelled mid-file: none of those encoders reports progress, so
   Cancel takes effect when the current file finishes (which is then discarded, not
-  written). There is no chroma subsampling control — AVIF is always written 4:4:4 — and
-  animated AVIF is not read.
+  written). There is no chroma subsampling control — AVIF is always written 4:4:4 —
+  animated AVIF is not read, and tiled (grid) AVIFs are refused.
 - An animation (animated WebP or GIF) converts to WebP only. AVIF, JPEG XL and HEIC
   output refuse it by name rather than keeping just the first frame, because those
   encoders write still images here. A target size or PSNR applies to each frame of an
