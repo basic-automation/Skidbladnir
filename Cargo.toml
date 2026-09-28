@@ -44,6 +44,9 @@ tauri = { version = "2", features = [] }
 # The native file and directory pickers. The app never browses the filesystem itself —
 # the user picks, and the app writes only where they pointed.
 tauri-plugin-dialog = "2"
+# In-app updates from the signed manifest `release.yml` publishes. Rust-side only: the
+# window gets two commands, not the plugin's own IPC permissions.
+tauri-plugin-updater = "2"
 tauri-build = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

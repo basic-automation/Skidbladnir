@@ -81,14 +81,40 @@ jobs:
         # serve the embedded frontend rather than the dev server. The CLI is the prebuilt
         # `@tauri-apps/cli` from the frontend's lockfile, as in ci.yml, rather than
         # `cargo install tauri-cli`, which compiled it from source on every platform.
+        #
+        # Updater artifacts (a `.sig` beside each installer, and the macOS `.app.tar.gz`)
+        # are switched on here rather than in tauri.conf.json, because producing them needs
+        # the signing key: in the config, every local and CI build without the key would
+        # fail. The key's public half is in tauri.conf.json; the private half exists only
+        # as these two secrets and in the owner's ~/.tauri.
+        #
+        # Without the secret a real release still ships, unsigned for the updater, with a
+        # warning — the installers work, the app just cannot offer them as an update. A dry
+        # run signs with a throwaway key instead, so the whole updater path is exercised
+        # before a tag exists; its signatures verify against nothing and are never published.
         shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          cd src-tauri
-          if [ -n "${{ matrix.target }}" ]; then
-            ../frontend/node_modules/.bin/tauri build --target "${{ matrix.target }}"
-          else
-            ../frontend/node_modules/.bin/tauri build
+          cli=frontend/node_modules/.bin/tauri
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ] && [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "dry run without the signing secret: signing with a throwaway key"
+            "$cli" signer generate --ci -w "$RUNNER_TEMP/throwaway.key" -p throwaway >/dev/null
+            export TAURI_SIGNING_PRIVATE_KEY="$(cat "$RUNNER_TEMP/throwaway.key")"
+            export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=throwaway
           fi
+          args=()
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            args+=(--config '{"bundle":{"createUpdaterArtifacts":true}}')
+          else
+            echo "::warning::TAURI_SIGNING_PRIVATE_KEY is not set, so ${{ matrix.name }} is built without updater signatures and will not be offered as an update"
+          fi
+          if [ -n "${{ matrix.target }}" ]; then
+            args+=(--target "${{ matrix.target }}")
+          fi
+          cd src-tauri
+          "../$cli" build "${args[@]}"
 
       - name: Collect the artifacts
         shell: bash
@@ -97,7 +123,18 @@ jobs:
           # `find` rather than a fixed list: the bundle layout differs per platform and a
           # missing glob must not silently produce an empty upload.
           # target/<triple>/release/bundle for a cross build, target/release/bundle otherwise.
-          find target -path '*/release/bundle/*' -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.msi' -o -name '*-setup.exe' \) -exec cp {} dist-artifacts/ \;
+          find target -path '*/release/bundle/*' -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.msi' -o -name '*-setup.exe' -o -name '*.sig' \) -exec cp {} dist-artifacts/ \;
+          # The macOS updater archive is `Skidbladnir.app.tar.gz` on both architectures,
+          # and one release cannot hold two assets with the same name. Name it like the
+          # .dmg beside it: Skidbladnir_<version>_<aarch64|x64>.app.tar.gz.
+          archive=$(find target -path '*/release/bundle/macos/*' -type f -name '*.app.tar.gz' | head -1)
+          if [ -n "$archive" ]; then
+            version=$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)
+            case "${{ matrix.name }}" in macos-x64) arch=x64 ;; *) arch=aarch64 ;; esac
+            cp "$archive" "dist-artifacts/Skidbladnir_${version}_${arch}.app.tar.gz"
+            rm -f dist-artifacts/*.app.tar.gz.sig
+            cp "$archive.sig" "dist-artifacts/Skidbladnir_${version}_${arch}.app.tar.gz.sig"
+          fi
           ls -la dist-artifacts
           if [ -z "$(ls -A dist-artifacts)" ]; then
             echo "::error::No installers were produced for ${{ matrix.name }}"
@@ -132,3 +169,98 @@ jobs:
             gh release create "$TAG" --draft --prerelease --title "$TAG" --notes "Artifacts attached by CI. Notes pending."
           fi
           gh release upload "$TAG" dist-artifacts/* --clobber
+
+  # The updater manifest. Runs after every platform has finished, whatever they did, and
+  # lists the ones that produced signed installers (scripts/updater-manifest.py).
+  #
+  # The installed app reads it from the `updater` branch, not from the release:
+  # `releases/latest` skips prereleases, and every release is a prerelease for now. The
+  # branch holds only latest.json, and only this job writes to it.
+  manifest:
+    name: updater manifest
+    needs: bundle
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    # Two releases racing to rewrite latest.json must not interleave.
+    concurrency: updater-manifest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ (inputs.dry_run && github.ref) || inputs.tag || github.ref }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: skidbladnir-*
+          path: dist-artifacts
+          merge-multiple: true
+
+      - name: Write latest.json
+        id: write
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            tag="v$version"
+          else
+            tag="$TAG"
+            # The tag and the manifest's version must agree, or clients would download one
+            # version believing it to be another and offer it again on every launch.
+            if [ "$tag" != "v$version" ]; then
+              echo "::error::tag $tag does not match the version in src-tauri/Cargo.toml ($version)"
+              exit 1
+            fi
+            gh release view "$tag" --json body -q .body > notes.md || true
+          fi
+          if ! ls dist-artifacts/*.sig >/dev/null 2>&1; then
+            echo "::warning::no platform produced updater signatures; no manifest is published and installed copies will not be offered $tag"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          scripts/updater-manifest.py --dir dist-artifacts --version "$version" --tag "$tag" --repo "${{ github.repository }}" --notes-file notes.md --out latest.json
+          cat latest.json
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        if: steps.write.outputs.publish == 'true'
+        with:
+          name: updater-manifest
+          path: latest.json
+
+      - name: Publish to the release and the updater branch
+        if: ${{ steps.write.outputs.publish == 'true' && !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.write.outputs.tag }}
+          VERSION: ${{ steps.write.outputs.version }}
+        run: |
+          gh release upload "$TAG" latest.json --clobber
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          branch="$RUNNER_TEMP/updater"
+          if git fetch --depth 1 origin updater 2>/dev/null; then
+            git worktree add "$branch" FETCH_HEAD
+            # Re-running an older tag's release must not roll every client back to it.
+            current=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$branch/latest.json" 2>/dev/null || echo 0)
+            newest=$(printf '%s\n%s\n' "$current" "$VERSION" | sort -V | tail -1)
+            if [ "$newest" != "$VERSION" ]; then
+              echo "the updater branch already offers $current, newer than $VERSION; leaving it"
+              exit 0
+            fi
+          else
+            git worktree add --detach "$branch"
+            git -C "$branch" checkout --orphan updater
+            git -C "$branch" rm -rf --quiet .
+          fi
+          cp latest.json "$branch/latest.json"
+          git -C "$branch" add latest.json
+          if git -C "$branch" diff --cached --quiet; then
+            echo "latest.json is unchanged"
+            exit 0
+          fi
+          git -C "$branch" commit -m "updater: offer $TAG"
+          git -C "$branch" push origin HEAD:refs/heads/updater

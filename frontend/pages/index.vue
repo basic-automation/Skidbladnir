@@ -418,6 +418,8 @@ function basename(path: string): string {
 		</div>
 
 		<main class="mx-auto w-full max-w-5xl grow px-5 pt-8 pb-36">
+			<UpdateBanner />
+
 			<UAlert
 				v-if="preferencesNotice"
 				color="warning"

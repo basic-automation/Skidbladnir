@@ -58,6 +58,13 @@ Each release carries a Linux `.deb` and AppImage, a Windows installer, and macOS
 for Apple Silicon and Intel. Releases are still marked **prerelease**; see Status for
 which builds have actually been run.
 
+Once installed, Skidbladnir checks for a newer release each time it starts and offers it
+in a banner; nothing is downloaded until you click **Install and restart**, and every
+update is verified against the project's signing key before it is installed. A `.deb`
+install updates with a `.deb` (and asks for your password to do it); an AppImage, the
+Windows installer and the macOS app update themselves in place. Releases before 0.8.0
+have no updater, so moving off them is a manual download, once.
+
 Skidbladnir used to be an Electron app for Windows. That app has been retired: its last
 binary release is [v0.4.3](https://github.com/basic-automation/Skidbladnir/releases/tag/v0.4.3)
 (2019), and its last source is the

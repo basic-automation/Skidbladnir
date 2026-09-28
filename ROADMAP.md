@@ -452,23 +452,36 @@ prettier subset.
       than uploading nothing.
       **Unverified until a tag exists** — a tag-triggered workflow cannot be exercised
       before the tag it reacts to.
-- [x] Decide whether the Tauri updater is in scope. **Not for the 0.x line.** Reasons, in
-      order of weight:
-      1. The updater requires a **signing keypair**, and its private key is owner-gated —
-       it must never pass through this routine. An updater configured without one is not
-       an updater; an updater whose key lives somewhere convenient is a way to push
-       arbitrary code to every install.
-      2. It is an auto-update channel for an app that is **mid-migration and pre-parity**.
-       Shipping a mechanism that silently replaces a user's binary before the binary
-       itself is stable is the wrong order.
-      3. The app has no telemetry and no crash reporting, so a bad auto-update would be
-       invisible to us and unattributable by the user.
-      Revisit when the Tauri app is the shipping app and a tri-platform release has gone
-      out at least once. Until then, releases are downloaded deliberately from the
-      releases page.
-- [ ] (owner-gated, when the updater is revisited) Generate and store an updater signing
-      keypair. `cargo tauri signer generate`. The private key and its password belong in
-      the repository's Actions secrets and nowhere else; the routine must never see them.
+- [x] Decide whether the Tauri updater is in scope. First decided **not for the 0.x
+      line** (key custody; an auto-update channel for a pre-parity app; no telemetry to see
+      a bad update), to be revisited once the Tauri app was the shipping app and a
+      tri-platform release had gone out. Both held by 0.7.0, and the owner asked for it
+      (2026-09-28), so it is in — shaped by those three objections:
+      1. **Key custody.** The minisign keypair was generated in an interactive session
+       with the owner, not by the routine. The private key and its password live in the
+       owner's `~/.tauri/skidbladnir-updater.key*` and the repository's Actions secrets
+       `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, nowhere else;
+       the public half is in `tauri.conf.json`. The routine never touches either.
+      2. **Nothing is silent.** The app checks once per launch (release builds only) and
+       shows a banner; nothing is downloaded or installed until the user clicks. Every
+       download is verified against the public key before it is installed.
+      3. **Each install updates in its own format**: the manifest is keyed per bundle
+       (`linux-x86_64-appimage`, `linux-x86_64-deb`, `windows-x86_64-nsis`,
+       `darwin-{aarch64,x86_64}-app`), so a `.deb` install is never replaced by an
+       AppImage. A `.deb` update asks for the admin password through polkit.
+- [x] Updater plumbing. `release.yml` builds with `createUpdaterArtifacts` only when the
+      signing secret is present (so local and CI builds need no key), and a final
+      `manifest` job writes `latest.json` from the signed installers
+      (`scripts/updater-manifest.py`), attaches it to the release, and commits it to the
+      orphan **`updater` branch**, which is what installed copies read. Not
+      `releases/latest`: that skips prereleases, and every release is one. A re-run of an
+      older tag never rolls the branch back. Dry runs sign with a throwaway key so the
+      whole path is exercised without publishing.
+      Verified locally: a signed `.deb` built with a throwaway key, served with a
+      generated manifest, raised the banner in the real window; a tampered download was
+      refused with "signature verification failed". **The first release that can be
+      offered as an update is the first one built with the secret set** — 0.7.0 and
+      earlier have no updater and must be updated by hand once.
 - [x] First tri-platform release of the Tauri app — **v0.5.0**, a prerelease carrying a
       Windows installer, a macOS `.dmg`, a `.deb` and an AppImage.
 
