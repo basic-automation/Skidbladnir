@@ -699,6 +699,50 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
 - [ ] Re-encode animated WebP rather than refusing it, using libwebp's `WebPAnimEncoder`.
       This needs a per-frame settings story (do the advanced controls apply to every
       frame?) and a demuxer for the input, so it is a real piece of work, not a flag.
+- [ ] **HEIF/HEIC input.** The common case is iPhone and macOS photos, which are HEIC
+      by default. Converting those to WebP/AVIF is something users do, so this is a
+      real input format, not a curiosity. Added to the queue 2026-09-28.
+      - *Sniffing already half-exists:* `SourceFormat` reads the `ftyp` box for AVIF and
+        explicitly **refuses** a HEIC with the same container. This item turns that refusal
+        into a decode for the `heic`/`heix`/`mif1` brands.
+      - *Decoder choice is the whole decision, and it is a licensing one.* `libheif-rs`
+        wraps libheif (LGPL-3.0) and needs libde265 for HEVC. That is a C toolchain on
+        three runners, and dynamic-linking obligations that `cargo deny` will have to be
+        told about. `heic-rs` claims pure Rust (MIT OR Apache-2.0, no C toolchain) and
+        covers iPhone grid images, 8/10-bit and 4:2:0/4:2:2/4:4:4. It is young, so it has
+        to earn trust the way `avif-decode` did: an agreement gate against a reference
+        decoder (libheif's `heif-dec`) in CI, before it ships.
+        <https://github.com/tbraun96/heic-rs> · <https://crates.io/crates/libheif-rs>
+      - *HEVC is patent-encumbered.* Decoding in a free desktop app is the common practice
+        (libheif and GIMP ship it), but check this, and write the answer down, before
+        release.
+      - *Out of scope: HEIC output.* Encoding HEVC means x265 (GPL) and the patent pool.
+        AVIF already is "HEIF with a royalty-free codec", and it is the output format to
+        offer anyone who wants HEIF.
+      - *Carry over from HEIC:* EXIF orientation (iPhone photos rely on it) and the
+        embedded colour profile. Check whether the AVIF path already honours either.
+- [ ] **JPEG XL input, then output.** Supersedes the "watch item" in the format decision
+      above: the trigger it named is close. Firefox 157 enables JXL by default (due the
+      end of September 2026), and Chrome/Edge have formalised their intent to enable it by
+      default after shipping it behind a flag in Chrome 145.
+      <https://mintec.co/blog/jpeg-xl-firefox-pipeline-imagenes/> ·
+      <https://www.phoronix.com/news/Chrome-145-Released>
+      1. **Input first. It is cheap, and useful today** for anyone who already has .jxl
+         files. `jxl-oxide` (0.12, pure Rust, MIT/Apache) is a complete decoder with no C
+         toolchain. Sniff the bare codestream (`FF 0A`) and the ISOBMFF container
+         (`JXL ` box). Gate it the way AVIF input was gated: our decode against libjxl's
+         `djxl` on the same files, in CI.
+         <https://crates.io/crates/jxl-oxide>
+      2. **Output once Chrome enables it by default** (re-check before starting). The
+         encoder is libjxl, via `jpegxl-rs`/`jpegxl-sys` (BSD-3). That is a C++ build on
+         three runners, so price it the way the AVIF encoder choice was priced. Its
+         controls map naturally onto the existing panel: distance/quality, effort
+         (1–10, the analogue of `method`/`speed`), and lossless. One control is worth
+         adding: **lossless JPEG recompression**, which re-packs a JPEG into JXL about 20%
+         smaller and can reconstruct the original JPEG bit for bit. No other output format
+         here can offer that.
+      3. The preview already decodes AVIF in Rust and shows lossless WebP, so JXL gets a
+         preview on every web engine the same way, whatever the browsers do.
 
 ## Cross-cutting
 
