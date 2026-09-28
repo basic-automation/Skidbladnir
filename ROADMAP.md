@@ -479,7 +479,10 @@ prettier subset.
       whole path is exercised without publishing.
       Verified locally: a signed `.deb` built with a throwaway key, served with a
       generated manifest, raised the banner in the real window; a tampered download was
-      refused with "signature verification failed". **The first release that can be
+      refused with "signature verification failed". A `release.yml` dry run signed all
+      five updatable installers and wrote a manifest listing every target; its first run
+      found that a `dmg`-only target list yields no `.app.tar.gz`, so `app` is now a bundle
+      target too. **The first release that can be
       offered as an update is the first one built with the secret set** — 0.7.0 and
       earlier have no updater and must be updated by hand once.
 - [x] First tri-platform release of the Tauri app — **v0.5.0**, a prerelease carrying a
