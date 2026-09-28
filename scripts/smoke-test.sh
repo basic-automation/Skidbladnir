@@ -195,6 +195,35 @@ check "reads AVIF input" \
 	 const r=await I.invoke('convert_image', { settings: s, input: '$out_dir/smoke.avif', outputDirectory: '$(app_path "$scratch/from-avif")' });
 	 return r.outputPath.split(/[\\\\/]/).pop() + ' ' + r.width + 'x' + r.height" 'smoke.webp 48x48'
 
+# Animated WebP: converted with every frame, refused (not cut down) for AVIF, and
+# previewed as an animation the webview can show. The fixture was written by libwebp's own
+# img2webp; its provenance is in crates/skidbladnir-encode/tests/animation.rs.
+cp "$(dirname "$0")/../crates/skidbladnir-encode/tests/fixtures/animated.webp" "$scratch/anim.webp"
+anim_in=$(app_path "$scratch/anim.webp")
+check "converts an animated WebP end to end" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const s=await I.invoke('default_settings');
+	 const r=await I.invoke('convert_image', { settings: s, input: '$anim_in', outputDirectory: '$out_dir' });
+	 return r.outputPath.split(/[\\\\/]/).pop() + ' ' + r.width + 'x' + r.height" 'anim.webp 24x16'
+frames=$("$PY" -c 'import sys; print(open(sys.argv[1], "rb").read().count(b"ANMF"))' "$scratch/out/anim.webp" 2>/dev/null || echo 0)
+if [ "$frames" = 3 ]; then
+	printf 'ok   %s\n' "wrote an animated WebP with all 3 frames ($(wc -c < "$scratch/out/anim.webp") bytes)"
+else
+	printf 'FAIL %s\n' "expected 3 frames in $scratch/out/anim.webp, found $frames"
+	failures=$((failures + 1))
+fi
+check "refuses to cut an animation down to an AVIF still" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const s=await I.invoke('default_settings'); s.format='avif';
+	 try { await I.invoke('convert_image', { settings: s, input: '$anim_in', outputDirectory: '$out_dir' }); return 'NOT REFUSED'; }
+	 catch (e) { return String(e); }" 'AVIF output takes still images only'
+check "previews an animation the webview can show" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const s=await I.invoke('default_settings');
+	 const p=await I.invoke('preview_encode', { settings: s, input: '$anim_in' });
+	 const shown=await new Promise(res => { const i=new Image(); i.onload=()=>res(i.naturalWidth + 'x' + i.naturalHeight); i.onerror=()=>res('not displayable'); i.src=p.encoded; });
+	 return p.frames + ' frames, shown ' + shown" '3 frames, shown 24x16'
+
 echo
 if [ "$failures" -gt 0 ]; then
 	echo "$failures check(s) failed."

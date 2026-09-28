@@ -46,6 +46,7 @@ without memorising the command line.
 **Workflow**
 
 - Preview the result beside the original, in either format, before anything is written
+- Animated WebP in, animated WebP out, every frame kept
 - Batch conversion across multiple input files
 - Original and converted file sizes reported after each conversion
 - Advanced options hidden behind a disclosure so the common path stays simple
@@ -91,8 +92,9 @@ scripts/smoke-test.sh      # drives the built window: renders, IPC, a real conve
 scripts/a11y-audit.sh      # axe-core against the live window
 ```
 
-The parity tests compare this encoder against a real `cwebp` and require one: point
-`SKIDBLADNIR_REFERENCE_CWEBP` at a build of the **same libwebp version** the binary links
+The parity tests compare this encoder against a real `cwebp` (and the animation encoder
+against `img2webp`) and require one: point `SKIDBLADNIR_REFERENCE_CWEBP` and
+`SKIDBLADNIR_REFERENCE_IMG2WEBP` at builds of the **same libwebp version** the binary links
 (`cargo run --example libwebp-version -p skidbladnir-encode` prints it), or they will say
 so and skip rather than pass quietly. Set `SKIDBLADNIR_REQUIRE_PARITY=1` to turn a skip
 into a failure.
@@ -128,8 +130,11 @@ What it can do:
   transparency survives.
 - Preview the result beside the original, in either format, before anything is
   written to disk.
-- Tell you what an existing WebP already is — size, lossy or lossless, alpha — and say
-  plainly when a file is an animation it cannot re-encode, rather than failing obscurely.
+- Tell you what an existing WebP already is — size, lossy or lossless, alpha, animated.
+- Re-encode an **animated WebP** as an animated WebP, keeping every frame, its timing and
+  its loop count, with every WebP setting applied to each frame, and preview it as an
+  animation before converting. Its output is byte-for-byte identical to libwebp's own
+  `img2webp` for every setting `img2webp` can express.
 - Remember your settings and destination between launches, and save named presets of
   your own.
 - Be driven entirely from the keyboard, with every control labelled for a screen reader.
@@ -157,6 +162,9 @@ Known gaps:
   Cancel takes effect when the current file finishes (which is then discarded, not
   written). There is no chroma subsampling control — AVIF is always written 4:4:4 — and
   animated AVIF is not read.
+- An animated WebP converts to WebP only. AVIF output refuses it by name rather than
+  keeping just the first frame, because the AVIF encoder writes still images. A target
+  size or PSNR applies to each frame of an animation, not to the whole file.
 - JPEG XL is being watched until browsers enable it without a flag. The long-promised
   JPEG 2000 was dropped as a goal; it has no momentum outside medical and archival
   imaging.

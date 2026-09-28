@@ -122,13 +122,14 @@ pub enum SourceError {
 		/// The path that failed.
 		path: PathBuf,
 	},
-	/// The file is an animated WebP, which this encoder cannot re-encode.
+	/// The file is an animated WebP, asked for somewhere only a still image will do.
 	///
-	/// Distinguished from a decode failure because it is not one: the file is perfectly
-	/// valid, it is simply a kind of image the still-image encoder has nothing to do with.
-	/// libwebp's still decoder refuses it anyway, but with a message that tells the user
-	/// nothing about why.
-	#[error("`{path}` is an animated WebP. Skidbladnir encodes still images, so it cannot re-encode an animation.")]
+	/// Converting one to WebP works — [`encode_file`] re-encodes every frame. What cannot
+	/// take one is anything that wants a single picture: [`load`], and AVIF output, which
+	/// `ravif` writes as stills only. Refusing there, by name, is what stops an animation
+	/// being silently cut down to its first frame. libwebp's still decoder refuses it
+	/// anyway, but with a message that tells the user nothing about why.
+	#[error("`{path}` is an animated WebP. It converts to an animated WebP, but AVIF output takes still images only.")]
 	Animated {
 		/// The path that failed.
 		path: PathBuf,
@@ -153,7 +154,17 @@ pub enum SourceError {
 /// formats, or fails to decode.
 pub fn load(path: &Path) -> Result<SourceImage, SourceError> {
 	let bytes = fs::read(path).map_err(|source| SourceError::Read { path: path.to_path_buf(), source })?;
-	let format = SourceFormat::sniff(&bytes).ok_or_else(|| SourceError::Unsupported { path: path.to_path_buf() })?;
+	decode(path, &bytes)
+}
+
+/// Whether `bytes` are an animated WebP, from the header alone.
+fn is_animated_webp(bytes: &[u8]) -> bool {
+	SourceFormat::sniff(bytes) == Some(SourceFormat::Webp) && crate::inspect::inspect_webp(bytes).is_some_and(|info| info.has_animation)
+}
+
+/// Decode the bytes of the file at `path` into RGBA pixels; `path` is for error messages.
+fn decode(path: &Path, bytes: &[u8]) -> Result<SourceImage, SourceError> {
+	let format = SourceFormat::sniff(bytes).ok_or_else(|| SourceError::Unsupported { path: path.to_path_buf() })?;
 
 	let (width, height, pixels) = match format {
 		// libwebp decodes its own format; using a second WebP implementation here would
@@ -163,14 +174,14 @@ pub fn load(path: &Path) -> Result<SourceImage, SourceError> {
 			// Check before decoding: libwebp's still decoder refuses an animation, but the
 			// failure it reports says nothing about why, and "libwebp rejected the file" is
 			// not something a user can act on.
-			if crate::inspect::inspect_webp(&bytes).is_some_and(|info| info.has_animation) {
+			if is_animated_webp(bytes) {
 				return Err(SourceError::Animated { path: path.to_path_buf() });
 			}
-			decode_webp(&bytes).ok_or_else(|| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: "libwebp rejected the file".to_owned() })?
+			decode_webp(bytes).ok_or_else(|| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: "libwebp rejected the file".to_owned() })?
 		}
 		SourceFormat::Avif => decode_avif(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?,
 		SourceFormat::Png | SourceFormat::Jpeg | SourceFormat::Tiff => {
-			let decoded = image::load_from_memory(&bytes).map_err(|error| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: error.to_string() })?;
+			let decoded = image::load_from_memory(bytes).map_err(|error| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: error.to_string() })?;
 			let rgba = to_rgba8(decoded);
 			(rgba.width(), rgba.height(), rgba.into_raw())
 		}
@@ -551,9 +562,20 @@ pub fn encode_file_with_progress(settings: &EncodeJob, input: &Path, output: &Pa
 		return Err(ConvertError::WouldOverwriteSource { path: input.to_path_buf() });
 	}
 
-	let source_bytes = fs::metadata(input).map(|meta| meta.len()).map_err(|source| SourceError::Read { path: input.to_path_buf(), source })?;
-	let image = load(input)?;
-	let encoded = encode_rgba_with_progress(settings, &image.as_rgba(), on_progress)?;
+	let bytes = fs::read(input).map_err(|source| SourceError::Read { path: input.to_path_buf(), source })?;
+	let source_bytes = bytes.len() as u64;
+	// An animation goes through the animation encoder whole. Only WebP can hold one, so
+	// asking for AVIF is refused rather than quietly keeping the first frame.
+	let (encoded, fallback) = if is_animated_webp(&bytes) {
+		if settings.format != OutputFormat::Webp {
+			return Err(SourceError::Animated { path: input.to_path_buf() }.into());
+		}
+		let animation = crate::animation::decode(&bytes).ok_or_else(|| SourceError::Decode { path: input.to_path_buf(), format: SourceFormat::Webp.name(), detail: "libwebp could not read the animation".to_owned() })?;
+		(crate::animation::encode(&settings.webp, settings.resize, &animation, on_progress)?, (animation.width, animation.height))
+	} else {
+		let image = decode(input, &bytes)?;
+		(encode_rgba_with_progress(settings, &image.as_rgba(), on_progress)?, (image.width, image.height))
+	};
 
 	// A temporary name in the destination directory, so the rename stays on one filesystem
 	// and is therefore atomic.
@@ -568,7 +590,7 @@ pub fn encode_file_with_progress(settings: &EncodeJob, input: &Path, output: &Pa
 		OutputFormat::Webp => encoded_dimensions(&encoded),
 		OutputFormat::Avif => crate::avif::dimensions(&encoded),
 	}
-	.unwrap_or((image.width, image.height));
+	.unwrap_or(fallback);
 	Ok(Conversion { source_bytes, output_bytes: encoded.len() as u64, width, height })
 }
 
@@ -896,12 +918,13 @@ mod tests {
 		assert_eq!(super::mirrored_output_path(out, Path::new("/absolute/escaped.png"), OutputFormat::Webp), None);
 	}
 
-	/// An animated WebP must be refused with a message that explains itself.
+	/// Loading an animated WebP as a still must be refused with a message that explains
+	/// itself, rather than handing back one frame as if it were the whole image.
 	///
-	/// libwebp's still decoder already refuses one, so the behaviour was never wrong — but
-	/// it reported "libwebp rejected the file", which tells the user nothing.
+	/// libwebp's still decoder already refuses one, but it reports "libwebp rejected the
+	/// file", which tells the user nothing.
 	#[test]
-	fn an_animated_webp_is_refused_by_name() {
+	fn an_animated_webp_is_refused_as_a_still_by_name() {
 		let animated = animated_fixture().expect("libwebp built the animated fixture");
 		assert!(crate::inspect::inspect_webp(&animated).is_some_and(|info| info.has_animation), "the fixture must really be an animation");
 		let scratch = Scratch::new("animated");
@@ -915,6 +938,44 @@ mod tests {
 		// And the UI-facing inspection agrees, so the warning and the refusal cannot drift.
 		let inspected = super::inspect_paths(&[path]);
 		assert!(inspected[0].webp.expect("webp details").has_animation);
+	}
+
+	/// Converting an animated WebP to WebP re-encodes every frame, with their timing.
+	#[test]
+	fn an_animated_webp_converts_to_an_animated_webp() {
+		let animated = animated_fixture().expect("libwebp built the animated fixture");
+		let scratch = Scratch::new("animated-converts");
+		let input = scratch.join("animation.webp");
+		fs::write(&input, &animated).expect("write the fixture");
+		let output = scratch.join("out.webp");
+
+		let job = EncodeJob { resize: Resize { width: 16, height: 0 }, ..EncodeJob::default() };
+		let conversion = encode_file(&job, &input, &output).expect("an animation must convert to WebP");
+		assert_eq!((conversion.width, conversion.height), (16, 12), "the reported size is the resized canvas");
+
+		let written = fs::read(&output).expect("read the output");
+		let decoded = crate::animation::decode(&written).expect("the output must be an animation libwebp reads");
+		assert_eq!(decoded.frames.len(), 2, "no frame may be dropped");
+		assert_eq!(decoded.frames.iter().map(|frame| frame.duration_ms).collect::<Vec<_>>(), [100, 100], "the timing carries over");
+		assert_eq!(conversion.output_bytes, written.len() as u64);
+	}
+
+	/// Asking for AVIF from an animation is refused by name and writes nothing, rather than
+	/// keeping only the first frame.
+	#[test]
+	fn an_animated_webp_is_not_cut_down_to_an_avif_still() {
+		let animated = animated_fixture().expect("libwebp built the animated fixture");
+		let scratch = Scratch::new("animated-avif");
+		let input = scratch.join("animation.webp");
+		fs::write(&input, &animated).expect("write the fixture");
+		let output = scratch.join("out.avif");
+
+		let job = EncodeJob { format: OutputFormat::Avif, ..EncodeJob::default() };
+		let error = encode_file(&job, &input, &output).expect_err("AVIF output of an animation must be refused");
+		assert!(matches!(error, ConvertError::Source(super::SourceError::Animated { .. })), "got {error}");
+		assert!(error.to_string().contains("AVIF"), "the message must say what cannot take it: {error}");
+		assert!(!output.exists(), "a refused conversion writes nothing");
+		assert_eq!(fs::read_dir(&scratch.0).expect("list").count(), 1, "not even a staging file");
 	}
 
 	/// Build a real two-frame animated WebP with libwebp's own animation encoder.

@@ -348,7 +348,7 @@ const converted = computed(() => reports.value.length > 0 && failures.value.leng
 // Preview: encode one of the selected files into memory with the current settings and
 // show it beside the original. Nothing is written to disk. The core returns both sides as
 // data: URLs and computes the saving itself.
-interface Preview { original: string, encoded: string, sourceBytes: number, encodedBytes: number, width: number, height: number, savingPercent: number | null }
+interface Preview { original: string, encoded: string, sourceBytes: number, encodedBytes: number, width: number, height: number, savingPercent: number | null, frames: number }
 const preview = ref<Preview | null>(null)
 const previewFormat = ref<OutputFormat>('webp')
 const previewPath = ref('')
@@ -474,8 +474,15 @@ function basename(path: string): string {
 						</p>
 						<p v-if="animatedInputs.length > 0" class="text-center text-xs text-palenight-yellow">
 							{{ animatedInputs.length === 1 ? 'One selected file is an animated WebP' : `${animatedInputs.length} selected files are animated WebPs` }}.
-							Skidbladnir encodes still images, so {{ animatedInputs.length === 1 ? 'it' : 'they' }} will be
-							skipped with an error rather than converted.
+							<template v-if="isAvif">
+								AVIF holds still images only, so {{ animatedInputs.length === 1 ? 'it' : 'they' }} will be
+								skipped with an error rather than cut down to one frame. Choose WebP to convert
+								{{ animatedInputs.length === 1 ? 'it' : 'them' }} with every frame.
+							</template>
+							<template v-else>
+								{{ animatedInputs.length === 1 ? 'It' : 'They' }} will be re-encoded as animated WebP with every
+								frame and its timing kept. Every setting applies to each frame.
+							</template>
 						</p>
 						<p v-if="dropRejected > 0" class="text-center text-xs text-palenight-yellow">
 							{{ dropRejected }} dropped {{ dropRejected === 1 ? 'file was' : 'files were' }} not a
@@ -646,6 +653,7 @@ function basename(path: string): string {
 								<URadioGroup v-model="targetKind" :items="TARGET_ITEMS" class="mt-2" />
 								<p class="mt-1 text-xs text-palenight-muted">
 									A size or PSNR target overrides the quality slider.
+									<template v-if="animatedInputs.length > 0">For an animation it applies to each frame, not the whole file.</template>
 								</p>
 							</div>
 							<div class="flex flex-col gap-5">
@@ -697,6 +705,9 @@ function basename(path: string): string {
 									</p>
 									<figcaption class="mt-1 text-xs text-palenight-fg">
 										{{ previewFormat.toUpperCase() }} · {{ formatBytes(preview.encodedBytes) }} · {{ preview.width }}×{{ preview.height }}
+										<template v-if="preview.frames > 1">
+											· {{ preview.frames }} frames
+										</template>
 										<template v-if="preview.savingPercent !== null">
 											· <span :class="preview.savingPercent >= 0 ? 'text-palenight-green' : 'text-palenight-orange'">{{ preview.savingPercent >= 0 ? '−' : '+' }}{{ Math.abs(preview.savingPercent).toFixed(1) }}%</span>
 										</template>
