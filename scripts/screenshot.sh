@@ -61,9 +61,12 @@ STATE="${XDG_RUNTIME_DIR:-/tmp}/skidbladnir-wd-${SKIDBLADNIR_WD_PORT:-4444}.json
 session=$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1]))["session"])' "$STATE")
 base="http://127.0.0.1:${SKIDBLADNIR_WD_PORT:-4444}/session/$session"
 
-# Tall enough to show every panel without scrolling, at the width the window opens at.
-curl -s --max-time 30 -X POST -H 'Content-Type: application/json' -d '{"width":1000,"height":3000}' "$base/window/rect" >/dev/null
-sleep 2
+# The settings column scrolls inside the window, so each shot sizes the window to fit its
+# own content: the width the window opens at, and whatever height shows every control.
+size() {
+	curl -s --max-time 30 -X POST -H 'Content-Type: application/json' -d "{\"width\":1280,\"height\":$1}" "$base/window/rect" >/dev/null
+	sleep 2
+}
 
 shot() {
 	curl -s --max-time 60 "$base/screenshot" | "$PY" -c 'import base64,json,sys; open(sys.argv[1], "wb").write(base64.b64decode(json.load(sys.stdin)["value"]))' "$1"
@@ -75,6 +78,7 @@ format() {
 }
 
 format 1
+size 960
 shot "$OUT/avif.png"
 
 format 0
@@ -84,5 +88,7 @@ format 0
 	[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Preview').click();
 	for (let i = 0; i < 300 && document.querySelectorAll('figure img').length < 2; i++) await sleep(100);
 	await sleep(800);
-	return 'ok'" >/dev/null
+	const column = document.querySelector('main .overflow-y-auto');
+	return String(Math.ceil(column.scrollHeight - column.clientHeight + window.innerHeight))" > "$scratch/height"
+size "$(tr -dc 0-9 < "$scratch/height")"
 shot "$OUT/webp.png"

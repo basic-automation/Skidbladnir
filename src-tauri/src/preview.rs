@@ -199,7 +199,7 @@ mod tests {
 	fn a_resize_applies_to_both_sides() {
 		let scratch = Scratch::new("resize");
 		let input = scratch.join_png();
-		let result = preview(&EncodeJob { resize: Resize { width: 32, height: 0 }, ..Default::default() }, &input).expect("preview");
+		let result = preview(&EncodeJob { resize: Resize { width: 32, height: 0, no_enlarge: false }, ..Default::default() }, &input).expect("preview");
 		assert_eq!((result.width, result.height), (32, 24));
 		// Both sides decode to the resized dimensions.
 		for (label, url) in [("original", &result.original), ("encoded", &result.encoded)] {

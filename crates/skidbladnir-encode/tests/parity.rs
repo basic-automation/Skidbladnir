@@ -150,14 +150,14 @@ fn cases() -> Vec<(String, EncodeJob)> {
 	}
 
 	// Resize, including the -exact path that lossless takes.
-	for resize in [Resize { width: 32, height: 24 }, Resize { width: 32, height: 0 }, Resize { width: 0, height: 24 }, Resize { width: 128, height: 96 }] {
+	for resize in [Resize { width: 32, height: 24, no_enlarge: false }, Resize { width: 32, height: 0, no_enlarge: false }, Resize { width: 0, height: 24, no_enlarge: false }, Resize { width: 128, height: 96, no_enlarge: false }] {
 		add(&format!("resize {}x{}", resize.width, resize.height), EncodeJob { resize, ..Default::default() });
 		add(&format!("lossless resize {}x{}", resize.width, resize.height), EncodeJob { resize, webp: WebpSettings { mode: Mode::Lossless, ..Default::default() }, ..Default::default() });
 	}
 
 	// A few combinations, because controls interact: target size with a manual filter,
 	// sharp YUV with a preset-free lossy encode, and the full advanced set at once.
-	add("everything at once", EncodeJob { resize: Resize { width: 40, height: 0 }, webp: WebpSettings { mode: Mode::Lossy, quality: 61, alpha_quality: 77, alpha_filtering: Some(AlphaFiltering::Fast), method: 5, segments: 3, partition_limit: 22, sns: 66, passes: 4, filter: FilterType::Strong, filter_strength: 44, filter_sharpness: 2, target: Some(TargetMetric::Size(4_096)), sharp_yuv: true, low_memory: true, multi_threading: true, preset: None }, ..Default::default() });
+	add("everything at once", EncodeJob { resize: Resize { width: 40, height: 0, no_enlarge: false }, webp: WebpSettings { mode: Mode::Lossy, quality: 61, alpha_quality: 77, alpha_filtering: Some(AlphaFiltering::Fast), method: 5, segments: 3, partition_limit: 22, sns: 66, passes: 4, filter: FilterType::Strong, filter_strength: 44, filter_sharpness: 2, target: Some(TargetMetric::Size(4_096)), sharp_yuv: true, low_memory: true, multi_threading: true, preset: None }, ..Default::default() });
 
 	cases
 }
@@ -266,7 +266,7 @@ fn matches_reference_cwebp_through_a_png_file() {
 	let mut mismatches: Vec<String> = Vec::new();
 	// A representative slice rather than all 76: this test is about the decoder agreeing,
 	// and the encoder surface is already covered above.
-	let subset = [("default lossy", EncodeJob::default()), ("lossless", EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() })), ("near-lossless 60", EncodeJob::from(WebpSettings { mode: Mode::NearLossless, quality: 60, ..Default::default() })), ("quality 30", EncodeJob::from(WebpSettings { quality: 30, ..Default::default() })), ("sharp yuv", EncodeJob::from(WebpSettings { sharp_yuv: true, ..Default::default() })), ("resize 32x0", EncodeJob { resize: Resize { width: 32, height: 0 }, ..Default::default() })];
+	let subset = [("default lossy", EncodeJob::default()), ("lossless", EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() })), ("near-lossless 60", EncodeJob::from(WebpSettings { mode: Mode::NearLossless, quality: 60, ..Default::default() })), ("quality 30", EncodeJob::from(WebpSettings { quality: 30, ..Default::default() })), ("sharp yuv", EncodeJob::from(WebpSettings { sharp_yuv: true, ..Default::default() })), ("resize 32x0", EncodeJob { resize: Resize { width: 32, height: 0, no_enlarge: false }, ..Default::default() })];
 
 	for (name, settings) in &subset {
 		let theirs_path = dir.join(format!("cwebp-{}.webp", name.replace(' ', "-")));

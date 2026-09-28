@@ -9,15 +9,18 @@
     "frontendDist": "../frontend/.output/public"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "Skidbladnir",
-        "width": 1000,
-        "height": 780,
+        "width": 1280,
+        "height": 960,
         "minWidth": 720,
         "minHeight": 560,
         "resizable": true,
-        "center": true
+        "center": true,
+        "decorations": false,
+        "transparent": true
       }
     ],
     "security": {

@@ -118,7 +118,7 @@ mod tests {
 	#[test]
 	fn applies_the_shared_resize() {
 		let pixels = fixture(40, 24);
-		for (resize, expected) in [(Resize { width: 20, height: 12 }, (20, 12)), (Resize { width: 20, height: 0 }, (20, 12)), (Resize { width: 0, height: 12 }, (20, 12))] {
+		for (resize, expected) in [(Resize { width: 20, height: 12, no_enlarge: false }, (20, 12)), (Resize { width: 20, height: 0, no_enlarge: false }, (20, 12)), (Resize { width: 0, height: 12, no_enlarge: false }, (20, 12))] {
 			let bytes = encode(&quick(), resize, &RgbaImage { width: 40, height: 24, pixels: &pixels }, &mut |_| true).expect("encode");
 			assert_eq!(dimensions(&bytes), Some(expected), "{resize:?}");
 		}

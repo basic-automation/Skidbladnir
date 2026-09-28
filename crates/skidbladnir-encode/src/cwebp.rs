@@ -301,7 +301,7 @@ mod tests {
 	#[test]
 	fn resize_is_emitted_in_every_mode_when_set() {
 		for mode in [Mode::Lossy, Mode::Lossless, Mode::NearLossless, Mode::JpegLike, Mode::Preset] {
-			let settings = EncodeJob { resize: Resize { width: 1024, height: 0 }, webp: WebpSettings { mode, preset: Some(Preset::Icon), ..Default::default() }, ..Default::default() };
+			let settings = EncodeJob { resize: Resize { width: 1024, height: 0, no_enlarge: false }, webp: WebpSettings { mode, preset: Some(Preset::Icon), ..Default::default() }, ..Default::default() };
 			assert!(line(&settings).contains("-resize 1024 0"), "{mode:?} must carry the resize");
 		}
 		assert!(!line(&EncodeJob::default()).contains("-resize"));
@@ -310,7 +310,7 @@ mod tests {
 	/// Resize lands immediately before the input path, as the last option.
 	#[test]
 	fn resize_is_the_last_option_before_the_paths() {
-		let settings = EncodeJob { resize: Resize { width: 0, height: 480 }, ..Default::default() };
+		let settings = EncodeJob { resize: Resize { width: 0, height: 480, no_enlarge: false }, ..Default::default() };
 		assert!(line(&settings).ends_with("-resize 0 480 in.png -o out.webp"), "{}", line(&settings));
 	}
 

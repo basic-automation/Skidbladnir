@@ -1,12 +1,16 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The permissions the Skidbladnir window needs. Deliberately minimal: it can ask the user to pick files and a destination, and nothing else. There is no dialog:allow-save because the output name is derived, and no filesystem permission at all because every read and write happens in Rust against a path the user chose.",
+  "description": "The permissions the Skidbladnir window needs. Deliberately minimal: it can ask the user to pick files and a destination, and move, minimise, maximise and close its own frameless window, and nothing else. There is no dialog:allow-save because the output name is derived, and no filesystem permission at all because every read and write happens in Rust against a path the user chose.",
   "windows": [
     "main"
   ],
   "permissions": [
     "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
     "dialog:allow-open"
   ]
 }

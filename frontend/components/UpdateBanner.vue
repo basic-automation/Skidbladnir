@@ -74,7 +74,6 @@ onUnmounted(() => unlisten?.())
 		:actions="[{ label: installError ? 'Try again' : 'Install and restart', color: 'primary', loading: installing, disabled: installing, onClick: install }]"
 		:close="!installing"
 		orientation="horizontal"
-		class="mb-6"
 		data-testid="update-banner"
 		@update:open="dismissed = true"
 	/>

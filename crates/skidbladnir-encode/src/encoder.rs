@@ -352,9 +352,12 @@ pub fn encode_rgba(job: &EncodeJob, image: &RgbaImage<'_>) -> Result<Vec<u8>, En
 ///
 /// As [`encode_rgba`], plus [`EncodeError::Cancelled`] if `on_progress` returned `false`.
 pub fn encode_rgba_with_progress(job: &EncodeJob, image: &RgbaImage<'_>, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
+	// "Do not enlarge" depends on the source, so it is resolved here, once, for every format.
+	let resize = job.resize.for_source(image.width, image.height);
 	match job.format {
-		OutputFormat::Webp => encode_webp(job, image, on_progress),
-		OutputFormat::Avif => crate::avif::encode(&job.avif, job.resize, image, on_progress),
+		OutputFormat::Webp if resize == job.resize => encode_webp(job, image, on_progress),
+		OutputFormat::Webp => encode_webp(&EncodeJob { resize, ..job.clone() }, image, on_progress),
+		OutputFormat::Avif => crate::avif::encode(&job.avif, resize, image, on_progress),
 	}
 }
 
@@ -755,8 +758,21 @@ mod tests {
 	#[test]
 	fn resize_changes_the_output_dimensions() {
 		let pixels = fixture(48, 32);
-		for (resize, expected) in [(Resize { width: 24, height: 16 }, (24, 16)), (Resize { width: 24, height: 0 }, (24, 16)), (Resize { width: 0, height: 16 }, (24, 16))] {
+		for (resize, expected) in [(Resize { width: 24, height: 16, no_enlarge: false }, (24, 16)), (Resize { width: 24, height: 0, no_enlarge: false }, (24, 16)), (Resize { width: 0, height: 16, no_enlarge: false }, (24, 16))] {
 			let bytes = encode_rgba(&EncodeJob { resize, ..Default::default() }, &RgbaImage { width: 48, height: 32, pixels: &pixels }).expect("resized encode");
+			let mut width = 0;
+			let mut height = 0;
+			assert_ne!(unsafe { libwebp_sys::WebPGetInfo(bytes.as_ptr(), bytes.len(), &raw mut width, &raw mut height) }, 0);
+			assert_eq!((width, height), expected, "resize {resize:?}");
+		}
+	}
+
+	#[test]
+	fn no_enlarge_skips_an_upscale_but_not_a_downscale() {
+		let pixels = fixture(48, 32);
+		let image = RgbaImage { width: 48, height: 32, pixels: &pixels };
+		for (resize, expected) in [(Resize { width: 96, height: 0, no_enlarge: true }, (48, 32)), (Resize { width: 24, height: 0, no_enlarge: true }, (24, 16)), (Resize { width: 96, height: 0, no_enlarge: false }, (96, 64))] {
+			let bytes = encode_rgba(&EncodeJob { resize, ..Default::default() }, &image).expect("encode");
 			let mut width = 0;
 			let mut height = 0;
 			assert_ne!(unsafe { libwebp_sys::WebPGetInfo(bytes.as_ptr(), bytes.len(), &raw mut width, &raw mut height) }, 0);
@@ -769,7 +785,7 @@ mod tests {
 	#[test]
 	fn lossless_resize_uses_the_exact_path_and_still_decodes() {
 		let pixels = fixture(48, 32);
-		let bytes = encode_rgba(&EncodeJob { resize: Resize { width: 24, height: 16 }, webp: WebpSettings { mode: Mode::Lossless, ..Default::default() }, ..Default::default() }, &RgbaImage { width: 48, height: 32, pixels: &pixels }).expect("lossless resize encodes");
+		let bytes = encode_rgba(&EncodeJob { resize: Resize { width: 24, height: 16, no_enlarge: false }, webp: WebpSettings { mode: Mode::Lossless, ..Default::default() }, ..Default::default() }, &RgbaImage { width: 48, height: 32, pixels: &pixels }).expect("lossless resize encodes");
 		let mut width = 0;
 		let mut height = 0;
 		assert_ne!(unsafe { libwebp_sys::WebPGetInfo(bytes.as_ptr(), bytes.len(), &raw mut width, &raw mut height) }, 0);

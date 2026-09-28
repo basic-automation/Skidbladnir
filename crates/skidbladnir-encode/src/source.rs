@@ -674,7 +674,7 @@ mod tests {
 		let scratch = Scratch::new("resize");
 		let input = scratch.join("source.png");
 		write_png(&input, 64, 48);
-		let settings = EncodeJob { resize: Resize { width: 32, height: 0 }, ..Default::default() };
+		let settings = EncodeJob { resize: Resize { width: 32, height: 0, no_enlarge: false }, ..Default::default() };
 		let conversion = encode_file(&settings, &input, &scratch.join("out.webp")).expect("conversion succeeds");
 		assert_eq!((conversion.width, conversion.height), (32, 24), "height must be derived, not echoed back as 0");
 	}
@@ -995,7 +995,7 @@ mod tests {
 		write_png(&input, 48, 32);
 		let output = output_path_in(scratch.0.clone(), &input, OutputFormat::Avif);
 		assert!(output.ends_with("in.avif"));
-		let job = EncodeJob { format: OutputFormat::Avif, resize: Resize { width: 24, height: 0 }, avif: AvifSettings { speed: 10, ..Default::default() }, ..Default::default() };
+		let job = EncodeJob { format: OutputFormat::Avif, resize: Resize { width: 24, height: 0, no_enlarge: false }, avif: AvifSettings { speed: 10, ..Default::default() }, ..Default::default() };
 		let conversion = encode_file(&job, &input, &output).expect("AVIF conversion succeeds");
 		assert_eq!((conversion.width, conversion.height), (24, 16));
 		let bytes = std::fs::read(&output).expect("read the output");

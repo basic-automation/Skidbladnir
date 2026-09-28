@@ -1,78 +1,74 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
+@import "@fontsource-variable/fira-code";
 
 /* ---------------------------------------------------------------------------
-   Palenight
+   Paleday
    ---------------------------------------------------------------------------
-   The Material Theme Palenight palette, as the app's own colour scale. These are
-   the theme's canonical values; they are written out here rather than pulled from
-   a package so there is exactly one place to read them.
-
-   The old Electron app was near-black (#0e1214) with white text, a white header
-   band, dotted-bordered option groups and a single green accent. That structure is
-   kept; only the colours move to Palenight, whose own greens and blues stand in for
-   the old rgba(71,171,108).
+   The palette of the "Nanna" Figma design (file N2M6tr7JQLg89RLM1O0reH): a warm
+   paper-grey ground, near-black type and a single green accent, with no borders —
+   selection is a green bar on the left edge of the chosen item. The values are the
+   Figma styles' own, written out so there is exactly one place to read them.
    --------------------------------------------------------------------------- */
 @theme {
-	--color-palenight-bg: #292d3e;
-	--color-palenight-panel: #232635;
-	--color-palenight-raised: #343a51;
-	--color-palenight-selection: #444267;
-	--color-palenight-line: #4e5579;
-	--color-palenight-comment: #676e95;
-	/* Palenight's own comment colour is #676e95, which is 2.76:1 against the background —
-	   well under WCAG AA's 4.5:1 for text. axe-core flagged it on 25 nodes. It is kept for
-	   non-text use (borders, the dot texture) and this lightened variant carries the same
-	   muted role for anything a person has to read: 4.86:1 on the background, 5.34:1 on a
-	   panel. */
-	--color-palenight-muted: #9099bd;
-	--color-palenight-fg: #a6accd;
-	--color-palenight-bright: #bfc7d5;
+	--color-paleday-bg: #d8d8d0;
+	/* The select's fill in the design; a step darker than the ground. */
+	--color-paleday-field: #c9c9bf;
+	--color-paleday-rule: #abab9c;
+	/* The design's muted grey is 2.97:1 on the ground, well under WCAG AA's 4.5:1 for text,
+	   and the window is audited by axe-core in CI. It stays for non-text use (an unchecked
+	   checkbox) and the palette's own "dim" (4.82:1) carries every muted line of text. */
+	--color-paleday-muted: #7c7c67;
+	--color-paleday-dim: #5b5b4b;
+	--color-paleday-fg: #2b2b22;
+	--color-paleday-bright: #0c0a09;
 
-	/* #ff5370 is Palenight's red but only 4.37:1 here, just under AA; lightened to clear
-	   it while staying the same hue. */
-	--color-palenight-red: #ff6b85;
-	--color-palenight-orange: #f78c6c;
-	--color-palenight-yellow: #ffcb6b;
-	--color-palenight-green: #c3e88d;
-	--color-palenight-cyan: #89ddff;
-	--color-palenight-blue: #82aaff;
-	--color-palenight-paleblue: #b2ccd6;
-	--color-palenight-purple: #c792ea;
-	--color-palenight-pink: #f07178;
-	--color-palenight-violet: #bb80b3;
+	--color-paleday-accent: #5ea500;
+	/* The accent is 2.14:1 as text on the ground. Green text — a selected label, a slider's
+	   readout, a saving — uses this darkening of the same hue, which clears 4.5:1. */
+	--color-paleday-accent-text: #3c6a00;
+	/* Named "blue" and "bright-green" in the Figma styles, but they are a brown and a violet;
+	   named here for what they are. */
+	--color-paleday-brown: #733e0a;
+	--color-paleday-violet: #7f22fe;
+	--color-paleday-on-violet: #f6f6f1;
 
-	--font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+	--color-paleday-warning: #8a5a00;
+	--color-paleday-error: #b3261e;
+
+	--font-sans: "Fira Code Variable", ui-monospace, monospace;
+	--font-mono: "Fira Code Variable", ui-monospace, monospace;
 }
 
-/* Nuxt UI's semantic tokens, re-pointed at Palenight so every component it renders
-   is skinned by default instead of being restyled one at a time. */
+/* Nuxt UI's semantic tokens, re-pointed at Paleday so every component it renders is
+   skinned by default instead of being restyled one at a time. The window is light-only,
+   so the dark class maps to the same values. */
 :root,
 .dark {
-	--ui-bg: var(--color-palenight-bg);
-	--ui-bg-muted: var(--color-palenight-panel);
-	--ui-bg-elevated: var(--color-palenight-raised);
-	--ui-bg-accented: var(--color-palenight-selection);
-	--ui-bg-inverted: var(--color-palenight-bright);
+	--ui-bg: var(--color-paleday-bg);
+	--ui-bg-muted: var(--color-paleday-field);
+	--ui-bg-elevated: var(--color-paleday-field);
+	--ui-bg-accented: var(--color-paleday-rule);
+	--ui-bg-inverted: var(--color-paleday-bright);
 
-	--ui-text-dimmed: var(--color-palenight-muted);
-	--ui-text-muted: var(--color-palenight-muted);
-	--ui-text-toned: var(--color-palenight-fg);
-	--ui-text: var(--color-palenight-fg);
-	--ui-text-highlighted: var(--color-palenight-bright);
-	--ui-text-inverted: var(--color-palenight-bg);
+	--ui-text-dimmed: var(--color-paleday-dim);
+	--ui-text-muted: var(--color-paleday-dim);
+	--ui-text-toned: var(--color-paleday-fg);
+	--ui-text: var(--color-paleday-fg);
+	--ui-text-highlighted: var(--color-paleday-bright);
+	--ui-text-inverted: var(--color-paleday-bg);
 
-	--ui-border: var(--color-palenight-line);
-	--ui-border-muted: var(--color-palenight-selection);
-	--ui-border-accented: var(--color-palenight-comment);
-	--ui-border-inverted: var(--color-palenight-bright);
+	--ui-border: var(--color-paleday-rule);
+	--ui-border-muted: var(--color-paleday-field);
+	--ui-border-accented: var(--color-paleday-muted);
+	--ui-border-inverted: var(--color-paleday-bright);
 
-	--ui-primary: var(--color-palenight-green);
-	--ui-secondary: var(--color-palenight-blue);
-	--ui-success: var(--color-palenight-green);
-	--ui-info: var(--color-palenight-cyan);
-	--ui-warning: var(--color-palenight-yellow);
-	--ui-error: var(--color-palenight-red);
+	--ui-primary: var(--color-paleday-accent);
+	--ui-secondary: var(--color-paleday-violet);
+	--ui-success: var(--color-paleday-accent);
+	--ui-info: var(--color-paleday-violet);
+	--ui-warning: var(--color-paleday-warning);
+	--ui-error: var(--color-paleday-error);
 
 	--ui-radius: 0.375rem;
 }
@@ -84,9 +80,18 @@
 		height: 100%;
 	}
 
+	/* The window is frameless and transparent so the app can draw its own rounded frame;
+	   the page behind that frame must not paint over the corners. */
+	html,
 	body {
-		background-color: var(--color-palenight-bg);
-		color: var(--color-palenight-fg);
+		background: transparent;
+	}
+
+	body {
+		color: var(--color-paleday-fg);
+		font-family: var(--font-sans);
+		font-size: 12px;
+		font-weight: 450;
 		/* A desktop window, not a web page: no overscroll bounce and no accidental
 		   selection of the chrome. */
 		overscroll-behavior: none;
@@ -95,10 +100,10 @@
 	}
 
 	/* A visible focus ring. The app is keyboard-navigable, which is worth nothing if the
-	   focused control cannot be seen — and the dark palette makes a default outline hard to
-	   pick out. `:focus-visible` rather than `:focus`, so it does not fire on mouse clicks. */
+	   focused control cannot be seen. `:focus-visible` rather than `:focus`, so it does not
+	   fire on mouse clicks. */
 	:focus-visible {
-		outline: 2px solid var(--color-palenight-cyan);
+		outline: 2px solid var(--color-paleday-violet);
 		outline-offset: 2px;
 		border-radius: 2px;
 	}
@@ -111,16 +116,29 @@
 		user-select: text;
 	}
 
-	/* The Electron app hid its scrollbars; the window keeps that, without also
-	   disabling scrolling the way `display: none` on the track can. */
+	/* The design's number fields are plain text boxes with a unit; WebKit's spinner arrows
+	   are not part of them. The arrow keys still step the value. */
+	input[type="number"] {
+		appearance: textfield;
+	}
+
+	input[type="number"]::-webkit-inner-spin-button,
+	input[type="number"]::-webkit-outer-spin-button {
+		-webkit-appearance: none;
+		margin: 0;
+	}
+
+	/* The design's scrollbar: a 6px pill in the rule colour on no track. */
 	*::-webkit-scrollbar {
 		width: 8px;
 		height: 8px;
 	}
 
 	*::-webkit-scrollbar-thumb {
-		background-color: var(--color-palenight-selection);
-		border-radius: 4px;
+		background-color: var(--color-paleday-rule);
+		border: 1px solid transparent;
+		background-clip: padding-box;
+		border-radius: 100px;
 	}
 
 	*::-webkit-scrollbar-track {
@@ -128,17 +146,10 @@
 	}
 }
 
-/* The old app's signature: header and footer bands carrying a repeating radial-gradient
-   dot texture. Reproduced with the Palenight foreground instead of black-on-white. */
-@utility dot-texture {
-	background-image: radial-gradient(var(--color-palenight-comment) 1px, transparent 1px);
-	background-size: 10px 10px;
-}
-
 /* Behind the preview images, so transparency reads as transparency rather than as the
-   panel colour showing through. */
+   window colour showing through. */
 @utility checkerboard {
-	background-color: var(--color-palenight-panel);
-	background-image: conic-gradient(var(--color-palenight-selection) 25%, transparent 0 50%, var(--color-palenight-selection) 0 75%, transparent 0);
+	background-color: var(--color-paleday-field);
+	background-image: conic-gradient(var(--color-paleday-rule) 25%, transparent 0 50%, var(--color-paleday-rule) 0 75%, transparent 0);
 	background-size: 16px 16px;
 }

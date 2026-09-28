@@ -12,7 +12,8 @@ export type TargetMetric = { kind: 'size', value: number } | { kind: 'psnr', val
 
 export type OutputFormat = 'webp' | 'avif'
 
-export interface Resize { width: number, height: number }
+/** `noEnlarge` leaves an image smaller than the target at its own size. */
+export interface Resize { width: number, height: number, noEnlarge: boolean }
 
 /** What the window sends, and what presets and the preferences file store. */
 export interface EncodeJob {

@@ -166,6 +166,11 @@ pub struct Resize {
 	pub width: u32,
 	/// Target height in pixels, or `0` to derive it from the width.
 	pub height: u32,
+	/// Leave an image alone rather than upscale it when it is already smaller than the
+	/// target. `cwebp` has no such switch, so it is off by default and a default job still
+	/// matches `cwebp -resize` exactly.
+	#[serde(default)]
+	pub no_enlarge: bool,
 }
 
 impl Resize {
@@ -173,6 +178,16 @@ impl Resize {
 	#[must_use]
 	pub const fn is_noop(self) -> bool {
 		self.width == 0 && self.height == 0
+	}
+
+	/// The resize to actually apply to a `width` × `height` source: a no-op when
+	/// [`Resize::no_enlarge`] is set and either requested dimension exceeds the source's.
+	#[must_use]
+	pub const fn for_source(self, width: u32, height: u32) -> Self {
+		if self.no_enlarge && (self.width > width || self.height > height) {
+			return Self { width: 0, height: 0, no_enlarge: true };
+		}
+		self
 	}
 }
 
@@ -588,7 +603,7 @@ mod tests {
 	/// the contract with the frontend and is pinned here.
 	#[test]
 	fn round_trips_through_json() {
-		let settings = EncodeJob { resize: Resize { width: 800, height: 0 }, webp: WebpSettings { mode: Mode::NearLossless, preset: Some(Preset::Drawing), target: Some(TargetMetric::Psnr(42)), sharp_yuv: true, ..Default::default() }, ..Default::default() };
+		let settings = EncodeJob { resize: Resize { width: 800, height: 0, no_enlarge: false }, webp: WebpSettings { mode: Mode::NearLossless, preset: Some(Preset::Drawing), target: Some(TargetMetric::Psnr(42)), sharp_yuv: true, ..Default::default() }, ..Default::default() };
 		let json = serde_json::to_string(&settings).expect("settings serialize");
 		assert_eq!(serde_json::from_str::<EncodeJob>(&json).expect("settings deserialize"), settings);
 	}
@@ -626,9 +641,9 @@ mod tests {
 
 	#[test]
 	fn resize_noop_detection() {
-		assert!(Resize { width: 0, height: 0 }.is_noop());
-		assert!(!Resize { width: 800, height: 0 }.is_noop());
-		assert!(!Resize { width: 0, height: 600 }.is_noop());
+		assert!(Resize { width: 0, height: 0, no_enlarge: false }.is_noop());
+		assert!(!Resize { width: 800, height: 0, no_enlarge: false }.is_noop());
+		assert!(!Resize { width: 0, height: 600, no_enlarge: false }.is_noop());
 	}
 
 	/// The job's own wire shape, which the frontend now sends and the settings files now
@@ -649,7 +664,7 @@ mod tests {
 	fn the_flat_shape_from_before_the_split_still_loads() {
 		let legacy = r#"{"mode":"lossless","preset":null,"quality":92,"alphaQuality":80,"alphaFiltering":"fast","method":6,"segments":2,"partitionLimit":10,"sns":30,"passes":3,"filter":"strong","filterStrength":40,"filterSharpness":5,"target":{"kind":"size","value":5000},"sharpYuv":true,"lowMemory":true,"multiThreading":false,"resize":{"width":640,"height":0}}"#;
 		let job: EncodeJob = serde_json::from_str(legacy).expect("the legacy shape deserializes");
-		let expected = EncodeJob { format: OutputFormat::Webp, avif: AvifSettings::default(), resize: Resize { width: 640, height: 0 }, webp: WebpSettings { mode: Mode::Lossless, preset: None, quality: 92, alpha_quality: 80, alpha_filtering: Some(AlphaFiltering::Fast), method: 6, segments: 2, partition_limit: 10, sns: 30, passes: 3, filter: FilterType::Strong, filter_strength: 40, filter_sharpness: 5, target: Some(TargetMetric::Size(5000)), sharp_yuv: true, low_memory: true, multi_threading: false } };
+		let expected = EncodeJob { format: OutputFormat::Webp, avif: AvifSettings::default(), resize: Resize { width: 640, height: 0, no_enlarge: false }, webp: WebpSettings { mode: Mode::Lossless, preset: None, quality: 92, alpha_quality: 80, alpha_filtering: Some(AlphaFiltering::Fast), method: 6, segments: 2, partition_limit: 10, sns: 30, passes: 3, filter: FilterType::Strong, filter_strength: 40, filter_sharpness: 5, target: Some(TargetMetric::Size(5000)), sharp_yuv: true, low_memory: true, multi_threading: false } };
 		assert_eq!(job, expected);
 
 		// And it is rewritten in the current shape, which reads back identically.
