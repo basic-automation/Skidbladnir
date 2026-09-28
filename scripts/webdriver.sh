@@ -71,6 +71,10 @@ start)
 	# tauri-driver is a native Windows program there: it cannot open a Git Bash path like
 	# /d/a/..., so hand it the Windows form.
 	if [ "$ON_WINDOWS" = 1 ]; then APP=$(cygpath -w "$APP"); fi
+	# The app inherits this through tauri-driver. Without it a release build asks GitHub for
+	# updates at launch, and a smoke test would then depend on the network and on whatever
+	# the newest release is. Set it to the empty string to exercise the update check.
+	export SKIDBLADNIR_NO_UPDATE_CHECK="${SKIDBLADNIR_NO_UPDATE_CHECK-1}"
 	driver_log="${STATE%.json}.driver.log"
 	tauri-driver --port "$PORT" --native-port "$NATIVE_PORT" >"$driver_log" 2>&1 &
 	driver_pid=$!
