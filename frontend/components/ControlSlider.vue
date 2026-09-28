@@ -14,20 +14,18 @@ defineProps<{
 </script>
 
 <template>
-	<!-- A disabled control dims the SLIDER, not its text. Fading the whole block to 40%
-	     took the label and help text to 2.6:1 and 2.0:1 against the panel, which axe-core
-	     flagged and which is simply unreadable; the affordance is carried by the greyed
-	     track and the "not in use" note instead. -->
-	<div class="text-left">
-		<div class="flex items-baseline justify-between gap-3">
-			<span class="text-sm font-medium" :class="disabled ? 'text-palenight-muted' : 'text-palenight-bright'">
-				{{ label }}<span v-if="disabled" class="font-normal"> · not in use</span>
+	<!-- A disabled control dims the SLIDER, not its text: fading the label and help would
+	     take them under AA contrast. The affordance is carried by the greyed track and the
+	     "not in use" note instead. -->
+	<div class="flex min-w-0 flex-col gap-2 px-2.5 py-[7px] text-left">
+		<div class="flex items-baseline gap-3 text-xs font-semibold">
+			<span class="min-w-0 flex-1 text-paleday-fg">
+				{{ label }}<span v-if="disabled" class="font-[450] text-paleday-dim"> · not in use</span>
 			</span>
-			<output class="font-mono text-sm tabular-nums" :class="disabled ? 'text-palenight-muted' : 'text-palenight-green'" aria-live="off">{{ model }}</output>
+			<output class="tabular-nums" :class="disabled ? 'text-paleday-dim' : 'text-paleday-accent-text'" aria-live="off">{{ model }}</output>
 		</div>
 		<USlider
 			v-model="model"
-			class="mt-2"
 			:min="min"
 			:max="max"
 			:step="step ?? 1"
@@ -35,8 +33,9 @@ defineProps<{
 			size="sm"
 			:aria-label="label"
 			:class="disabled && 'opacity-50'"
+			:ui="{ track: 'bg-paleday-dim', thumb: 'bg-paleday-bg ring-primary' }"
 		/>
-		<p v-if="help" class="mt-1 text-xs text-palenight-muted">
+		<p v-if="help" class="text-xs text-paleday-dim">
 			{{ help }}
 		</p>
 	</div>

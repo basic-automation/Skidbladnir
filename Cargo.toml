@@ -40,7 +40,7 @@ libwebp-sys = "0.14"
 # The version is not redundant with the path: a path dependency without one resolves as a
 # wildcard `*`, which `cargo deny` rejects and which would publish as an unbounded range.
 skidbladnir-encode = { path = "crates/skidbladnir-encode", version = "0.1" }
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["macos-private-api"] }
 # The native file and directory pickers. The app never browses the filesystem itself —
 # the user picks, and the app writes only where they pointed.
 tauri-plugin-dialog = "2"

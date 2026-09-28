@@ -1,8 +1,9 @@
 <script setup lang="ts">
-// The conversion screen, following the Electron app's layout: a full-width dotted header
-// band with a large centred title, dotted-bordered option groups laid out two to a row,
-// and a circular accent FAB bottom-right for the action. Only the palette has moved, to
-// Palenight, and the controls are Nuxt UI components skinned by the tokens in main.css.
+// The conversion screen, in the "Nanna" layout (Figma N2M6tr7JQLg89RLM1O0reH, node
+// 163:738): a frameless window with its own rounded frame and window buttons, a rail that
+// picks the output format, a sidebar holding the queue, the destination and the saved
+// presets, and one scrolling column of settings with the Convert action at its head. The
+// controls are Nuxt UI components in the Paleday skin from main.css.
 //
 // The show/hide behaviour is reproduced because it is real encoder behaviour: the advanced
 // controls only reach the encoder in lossy mode, so offering them elsewhere would promise
@@ -17,6 +18,7 @@ import { invokeCommand, isTauri } from '~/composables/useTauri'
 
 const settings = ref<EncodeJob | null>(null)
 const backendVersion = ref('')
+const appVersion = ref('')
 const startupError = ref('')
 
 const inputPaths = ref<string[]>([])
@@ -55,6 +57,9 @@ const cancelling = ref(false)
 const presets = ref<{ name: string, settings: EncodeJob }[]>([])
 const presetName = ref('')
 const presetError = ref('')
+const presetFormOpen = ref(false)
+// The preset last applied, marked in the sidebar until the controls move away from it.
+const activePreset = ref('')
 let unlistenProgress: (() => void) | null = null
 const FALLBACK_MESSAGES: Record<string, string> = {
 	unreadable: 'Your saved settings could not be read, so the defaults were loaded.',
@@ -62,9 +67,9 @@ const FALLBACK_MESSAGES: Record<string, string> = {
 	invalidSettings: 'Your saved settings were out of range, so the defaults were loaded.',
 }
 
-const FORMATS: { value: OutputFormat, label: string, help: string }[] = [
-	{ value: 'webp', label: 'WebP', help: 'libwebp, with every cwebp control. Byte-identical to cwebp.' },
-	{ value: 'avif', label: 'AVIF', help: 'AV1 stills: smaller files, slower to encode. Encoded by ravif.' },
+const FORMATS: { value: OutputFormat, label: string, icon: string }[] = [
+	{ value: 'webp', label: 'WebP', icon: 'i-iconoir-webp-format' },
+	{ value: 'avif', label: 'AVIF', icon: 'i-vscode-icons-file-type-avif' },
 ]
 
 const BIT_DEPTH_ITEMS = [
@@ -83,12 +88,12 @@ const ALPHA_MODE_ITEMS = [
 	{ label: 'Premultiplied', value: 'premultiplied', description: 'Store colour premultiplied by alpha.' },
 ] satisfies { label: string, value: AvifSettings['alphaMode'], description: string }[]
 
-const MODES: { value: Mode, label: string, help: string }[] = [
-	{ value: 'lossy', label: 'Lossy', help: 'Ordinary WebP. The only mode with the advanced controls.' },
-	{ value: 'lossless', label: 'Lossless', help: 'Exact pixels, larger files. Keeps colour under transparency.' },
-	{ value: 'nearLossless', label: 'Near-lossless', help: 'Lossless with preprocessing; quality sets the level.' },
-	{ value: 'jpegLike', label: 'JPEG-like', help: 'Roughly match the size a JPEG of this quality would be.' },
-	{ value: 'preset', label: 'Preset', help: 'Use one of libwebp\'s tuned parameter sets.' },
+const MODES: { value: Mode, label: string, description: string }[] = [
+	{ value: 'lossy', label: 'Lossy', description: 'Ordinary WebP. The only mode with the advanced controls.' },
+	{ value: 'lossless', label: 'Lossless', description: 'Exact pixels, larger files. Keeps colour under transparency.' },
+	{ value: 'nearLossless', label: 'Near-lossless', description: 'Lossless with preprocessing; quality sets the level.' },
+	{ value: 'jpegLike', label: 'JPEG-like', description: 'Roughly match the size a JPEG of this quality would be.' },
+	{ value: 'preset', label: 'Preset', description: 'Use one of libwebp\'s tuned parameter sets.' },
 ]
 
 const PRESET_ITEMS = [
@@ -152,6 +157,8 @@ watch([targetKind, targetSize, targetPsnr], () => {
 onMounted(async () => {
 	try {
 		backendVersion.value = await invokeCommand<string>('encoder_version')
+		const { getVersion } = await import('@tauri-apps/api/app')
+		appVersion.value = await getVersion()
 		// Preferences carry the defaults when there is nothing stored, so this is the only
 		// place startup settings come from.
 		const loaded = await invokeCommand<LoadedPreferences>('load_preferences')
@@ -306,7 +313,9 @@ async function savePreset() {
 	presetError.value = ''
 	try {
 		presets.value = await invokeCommand('save_preset', { name: presetName.value, settings: settings.value })
+		activePreset.value = presetName.value.trim()
 		presetName.value = ''
+		presetFormOpen.value = false
 	}
 	catch (error) {
 		presetError.value = error instanceof Error ? error.message : String(error)
@@ -317,6 +326,7 @@ async function deletePreset(name: string) {
 	presetError.value = ''
 	try {
 		presets.value = await invokeCommand('delete_preset', { name })
+		if (activePreset.value === name) activePreset.value = ''
 	}
 	catch (error) {
 		presetError.value = error instanceof Error ? error.message : String(error)
@@ -327,6 +337,7 @@ function applyPreset(preset: { name: string, settings: EncodeJob }) {
 	// Copied, not aliased: editing the controls afterwards must not silently rewrite the
 	// stored preset.
 	settings.value = structuredClone(toRaw(preset.settings))
+	activePreset.value = preset.name
 	// The target radio is UI state derived from settings.webp.target, so bring it back in step.
 	targetKind.value = settings.value.webp.target?.kind ?? 'none'
 	if (settings.value.webp.target?.kind === 'size') targetSize.value = settings.value.webp.target.value
@@ -372,6 +383,43 @@ watch([settings, previewPath], () => {
 	if (preview.value) previewStale.value = true
 }, { deep: true })
 
+// A hand edit after applying a preset means the controls no longer show that preset.
+watch(settings, (now, before) => {
+	// Applying a preset replaces the object; only an edit in place can move away from it.
+	if (now !== before || !activePreset.value) return
+	const stored = presets.value.find(preset => preset.name === activePreset.value)?.settings
+	if (!stored || JSON.stringify(stored) !== JSON.stringify(now)) activePreset.value = ''
+}, { deep: true })
+
+const sidebarCollapsed = ref(false)
+
+// The folder the queue came from, or the one most of it shares, as the sidebar's subtitle.
+const queueFolder = computed(() => {
+	if (inputPaths.value.length === 0) return 'Nothing queued'
+	const folders = inputPaths.value.map(path => path.replace(/[\\/][^\\/]*$/, ''))
+	let common = folders[0]!
+	for (const folder of folders) {
+		while (common && folder !== common && !folder.startsWith(common + '/') && !folder.startsWith(common + '\\')) {
+			common = common.replace(/[\\/][^\\/]*$/, '')
+		}
+	}
+	return common || folders[0]!
+})
+
+const queueMenu = [[
+	{ label: 'Choose images…', icon: 'i-lucide-images', onSelect: () => chooseInputs() },
+	{ label: 'Choose a folder…', icon: 'i-lucide-folder-search', onSelect: () => chooseFolder() },
+]]
+
+const fileCount = computed(() => `${inputPaths.value.length} file${inputPaths.value.length === 1 ? '' : 's'}`)
+
+// The window is frameless, so the app draws its own buttons for these.
+async function windowAction(action: 'minimize' | 'toggleMaximize' | 'close') {
+	if (!isTauri()) return
+	const { getCurrentWindow } = await import('@tauri-apps/api/window')
+	await getCurrentWindow()[action]()
+}
+
 async function runPreview() {
 	if (!settings.value || !previewPath.value) return
 	previewing.value = true
@@ -398,326 +446,248 @@ function basename(path: string): string {
 </script>
 
 <template>
-	<div class="flex min-h-full flex-col bg-palenight-bg">
-		<!-- The old app's header: a full-width band with a dot texture and a large centred
-		     title. White-on-black there; the Palenight surface here. -->
-		<header class="dot-texture w-full border-b border-palenight-line bg-palenight-selection/60">
-			<h1 class="py-10 text-center text-3xl font-extrabold tracking-tight text-palenight-bright">
-				Skidbladnir
-			</h1>
-			<p class="-mt-6 pb-8 text-center text-sm text-palenight-fg">
-				Convert images to next-generation formats, with the whole encoder exposed.
-			</p>
-		</header>
+	<!-- The window's own frame: the Tauri window is frameless and transparent, so this
+	     rounded surface is the whole visible window. -->
+	<div class="flex h-full overflow-hidden rounded-[32px] bg-paleday-bg text-paleday-fg">
+		<h1 class="sr-only">
+			Skidbladnir
+		</h1>
 
 		<div
 			v-if="dragging"
-			class="pointer-events-none fixed inset-4 z-50 flex items-center justify-center rounded-lg border-2 border-dashed border-palenight-green bg-palenight-bg/85 text-lg font-semibold text-palenight-green"
+			class="pointer-events-none fixed inset-4 z-50 flex items-center justify-center rounded-[28px] bg-paleday-bg/90 text-sm font-semibold text-paleday-accent-text outline-2 outline-dashed outline-paleday-accent"
 		>
 			Drop images to convert
 		</div>
 
-		<main class="mx-auto w-full max-w-5xl grow px-5 pt-8 pb-36">
-			<UAlert
-				v-if="preferencesNotice"
-				color="warning"
-				variant="subtle"
-				:description="preferencesNotice"
-				class="mb-6"
-				close
-				@update:open="preferencesNotice = ''"
-			/>
-
-			<UAlert
-				v-if="startupError"
-				color="warning"
-				variant="subtle"
-				title="Not connected to the encoder"
-				:description="startupError"
-				class="mb-6"
-			/>
-
-			<template v-if="settings">
-				<div class="flex flex-col gap-5">
-					<ControlPanel title="Files">
-						<div class="grid gap-4 sm:grid-cols-2">
-							<div class="text-left">
-								<UButton color="neutral" variant="subtle" block :disabled="!isTauri()" @click="chooseInputs">
-									Choose images…
-								</UButton>
-								<UButton color="neutral" variant="ghost" block size="xs" class="mt-1" :disabled="!isTauri()" @click="chooseFolder">
-									…or a whole folder
-								</UButton>
-								<p class="mt-2 truncate text-xs text-palenight-fg" data-selectable>
-									{{ inputPaths.length === 0 ? 'No files selected' : inputPaths.length === 1 ? basename(inputPaths[0]!) : `${inputPaths.length} files selected` }}
-								</p>
-							</div>
-							<div class="text-left">
-								<UButton color="neutral" variant="subtle" block :disabled="!isTauri()" @click="chooseOutput">
-									Choose destination…
-								</UButton>
-								<p class="mt-2 truncate text-xs text-palenight-fg" data-selectable>
-									{{ outputDirectory || 'No destination selected' }}
-								</p>
-							</div>
-						</div>
-						<div v-if="scanned.length > 0" class="flex flex-col items-center gap-2">
-							<p class="text-xs text-palenight-cyan">
-								Found {{ scanned.length }} image{{ scanned.length === 1 ? '' : 's' }} in that folder,
-								including subfolders. Symlinks are skipped.
+		<!-- Main menu: the logo, the output format, and the app settings. -->
+		<nav class="flex shrink-0 flex-col items-center gap-2 px-4 pt-8 pb-4" aria-label="Main menu" data-tauri-drag-region>
+			<img src="/skidbladnir-logo.svg" alt="Skidbladnir" width="55" height="64" class="h-16 w-[55px]" data-tauri-drag-region>
+			<div class="flex flex-1 flex-col items-start gap-4 px-2 pt-8 pb-4">
+				<URadioGroup
+					v-if="settings"
+					v-model="settings.format"
+					:items="FORMATS"
+					aria-label="Output format"
+					variant="card"
+					indicator="hidden"
+					:ui="{
+						fieldset: 'flex-col gap-4',
+						item: 'border-0 border-l border-transparent rounded-none px-2 py-1 cursor-pointer bg-transparent hover:not-has-disabled:not-has-focus-visible:not-has-data-[state=checked]:border-transparent has-data-[state=checked]:border-primary has-data-[state=checked]:bg-transparent',
+						wrapper: 'gap-0',
+						icon: 'size-6',
+						label: 'sr-only',
+					}"
+				/>
+				<div class="flex-1" />
+				<UPopover :content="{ side: 'right', align: 'end' }">
+					<UButton
+						color="neutral"
+						variant="ghost"
+						icon="i-iconamoon-settings-light"
+						aria-label="App settings"
+						:ui="{ base: 'px-2 py-1', leadingIcon: 'size-6' }"
+					/>
+					<template #content>
+						<div class="flex w-72 flex-col gap-2 p-2 text-xs">
+							<ControlToggle v-model="mirrorStructure" label="Recreate folder structure" help="When a whole folder is queued, mirror its subfolders in the destination. Off writes every file side by side." />
+							<p v-if="backendVersion" class="px-2.5 pb-1 text-paleday-dim" data-selectable>
+								{{ backendVersion }}
 							</p>
-							<ControlToggle v-model="mirrorStructure" label="Recreate the folder structure in the destination" help="Off writes every converted file side by side in the destination." />
 						</div>
-						<p v-if="inspected.length === 1 && inspected[0]?.webp" class="text-center text-xs text-palenight-cyan" data-selectable>
+					</template>
+				</UPopover>
+			</div>
+		</nav>
+
+		<!-- Sidebar: what is queued, where it goes, and the saved presets. -->
+		<aside v-if="!sidebarCollapsed" class="flex w-[272px] shrink-0 flex-col gap-3 p-4" aria-label="Queue and presets">
+			<div class="flex justify-end" data-tauri-drag-region>
+				<UButton
+					color="neutral"
+					variant="link"
+					trailing-icon="i-subway-down-2"
+					class="px-1 py-1.5 text-xs font-semibold text-paleday-fg"
+					:ui="{ trailingIcon: 'size-4 rotate-90' }"
+					@click="sidebarCollapsed = true"
+				>
+					Collapse
+				</UButton>
+			</div>
+
+			<UDropdownMenu :items="queueMenu" :disabled="!isTauri()" :content="{ align: 'start' }">
+				<button type="button" class="flex w-full flex-col gap-1 rounded-lg px-2.5 py-[7px] text-left transition-colors hover:bg-paleday-field/70" :disabled="!isTauri()">
+					<span class="flex w-full items-center gap-2">
+						<UIcon name="i-el-inbox-box" class="size-4 shrink-0" />
+						<span class="min-w-0 flex-1 text-xs text-paleday-bright">Queue</span>
+						<UBadge v-if="inputPaths.length" :label="String(inputPaths.length)" :ui="{ base: 'rounded-full bg-primary px-1.5 py-px text-[11px] font-semibold text-paleday-fg' }" />
+					</span>
+					<span class="w-full truncate text-xs text-paleday-dim" data-selectable>{{ queueFolder }}</span>
+				</button>
+			</UDropdownMenu>
+
+			<button type="button" class="flex w-full flex-col gap-1 rounded-lg px-2.5 py-[7px] text-left transition-colors hover:bg-paleday-field/70" :disabled="!isTauri()" @click="chooseOutput">
+				<span class="flex w-full items-center gap-2">
+					<UIcon name="i-ic-baseline-upcoming" class="size-4 shrink-0" />
+					<span class="min-w-0 flex-1 text-xs text-paleday-bright">Destination</span>
+				</span>
+				<span class="w-full truncate text-xs text-paleday-dim" data-selectable>{{ outputDirectory || 'Not chosen' }}</span>
+			</button>
+
+			<div class="flex items-center justify-between">
+				<h2 class="text-[11px] font-semibold tracking-[0.88px] text-paleday-bright">
+					Presets
+				</h2>
+				<UPopover v-model:open="presetFormOpen" :content="{ side: 'right', align: 'start' }">
+					<UButton color="neutral" variant="ghost" icon="i-material-symbols-add" aria-label="Save the current settings as a preset" :disabled="!settings" :ui="{ base: 'p-0', leadingIcon: 'size-4' }" />
+					<template #content>
+						<form class="flex w-64 gap-2 p-2" @submit.prevent="savePreset">
+							<UInput v-model="presetName" placeholder="Name these settings…" aria-label="Name for the preset" size="sm" class="flex-1" autofocus />
+							<UButton type="submit" size="sm" :disabled="!presetName.trim()">
+								Save
+							</UButton>
+						</form>
+					</template>
+				</UPopover>
+			</div>
+
+			<ul class="flex flex-col gap-0.5">
+				<li v-for="preset in presets" :key="preset.name" class="group relative">
+					<button
+						type="button"
+						class="w-full truncate border-l px-2.5 py-[7px] pr-8 text-left text-xs transition-colors"
+						:class="activePreset === preset.name
+							? 'border-paleday-brown font-semibold text-paleday-accent-text'
+							: 'rounded-lg border-transparent text-paleday-bright hover:bg-paleday-field/70'"
+						:aria-current="activePreset === preset.name ? 'true' : undefined"
+						@click="applyPreset(preset)"
+					>
+						{{ preset.name }}
+					</button>
+					<UButton
+						color="neutral"
+						variant="ghost"
+						icon="i-lucide-x"
+						:aria-label="`Delete preset ${preset.name}`"
+						class="absolute top-1/2 right-1 -translate-y-1/2 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+						:ui="{ base: 'p-1', leadingIcon: 'size-3.5' }"
+						@click="deletePreset(preset.name)"
+					/>
+				</li>
+			</ul>
+			<p v-if="!presets.length" class="px-2.5 text-xs text-paleday-dim">
+				No saved presets yet. Set the controls how you like them and press +.
+			</p>
+			<p v-if="presetError" class="px-2.5 text-xs text-paleday-error" role="alert">
+				{{ presetError }}
+			</p>
+
+			<div class="flex-1" />
+			<p v-if="appVersion" class="text-[10px] text-paleday-bright" data-selectable>
+				v{{ appVersion }}
+			</p>
+		</aside>
+
+		<main class="flex min-w-0 flex-1 flex-col gap-4 pb-1.5" :class="sidebarCollapsed ? 'pl-2' : 'pl-6'">
+			<!-- The title bar: a drag region with the window buttons at its end. -->
+			<div class="flex shrink-0 items-center gap-4" data-tauri-drag-region>
+				<UButton
+					v-if="sidebarCollapsed"
+					color="neutral"
+					variant="link"
+					trailing-icon="i-subway-down-2"
+					class="px-1 py-1.5 text-xs font-semibold text-paleday-fg"
+					:ui="{ trailingIcon: 'size-4 -rotate-90' }"
+					@click="sidebarCollapsed = false"
+				>
+					Expand
+				</UButton>
+				<div class="h-5 flex-1" data-tauri-drag-region />
+				<div class="flex items-center">
+					<UButton color="neutral" variant="ghost" icon="i-material-symbols-minimize" aria-label="Minimise" :ui="{ base: 'rounded-none p-4', leadingIcon: 'size-4' }" @click="windowAction('minimize')" />
+					<UButton color="neutral" variant="ghost" icon="i-mdi-maximize" aria-label="Maximise" :ui="{ base: 'rounded-none p-4', leadingIcon: 'size-4' }" @click="windowAction('toggleMaximize')" />
+					<UButton color="neutral" variant="ghost" icon="i-material-symbols-close" aria-label="Close" :ui="{ base: 'rounded-none py-4 pr-8 pl-4', leadingIcon: 'size-4' }" @click="windowAction('close')" />
+				</div>
+			</div>
+
+			<div class="min-h-0 flex-1 overflow-y-auto pr-4 pb-6">
+				<div class="flex flex-col gap-4">
+					<!-- Submit: what will happen, and the button that does it. -->
+					<div class="flex items-center justify-end gap-3 pr-2.5">
+						<p class="min-w-0 truncate text-xs text-paleday-dim" data-selectable>
+							<template v-if="inputPaths.length && outputDirectory">
+								{{ fileCount }} → {{ outputDirectory }}
+							</template>
+							<template v-else-if="inputPaths.length">
+								Choose a destination to convert {{ fileCount }}.
+							</template>
+							<template v-else>
+								Drop images anywhere on the window, or choose them from the queue.
+							</template>
+						</p>
+						<UButton
+							v-if="!busy"
+							size="lg"
+							icon="i-codicon-debug-start"
+							:disabled="!canConvert"
+							:ui="{ base: 'shrink-0 gap-2 rounded-[6px] bg-paleday-violet px-4 py-2.5 text-sm font-semibold text-paleday-on-violet hover:bg-paleday-violet/90 disabled:bg-paleday-violet/60 disabled:opacity-100', leadingIcon: 'size-4' }"
+							@click="convert"
+						>
+							Convert {{ inputPaths.length ? fileCount : '' }}
+						</UButton>
+						<UButton v-else color="error" variant="soft" size="lg" :loading="cancelling" @click="cancel">
+							{{ cancelling ? 'Stopping…' : 'Cancel' }}
+						</UButton>
+					</div>
+
+					<UAlert
+						v-if="preferencesNotice"
+						color="warning"
+						variant="soft"
+						:description="preferencesNotice"
+						close
+						@update:open="preferencesNotice = ''"
+					/>
+					<UAlert
+						v-if="startupError"
+						color="warning"
+						variant="soft"
+						title="Not connected to the encoder"
+						:description="startupError"
+					/>
+
+					<div v-if="scanned.length || animatedInputs.length || dropRejected || (inspected.length === 1 && inspected[0]?.webp)" class="flex flex-col gap-1 px-2.5 text-xs">
+						<p v-if="scanned.length > 0" class="text-paleday-dim">
+							Found {{ scanned.length }} image{{ scanned.length === 1 ? '' : 's' }} in that folder, including
+							subfolders. Symlinks are skipped. {{ mirrorStructure ? 'The folder structure is recreated in the destination.' : 'Every file is written side by side in the destination.' }}
+						</p>
+						<p v-if="inspected.length === 1 && inspected[0]?.webp" class="text-paleday-dim" data-selectable>
 							Already a WebP: {{ inspected[0]!.webp!.width }}&times;{{ inspected[0]!.webp!.height }},
 							{{ inspected[0]!.webp!.compression }}{{ inspected[0]!.webp!.hasAlpha ? ', with alpha' : '' }}.
 						</p>
-						<p v-if="animatedInputs.length > 0" class="text-center text-xs text-palenight-yellow">
-							{{ animatedInputs.length === 1 ? 'One selected file is an animated WebP' : `${animatedInputs.length} selected files are animated WebPs` }}.
+						<p v-if="animatedInputs.length > 0" class="text-paleday-warning">
+							{{ animatedInputs.length === 1 ? 'One queued file is an animated WebP' : `${animatedInputs.length} queued files are animated WebPs` }}.
 							Skidbladnir encodes still images, so {{ animatedInputs.length === 1 ? 'it' : 'they' }} will be
 							skipped with an error rather than converted.
 						</p>
-						<p v-if="dropRejected > 0" class="text-center text-xs text-palenight-yellow">
+						<p v-if="dropRejected > 0" class="text-paleday-warning">
 							{{ dropRejected }} dropped {{ dropRejected === 1 ? 'file was' : 'files were' }} not a
 							PNG, JPEG, TIFF, WebP or AVIF and {{ dropRejected === 1 ? 'was' : 'were' }} skipped.
 						</p>
-						<p class="text-center text-xs text-palenight-muted">
-							PNG, JPEG, TIFF, WebP and AVIF — drop them anywhere on the window, or use the button.
-							Converted files are written as <code class="text-palenight-cyan">&lt;name&gt;.{{ extension }}</code>
-							in the destination. Your originals are never written over.
-						</p>
-					</ControlPanel>
-
-					<ControlPanel title="Format">
-						<div class="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Output format">
-							<button
-								v-for="format in FORMATS"
-								:key="format.value"
-								type="button"
-								role="radio"
-								:aria-checked="settings.format === format.value"
-								class="rounded-md border px-3 py-2 text-left transition-colors"
-								:class="settings.format === format.value
-									? 'border-palenight-green bg-palenight-green/10'
-									: 'border-palenight-selection hover:border-palenight-comment'"
-								@click="settings.format = format.value"
-							>
-								<span class="block text-sm font-semibold" :class="settings.format === format.value ? 'text-palenight-green' : 'text-palenight-bright'">{{ format.label }}</span>
-								<span class="block text-xs text-palenight-fg">{{ format.help }}</span>
-							</button>
-						</div>
-					</ControlPanel>
-
-					<ControlPanel v-if="isWebp" title="Mode">
-						<div class="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Encoding mode">
-							<button
-								v-for="mode in MODES"
-								:key="mode.value"
-								type="button"
-								role="radio"
-								:aria-checked="settings.webp.mode === mode.value"
-								class="rounded-md border px-3 py-2 text-left transition-colors"
-								:class="settings.webp.mode === mode.value
-									? 'border-palenight-green bg-palenight-green/10'
-									: 'border-palenight-selection hover:border-palenight-comment'"
-								@click="settings.webp.mode = mode.value"
-							>
-								<span class="block text-sm font-semibold" :class="settings.webp.mode === mode.value ? 'text-palenight-green' : 'text-palenight-bright'">{{ mode.label }}</span>
-								<span class="block text-xs text-palenight-fg">{{ mode.help }}</span>
-							</button>
-						</div>
-
-						<div v-if="settings.webp.mode === 'preset'" class="mx-auto w-full max-w-sm text-left">
-							<span class="text-sm font-medium text-palenight-bright">Preset</span>
-							<USelect v-model="settings.webp.preset" :items="PRESET_ITEMS" class="mt-1 w-full" />
-							<p v-if="!settings.webp.preset" class="mt-1 text-xs text-palenight-yellow">
-								Pick a preset before converting.
-							</p>
-						</div>
-					</ControlPanel>
-
-					<ControlPanel title="My presets">
-						<div v-if="presets.length" class="flex flex-wrap justify-center gap-2">
-							<div v-for="preset in presets" :key="preset.name" class="flex items-center gap-1 rounded border border-palenight-selection pl-3">
-								<button type="button" class="py-1 text-sm text-palenight-cyan hover:text-palenight-bright" @click="applyPreset(preset)">
-									{{ preset.name }}
-								</button>
-								<button type="button" class="px-2 py-1 text-palenight-muted hover:text-palenight-red" :aria-label="`Delete preset ${preset.name}`" @click="deletePreset(preset.name)">
-									<UIcon name="i-lucide-x" class="size-3.5" />
-								</button>
-							</div>
-						</div>
-						<p v-else class="text-center text-xs text-palenight-muted">
-							No saved presets yet. Set the controls how you like them and give them a name.
-						</p>
-						<div class="mx-auto flex w-full max-w-md gap-2">
-							<UInput v-model="presetName" placeholder="Name these settings…" aria-label="Name for the preset" class="flex-1" @keyup.enter="savePreset" />
-							<UButton color="neutral" variant="subtle" :disabled="!presetName.trim()" @click="savePreset">
-								Save
-							</UButton>
-						</div>
-						<p v-if="presetError" class="text-center text-xs text-palenight-red">
-							{{ presetError }}
-						</p>
-					</ControlPanel>
-
-					<ControlPanel v-if="isWebp" title="Quality">
-						<div class="grid gap-5 sm:grid-cols-2">
-							<ControlSlider v-model="settings.webp.quality" :label="qualityLabel" :min="0" :max="100" :help="qualityHelp" />
-							<ControlSlider v-model="settings.webp.alphaQuality" label="Alpha quality" :min="0" :max="100" help="transparency-compression quality (0..100)" :disabled="basicOnly" />
-							<ControlSlider v-model="settings.webp.method" label="Compression method" :min="0" :max="6" help="0 = fast, 6 = slowest and smallest" :disabled="basicOnly" />
-						</div>
-					</ControlPanel>
-
-					<ControlPanel v-if="isAvif" title="AVIF">
-						<div class="grid gap-5 sm:grid-cols-2">
-							<ControlSlider v-model="settings.avif.quality" label="Quality" :min="1" :max="100" help="colour quality (1: small .. 100: big)" />
-							<ControlSlider v-model="settings.avif.alphaQuality" label="Alpha quality" :min="1" :max="100" help="transparency quality (1..100)" />
-							<ControlSlider v-model="settings.avif.speed" label="Speed" :min="1" :max="10" help="1 = slowest and smallest, 10 = fastest and largest" />
-							<ControlToggle v-model="settings.avif.multiThreading" label="Multi-threading" help="encode on every core" />
-						</div>
-						<div class="grid gap-5 border-t border-dotted border-palenight-selection pt-5 sm:grid-cols-2">
-							<div class="text-left">
-								<span class="text-sm font-medium text-palenight-bright">Bit depth</span>
-								<URadioGroup v-model="settings.avif.bitDepth" :items="BIT_DEPTH_ITEMS" orientation="horizontal" class="mt-2" aria-label="AVIF bit depth" />
-								<p class="mt-1 text-xs text-palenight-muted">
-									10-bit keeps more precision through the colour conversion, even for 8-bit images.
-								</p>
-							</div>
-							<div class="text-left">
-								<span class="text-sm font-medium text-palenight-bright">Colour model</span>
-								<URadioGroup v-model="settings.avif.colorModel" :items="COLOR_MODEL_ITEMS" orientation="horizontal" class="mt-2" aria-label="AVIF colour model" />
-								<p class="mt-1 text-xs text-palenight-muted">
-									RGB skips the colour conversion at a large size cost.
-								</p>
-							</div>
-						</div>
-						<div class="border-t border-dotted border-palenight-selection pt-5 text-left">
-							<span class="text-sm font-medium text-palenight-bright">Colour under transparency</span>
-							<URadioGroup v-model="settings.avif.alphaMode" :items="ALPHA_MODE_ITEMS" class="mt-2" aria-label="AVIF colour under transparency" />
-						</div>
-					</ControlPanel>
-
-					<ControlPanel title="Resize">
-						<div class="mx-auto w-full max-w-md">
-							<div class="grid grid-cols-2 gap-3 text-left">
-								<div>
-									<span class="text-sm font-medium text-palenight-bright">Resize width</span>
-									<UInput v-model.number="settings.resize.width" type="number" :min="0" aria-label="Resize width in pixels" class="mt-1 w-full" />
-								</div>
-								<div>
-									<span class="text-sm font-medium text-palenight-bright">Resize height</span>
-									<UInput v-model.number="settings.resize.height" type="number" :min="0" aria-label="Resize height in pixels" class="mt-1 w-full" />
-								</div>
-								<p class="col-span-2 text-xs text-palenight-muted">
-									Applied before encoding, the same way for either format. Both 0 means no
-									resize; set one to 0 to derive it and keep the aspect ratio.
-								</p>
-							</div>
-						</div>
-					</ControlPanel>
-
-					<!-- The Electron app kept the expert controls behind a disclosure. -->
-					<ControlPanel v-if="lossy" title="Advanced options">
-						<div class="grid gap-5 sm:grid-cols-2">
-							<ControlSlider v-model="settings.webp.sns" label="Spatial noise shaping" :min="0" :max="100" help="0 = off, 100 = maximum" />
-							<ControlSlider v-model="settings.webp.segments" label="Segments" :min="1" :max="4" help="number of segments to use (1..4)" />
-							<ControlSlider v-model="settings.webp.partitionLimit" label="Partition limit" :min="0" :max="100" help="degradation allowed to fit the 512k prediction-mode limit" />
-							<ControlSlider v-model="settings.webp.passes" label="Analysis passes" :min="1" :max="10" help="analysis pass number (1..10)" />
-						</div>
-
-						<div class="grid gap-5 border-t border-dotted border-palenight-selection pt-5 sm:grid-cols-2">
-							<div class="text-left">
-								<span class="text-sm font-medium text-palenight-bright">Deblocking filter</span>
-								<URadioGroup v-model="settings.webp.filter" :items="FILTER_ITEMS" orientation="horizontal" class="mt-2" />
-								<p class="mt-1 text-xs text-palenight-muted">
-									Auto lets the encoder pick the strength, so the two sliders do not apply.
-								</p>
-							</div>
-							<div class="flex flex-col gap-5">
-								<ControlSlider v-model="settings.webp.filterStrength" label="Filter strength" :min="0" :max="100" help="0 = off .. 100 = strongest" :disabled="!manualFilter" />
-								<ControlSlider v-model="settings.webp.filterSharpness" label="Filter sharpness" :min="0" :max="7" help="0 = most sharp .. 7 = least sharp" :disabled="!manualFilter" />
-							</div>
-						</div>
-
-						<div class="grid gap-5 border-t border-dotted border-palenight-selection pt-5 sm:grid-cols-2">
-							<div class="text-left">
-								<span class="text-sm font-medium text-palenight-bright">Compression target</span>
-								<URadioGroup v-model="targetKind" :items="TARGET_ITEMS" class="mt-2" />
-								<p class="mt-1 text-xs text-palenight-muted">
-									A size or PSNR target overrides the quality slider.
-								</p>
-							</div>
-							<div class="flex flex-col gap-5">
-								<div v-if="targetKind === 'size'" class="text-left">
-									<span class="text-sm font-medium text-palenight-bright">Target size (bytes)</span>
-									<UInput v-model.number="targetSize" type="number" :min="1" aria-label="Target size in bytes" class="mt-1 w-full" />
-								</div>
-								<ControlSlider v-if="targetKind === 'psnr'" v-model="targetPsnr" label="Target PSNR (dB)" :min="1" :max="10000" help="typically around 42" />
-							</div>
-						</div>
-
-						<div class="grid gap-3 border-t border-dotted border-palenight-selection pt-5 sm:grid-cols-3">
-							<ControlToggle v-model="settings.webp.sharpYuv" label="Sharp YUV" help="sharper (and slower) RGB to YUV" />
-							<ControlToggle v-model="settings.webp.lowMemory" label="Low memory" help="less memory, slower encoding" />
-							<ControlToggle v-model="settings.webp.multiThreading" label="Multi-threading" help="use multi-threading if available" />
-						</div>
-					</ControlPanel>
-
-					<ControlPanel v-if="inputPaths.length > 0 && !busy" title="Preview">
-						<div class="mx-auto flex w-full max-w-md flex-wrap items-center justify-center gap-2">
-							<USelect v-if="previewItems.length > 1" v-model="previewPath" :items="previewItems" aria-label="File to preview" class="min-w-0 flex-1" />
-							<UButton color="neutral" variant="subtle" :loading="previewing" :disabled="!previewPath" @click="runPreview">
-								{{ preview ? 'Preview again' : 'Preview' }}
-							</UButton>
-						</div>
-						<p class="text-center text-xs text-palenight-muted">
-							Encodes {{ previewItems.length > 1 ? 'the chosen file' : 'the file' }} in memory with the current settings. Nothing is written to disk.
-						</p>
-						<p v-if="previewError" class="text-center text-xs text-palenight-red" role="alert" data-selectable>
-							{{ previewError }}
-						</p>
-						<div v-if="preview" class="flex flex-col gap-2" aria-live="polite">
-							<p v-if="previewStale" class="text-center text-xs text-palenight-yellow">
-								The settings or the file have changed since this preview. Preview again to see them.
-							</p>
-							<div class="grid gap-3 sm:grid-cols-2">
-								<figure class="text-left">
-									<img :src="preview.original" alt="The original image" class="checkerboard w-full rounded border border-palenight-selection object-contain">
-									<figcaption class="mt-1 text-xs text-palenight-fg">
-										Original · {{ formatBytes(preview.sourceBytes) }}
-									</figcaption>
-								</figure>
-								<figure class="text-left">
-									<img v-if="!encodedUndisplayable" :src="preview.encoded" :alt="`The image encoded as ${previewFormat.toUpperCase()}`" class="checkerboard w-full rounded border border-palenight-selection object-contain" @error="encodedUndisplayable = true">
-									<p v-else class="rounded border border-dotted border-palenight-selection p-4 text-xs text-palenight-yellow" role="note">
-										This system's web view cannot display {{ previewFormat.toUpperCase() }}, so the encoded
-										image cannot be shown here. The file Skidbladnir writes is unaffected, and the size and
-										saving below are exact.
-									</p>
-									<figcaption class="mt-1 text-xs text-palenight-fg">
-										{{ previewFormat.toUpperCase() }} · {{ formatBytes(preview.encodedBytes) }} · {{ preview.width }}×{{ preview.height }}
-										<template v-if="preview.savingPercent !== null">
-											· <span :class="preview.savingPercent >= 0 ? 'text-palenight-green' : 'text-palenight-orange'">{{ preview.savingPercent >= 0 ? '−' : '+' }}{{ Math.abs(preview.savingPercent).toFixed(1) }}%</span>
-										</template>
-									</figcaption>
-								</figure>
-							</div>
-						</div>
-					</ControlPanel>
+					</div>
 
 					<ControlPanel v-if="busy" title="Converting">
-						<div class="text-left" role="status" aria-live="polite">
-							<div class="flex items-baseline justify-between gap-3">
-								<span class="truncate text-sm text-palenight-bright" data-selectable>
+						<div class="px-2.5" role="status" aria-live="polite">
+							<div class="flex items-baseline justify-between gap-3 text-xs">
+								<span class="truncate text-paleday-bright" data-selectable>
 									{{ currentFile ? basename(currentFile) : 'Starting…' }}
 								</span>
-								<span class="font-mono text-sm tabular-nums text-palenight-green">
+								<span class="font-semibold tabular-nums text-paleday-accent-text">
 									{{ doneCount }} / {{ inputPaths.length }}
 								</span>
 							</div>
-							<UProgress v-model="currentPercent" :max="100" class="mt-2" />
-							<p class="mt-1 text-xs text-palenight-muted">
+							<UProgress v-model="currentPercent" :max="100" size="sm" class="mt-2" :ui="{ base: 'bg-paleday-dim' }" />
+							<p class="mt-2 text-xs text-paleday-dim">
 								<template v-if="isAvif">
 									The AVIF encoder reports no progress while it works, so the bar moves only
 									when a file starts and when it finishes. Cancel cannot stop a file mid-encode,
@@ -729,75 +699,239 @@ function basename(path: string): string {
 								</template>
 							</p>
 						</div>
-						<div class="flex justify-center">
-							<UButton color="error" variant="subtle" :loading="cancelling" @click="cancel">
-								{{ cancelling ? 'Stopping…' : 'Cancel' }}
-							</UButton>
-						</div>
 					</ControlPanel>
 
-					<UAlert v-if="validationError" color="error" variant="subtle" role="alert" :description="validationError" />
+					<UAlert v-if="validationError" color="error" variant="soft" role="alert" :description="validationError" />
 
 					<ControlPanel v-if="reports.length || failures.length" title="Results">
 						<p class="sr-only" role="status" aria-live="polite">
 							{{ reports.length }} converted, {{ failures.length }} failed.
 						</p>
-						<table v-if="reports.length" class="w-full text-left text-sm">
-							<thead class="text-xs tracking-wide text-palenight-muted uppercase">
+						<table v-if="reports.length" class="w-full text-left text-xs">
+							<thead class="text-paleday-dim">
 								<tr>
-									<th class="py-1">File</th>
-									<th class="py-1 text-right">Before</th>
-									<th class="py-1 text-right">After</th>
-									<th class="py-1 text-right">Change</th>
-									<th class="py-1 text-right">Size</th>
+									<th class="px-2.5 py-1 font-semibold">File</th>
+									<th class="py-1 text-right font-semibold">Before</th>
+									<th class="py-1 text-right font-semibold">After</th>
+									<th class="py-1 text-right font-semibold">Change</th>
+									<th class="py-1 pr-2.5 text-right font-semibold">Size</th>
 								</tr>
 							</thead>
-							<tbody class="font-mono tabular-nums text-palenight-fg">
-								<tr v-for="report in reports" :key="report.outputPath" class="border-t border-palenight-selection">
-									<td class="py-1 pr-2 font-sans text-palenight-bright" data-selectable>{{ basename(report.outputPath) }}</td>
+							<tbody class="tabular-nums">
+								<tr v-for="report in reports" :key="report.outputPath">
+									<td class="px-2.5 py-1 text-paleday-bright" data-selectable>{{ basename(report.outputPath) }}</td>
 									<td class="py-1 text-right">{{ formatBytes(report.sourceBytes) }}</td>
 									<td class="py-1 text-right">{{ formatBytes(report.outputBytes) }}</td>
 									<td v-if="report.savingPercent === null" class="py-1 text-right">—</td>
-									<td v-else class="py-1 text-right" :class="report.savingPercent >= 0 ? 'text-palenight-green' : 'text-palenight-orange'">
+									<td v-else class="py-1 text-right font-semibold" :class="report.savingPercent >= 0 ? 'text-paleday-accent-text' : 'text-paleday-warning'">
 										{{ report.savingPercent >= 0 ? '−' : '+' }}{{ Math.abs(report.savingPercent).toFixed(1) }}%
 									</td>
-									<td class="py-1 text-right">{{ report.width }}×{{ report.height }}</td>
+									<td class="py-1 pr-2.5 text-right">{{ report.width }}×{{ report.height }}</td>
 								</tr>
 							</tbody>
 						</table>
-						<ul v-if="failures.length" class="flex flex-col gap-1 text-left text-sm text-palenight-red">
+						<ul v-if="failures.length" class="flex flex-col gap-1 px-2.5 text-xs text-paleday-error">
 							<li v-for="failure in failures" :key="failure.path" data-selectable>
-								<strong class="text-palenight-bright">{{ basename(failure.path) }}</strong>: {{ failure.message }}
+								<strong class="text-paleday-bright">{{ basename(failure.path) }}</strong>: {{ failure.message }}
 							</li>
 						</ul>
 					</ControlPanel>
+
+					<template v-if="settings">
+						<ControlPanel v-if="isWebp" title="Mode" class="pt-8">
+							<ChoiceGroup v-model="settings.webp.mode" :items="MODES" layout="cards" aria-label="Encoding mode" />
+							<div v-if="settings.webp.mode === 'preset'" class="flex w-80 flex-col gap-2 px-2.5 py-[7px]">
+								<span class="text-xs font-semibold text-paleday-fg">libwebp preset</span>
+								<USelect v-model="settings.webp.preset" :items="PRESET_ITEMS" variant="soft" size="sm" aria-label="libwebp preset" :ui="{ base: 'bg-paleday-field' }" />
+								<p v-if="!settings.webp.preset" class="text-xs text-paleday-warning">
+									Pick a preset before converting.
+								</p>
+							</div>
+						</ControlPanel>
+
+						<ControlPanel v-if="isWebp" title="Quality" class="pt-8">
+							<div class="grid grid-cols-3 gap-4">
+								<ControlSlider v-model="settings.webp.quality" :label="qualityLabel" :min="0" :max="100" :help="qualityHelp" />
+								<ControlSlider v-model="settings.webp.alphaQuality" label="Alpha quality" :min="0" :max="100" help="transparency-compression quality (0..100)" :disabled="basicOnly" />
+								<ControlSlider v-model="settings.webp.method" label="Compression method" :min="0" :max="6" help="0 = fast, 6 = slowest and smallest" :disabled="basicOnly" />
+							</div>
+						</ControlPanel>
+
+						<ControlPanel v-if="isAvif" title="Quality" class="pt-8">
+							<div class="grid grid-cols-3 gap-4">
+								<ControlSlider v-model="settings.avif.quality" label="Quality" :min="1" :max="100" help="colour quality (1: small .. 100: big)" />
+								<ControlSlider v-model="settings.avif.alphaQuality" label="Alpha quality" :min="1" :max="100" help="transparency quality (1..100)" />
+								<ControlSlider v-model="settings.avif.speed" label="Speed" :min="1" :max="10" help="1 = slowest and smallest, 10 = fastest and largest" />
+							</div>
+						</ControlPanel>
+
+						<ControlPanel v-if="isAvif" title="AVIF">
+							<div class="grid grid-cols-4 gap-3">
+								<div class="flex flex-col gap-2 px-2.5 py-[7px]">
+									<span class="text-xs font-semibold text-paleday-fg">Bit depth</span>
+									<ChoiceGroup v-model="settings.avif.bitDepth" :items="BIT_DEPTH_ITEMS" aria-label="AVIF bit depth" />
+									<p class="text-xs text-paleday-dim">
+										10-bit keeps more precision through the colour conversion, even for 8-bit images.
+									</p>
+								</div>
+								<div class="flex flex-col gap-2 px-2.5 py-[7px]">
+									<span class="text-xs font-semibold text-paleday-fg">Colour model</span>
+									<ChoiceGroup v-model="settings.avif.colorModel" :items="COLOR_MODEL_ITEMS" aria-label="AVIF colour model" />
+									<p class="text-xs text-paleday-dim">
+										RGB skips the colour conversion at a large size cost.
+									</p>
+								</div>
+								<div class="col-span-2 flex flex-col gap-2 px-2.5 py-[7px]">
+									<span class="text-xs font-semibold text-paleday-fg">Colour under transparency</span>
+									<ChoiceGroup v-model="settings.avif.alphaMode" :items="ALPHA_MODE_ITEMS" orientation="vertical" aria-label="AVIF colour under transparency" />
+								</div>
+							</div>
+							<div class="grid grid-cols-4 gap-3">
+								<ControlToggle v-model="settings.avif.multiThreading" label="Multi-threading" help="encode on every core" />
+							</div>
+						</ControlPanel>
+
+						<ControlPanel title="Resize">
+							<div class="grid grid-cols-3 gap-3">
+								<ControlToggle v-model="settings.resize.noEnlarge" label="Do not enlarge" help="Images already smaller than the target keep their size instead of being upscaled." />
+								<div class="flex min-w-0 flex-col gap-2 px-2.5 py-[7px] text-xs">
+									<span class="font-semibold text-paleday-fg">Width</span>
+									<UInput v-model.number="settings.resize.width" type="number" :min="0" variant="soft" aria-label="Resize width in pixels" :ui="{ base: 'bg-paleday-rule text-paleday-fg hover:bg-paleday-rule focus:bg-paleday-rule', trailing: 'pe-2.5 text-paleday-fg' }">
+										<template #trailing>
+											px
+										</template>
+									</UInput>
+									<p class="text-paleday-dim">
+										0 derives it from the height, keeping the aspect ratio.
+									</p>
+								</div>
+								<div class="flex min-w-0 flex-col gap-2 px-2.5 py-[7px] text-xs">
+									<span class="font-semibold text-paleday-fg">Height</span>
+									<UInput v-model.number="settings.resize.height" type="number" :min="0" variant="soft" aria-label="Resize height in pixels" :ui="{ base: 'bg-paleday-rule text-paleday-fg hover:bg-paleday-rule focus:bg-paleday-rule', trailing: 'pe-2.5 text-paleday-fg' }">
+										<template #trailing>
+											px
+										</template>
+									</UInput>
+									<p class="text-paleday-dim">
+										0 derives it from the width, keeping the aspect ratio.
+									</p>
+								</div>
+							</div>
+						</ControlPanel>
+
+						<!-- The expert controls, behind a disclosure as in the Electron app, open by default. -->
+						<UAccordion
+							v-if="lossy"
+							:items="[{ label: 'Advanced', value: 'advanced', slot: 'advanced' }]"
+							default-value="advanced"
+							:ui="{
+								item: 'border-0',
+								trigger: 'py-0 text-sm font-semibold text-paleday-bright',
+								trailingIcon: 'size-4',
+								body: 'pt-4 pb-0',
+							}"
+						>
+							<template #advanced-body>
+								<div class="flex flex-col gap-4">
+									<div class="grid grid-cols-4 gap-3">
+										<ControlSlider v-model="settings.webp.sns" label="Spatial noise shaping" :min="0" :max="100" help="0 = off, 100 = maximum" />
+										<ControlSlider v-model="settings.webp.segments" label="Segments" :min="1" :max="4" help="number of segments to use (1..4)" />
+										<ControlSlider v-model="settings.webp.partitionLimit" label="Partition limit" :min="0" :max="100" help="degradation allowed to fit the 512k prediction-mode limit" />
+										<ControlSlider v-model="settings.webp.passes" label="Analysis passes" :min="1" :max="10" help="analysis pass number (1..10)" />
+									</div>
+
+									<div class="grid grid-cols-4 gap-3">
+										<div class="flex min-w-0 flex-col gap-2 px-2.5 py-[7px]">
+											<span class="text-xs font-semibold text-paleday-fg">Deblocking filter</span>
+											<ChoiceGroup v-model="settings.webp.filter" :items="FILTER_ITEMS" aria-label="Deblocking filter" />
+											<p class="text-xs text-paleday-dim">
+												Auto lets the encoder pick the strength, so the two sliders do not apply.
+											</p>
+										</div>
+										<ControlSlider v-model="settings.webp.filterStrength" label="Filter strength" :min="0" :max="100" help="0 = off .. 100 = strongest" :disabled="!manualFilter" />
+										<ControlSlider v-model="settings.webp.filterSharpness" label="Filter sharpness" :min="0" :max="7" help="0 = most sharp .. 7 = least sharp" :disabled="!manualFilter" />
+									</div>
+
+									<div class="grid grid-cols-4 gap-3">
+										<div class="flex min-w-0 flex-col gap-2 px-2.5 py-[7px]">
+											<span class="text-xs font-semibold text-paleday-fg">Compression target</span>
+											<ChoiceGroup v-model="targetKind" :items="TARGET_ITEMS" orientation="vertical" aria-label="Compression target" />
+											<p class="text-xs text-paleday-dim">
+												A size or PSNR target overrides the quality slider.
+											</p>
+										</div>
+										<div v-if="targetKind === 'size'" class="flex min-w-0 flex-col gap-2 px-2.5 py-[7px] text-xs">
+											<span class="font-semibold text-paleday-fg">Target size</span>
+											<UInput v-model.number="targetSize" type="number" :min="1" variant="soft" aria-label="Target size in bytes" :ui="{ base: 'bg-paleday-rule text-paleday-fg hover:bg-paleday-rule focus:bg-paleday-rule', trailing: 'pe-2.5 text-paleday-fg' }">
+												<template #trailing>
+													bytes
+												</template>
+											</UInput>
+											<p class="text-paleday-dim">
+												Encoding stops as close to this output size as libwebp can get.
+											</p>
+										</div>
+										<ControlSlider v-if="targetKind === 'psnr'" v-model="targetPsnr" label="Target PSNR (dB)" :min="1" :max="10000" help="typically around 42" />
+									</div>
+
+									<div class="grid grid-cols-4 gap-3">
+										<ControlToggle v-model="settings.webp.sharpYuv" label="Sharp YUV" help="sharper (and slower) RGB to YUV" />
+										<ControlToggle v-model="settings.webp.lowMemory" label="Low memory" help="less memory, slower encoding" />
+										<ControlToggle v-model="settings.webp.multiThreading" label="Multi-threading" help="use multi-threading if available" />
+									</div>
+								</div>
+							</template>
+						</UAccordion>
+
+						<ControlPanel v-if="inputPaths.length > 0 && !busy" title="Preview">
+							<div class="flex items-center gap-2 px-2.5">
+								<USelect v-if="previewItems.length > 1" v-model="previewPath" :items="previewItems" variant="soft" size="sm" aria-label="File to preview" class="w-80 shrink-0" :ui="{ base: 'bg-paleday-field text-paleday-bright' }" />
+								<UButton
+									:loading="previewing"
+									:disabled="!previewPath"
+									:ui="{ base: 'shrink-0 rounded-[6px] bg-primary px-3 py-[7px] text-xs font-semibold text-paleday-fg hover:bg-primary/85' }"
+									@click="runPreview"
+								>
+									{{ preview ? 'Preview again' : 'Preview' }}
+								</UButton>
+								<p class="min-w-0 flex-1 text-xs text-paleday-dim">
+									Encodes {{ previewItems.length > 1 ? 'the chosen file' : 'the file' }} in memory with the current settings. Nothing is written to disk.
+								</p>
+							</div>
+							<p v-if="previewError" class="px-2.5 text-xs text-paleday-error" role="alert" data-selectable>
+								{{ previewError }}
+							</p>
+							<div v-if="preview" class="flex flex-col gap-2" aria-live="polite">
+								<p v-if="previewStale" class="px-2.5 text-xs text-paleday-warning">
+									The settings or the file have changed since this preview. Preview again to see them.
+								</p>
+								<div class="grid grid-cols-2 gap-3">
+									<figure class="flex min-w-0 flex-col gap-1.5 px-2.5 py-[7px]">
+										<img :src="preview.original" alt="The original image" class="max-h-[480px] w-full rounded-lg object-contain">
+										<figcaption class="text-xs text-paleday-dim">
+											Original · {{ formatBytes(preview.sourceBytes) }}
+										</figcaption>
+									</figure>
+									<figure class="flex min-w-0 flex-col gap-1.5 px-2.5 py-[7px]">
+										<img v-if="!encodedUndisplayable" :src="preview.encoded" :alt="`The image encoded as ${previewFormat.toUpperCase()}`" class="max-h-[480px] w-full rounded-lg object-contain" @error="encodedUndisplayable = true">
+										<p v-else class="flex h-[480px] items-center rounded-lg bg-paleday-field p-4 text-xs text-paleday-warning" role="note">
+											This system's web view cannot display {{ previewFormat.toUpperCase() }}, so the encoded
+											image cannot be shown here. The file Skidbladnir writes is unaffected, and the size and
+											saving below are exact.
+										</p>
+										<figcaption class="text-xs text-paleday-dim">
+											{{ previewFormat.toUpperCase() }} · {{ formatBytes(preview.encodedBytes) }} · {{ preview.width }}×{{ preview.height }}
+											<template v-if="preview.savingPercent !== null">
+												· <span class="font-semibold" :class="preview.savingPercent >= 0 ? 'text-paleday-accent-text' : 'text-paleday-warning'">{{ preview.savingPercent >= 0 ? '−' : '+' }}{{ Math.abs(preview.savingPercent).toFixed(1) }}%</span>
+											</template>
+										</figcaption>
+									</figure>
+								</div>
+							</div>
+						</ControlPanel>
+					</template>
 				</div>
-			</template>
+			</div>
 		</main>
-
-		<!-- The old app's fixed dot-textured footer band, with the version readout it never
-		     had but which belongs somewhere unobtrusive. -->
-		<footer class="dot-texture pointer-events-none fixed inset-x-0 bottom-0 h-24 border-t border-palenight-line bg-palenight-panel/90">
-			<p v-if="backendVersion" class="px-5 pt-3 font-mono text-[11px] text-palenight-muted" data-selectable>
-				{{ backendVersion }}
-			</p>
-		</footer>
-
-		<!-- The circular accent FAB, bottom-right, exactly where the Electron app put it. -->
-		<button
-			type="button"
-			class="fixed right-12 bottom-12 z-[100] flex size-[70px] items-center justify-center rounded-full text-3xl shadow-lg transition-transform"
-			:class="canConvert
-				? 'cursor-pointer bg-palenight-green text-palenight-bg hover:scale-105'
-				: 'cursor-not-allowed bg-palenight-selection text-palenight-muted'"
-			:disabled="!canConvert"
-			:title="canConvert ? 'Convert' : 'Choose images and a destination first'"
-			:aria-label="busy ? 'Converting' : 'Convert'"
-			@click="convert"
-		>
-			<UIcon v-if="busy" name="i-lucide-loader-circle" class="size-8 animate-spin" />
-			<UIcon v-else-if="converted" name="i-lucide-check" class="size-8" />
-			<UIcon v-else name="i-lucide-arrow-right" class="size-8" />
-		</button>
 	</div>
 </template>
