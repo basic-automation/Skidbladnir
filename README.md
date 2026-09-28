@@ -5,14 +5,14 @@ and **AVIF**. For WebP it drives libwebp with `cwebp`'s full control surface —
 quality slider — so you can tune an encode the way the command-line tool allows,
 without memorising the command line.
 
-![The Skidbladnir window with WebP selected: the format and mode selectors, the quality, resize and advanced encoder controls, and a preview of the result beside the original](resources/images/screenshot.webp)
+![The Skidbladnir window with WebP selected: the format rail, the queue, destination and presets sidebar, and the mode, quality, resize and advanced encoder controls, with a preview of the result beside the original](resources/images/screenshot.webp)
 
 *WebP selected, with a file previewed.*
 
 <details>
 <summary>With AVIF selected</summary>
 
-![The Skidbladnir window with AVIF selected: the AVIF panel with quality, alpha quality, speed, multi-threading, bit depth, colour model and colour-under-transparency controls](resources/images/screenshot-avif.webp)
+![The Skidbladnir window with AVIF selected: quality, alpha quality and speed, then bit depth, colour model, colour under transparency and multi-threading, and the shared resize controls](resources/images/screenshot-avif.webp)
 
 </details>
 
