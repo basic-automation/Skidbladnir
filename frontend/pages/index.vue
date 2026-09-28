@@ -640,6 +640,8 @@ function basename(path: string): string {
 						</UButton>
 					</div>
 
+					<UpdateBanner />
+
 					<UAlert
 						v-if="preferencesNotice"
 						color="warning"
