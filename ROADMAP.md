@@ -419,6 +419,23 @@ prettier subset.
       attaches nothing. The dry run built all four installers in 7m44s (the 0.5.0 release
       took 13m36s).
 - [x] Run `scripts/a11y-audit.sh` in CI alongside the smoke test — same job.
+- [x] **GIF input**, still and animated — GIF to animated WebP is WebP's classic job, and
+      libwebp ships the reference converter, `gif2webp`. `crates/skidbladnir-encode/src/gif_input.rs`
+      reads a GIF the way `gif2webp` does, rule for rule (transparent canvas, blending,
+      the three disposals, the 10 ms → 100 ms floor, GIF repeats → WebP plays, the
+      background hint), from the `gif` crate's raw indexed frames; the animation encoder
+      takes `gif2webp`'s keyframe spacing (9/17 lossless, 3/5 lossy). Any GIF converts
+      through the animation encoder, as in `gif2webp`; a still GIF bound for AVIF is a
+      still, an animated one is refused by name.
+      **Gate:** `tests/gif.rs` — **49 conversions byte-identical to libwebp 1.6.0's
+      `gif2webp`**: seven fixtures (sub-rectangles, transparency, every disposal, local
+      palettes, interlacing, short delays, each loop form, a still, a 24-frame clip, and a
+      GIF written by ImageMagick) × seven settings. Mutation-tested: skipping
+      dispose-to-previous fails 7, dropping either keyframe spacing fails 3 and 8 — the
+      last needed the 24-frame fixture, since no shorter clip exercised it. Found on the
+      way: the app's default alpha filtering ("best") moved mostly-transparent lossy
+      frames 2 bytes from libwebp's default ("fast"). CI builds `gif2webp` (giflib).
+      Verified in the running window by the smoke test.
 
 ## Phase 5 — Tri-platform packaging and release
 

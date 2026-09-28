@@ -14,6 +14,7 @@ pub mod animation;
 pub mod avif;
 pub mod cwebp;
 pub mod encoder;
+pub mod gif_input;
 pub mod inspect;
 pub mod settings;
 pub mod source;

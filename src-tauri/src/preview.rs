@@ -61,8 +61,12 @@ pub struct Preview {
 pub fn preview(settings: &EncodeJob, input: &Path) -> Result<Preview, String> {
 	let bytes = std::fs::read(input).map_err(|error| format!("could not read `{}`: {error}", input.display()))?;
 	let source_bytes = bytes.len() as u64;
-	if skidbladnir_encode::inspect_webp(&bytes).is_some_and(|info| info.has_animation) {
-		return preview_animation(settings, input, &bytes);
+	// The same routing as a conversion: an animated WebP or any GIF previews through the
+	// animation encoder when the output is WebP. A still GIF bound for AVIF is a still.
+	if let Some(source) = source::animated_source(input, &bytes).map_err(|error| error.to_string())?
+		&& (settings.format == OutputFormat::Webp || source.animation.frames.len() > 1)
+	{
+		return preview_animation(settings, input, bytes.len() as u64, &source);
 	}
 	let image = source::load(input).map_err(|error| error.to_string())?;
 
@@ -98,26 +102,26 @@ pub fn preview(settings: &EncodeJob, input: &Path) -> Result<Preview, String> {
 	Ok(Preview { original: data_url(&original), encoded: data_url(&shown), source_bytes, encoded_bytes: encoded.len() as u64, width, height, saving_percent, frames: 1 })
 }
 
-/// [`preview`] for an animated WebP: both sides are whole animations, encoded exactly as a
+/// [`preview`] for an animation: both sides are whole animations, encoded exactly as a
 /// conversion would encode them, so the preview shows every frame rather than the first.
-fn preview_animation(settings: &EncodeJob, input: &Path, bytes: &[u8]) -> Result<Preview, String> {
+fn preview_animation(settings: &EncodeJob, input: &Path, source_bytes: u64, source: &source::AnimatedSource) -> Result<Preview, String> {
 	// Same refusal, and the same words, as a conversion: AVIF holds stills only.
 	if settings.format != OutputFormat::Webp {
 		return Err(SourceError::Animated { path: input.to_path_buf() }.to_string());
 	}
-	let animation = animation::decode(bytes).ok_or_else(|| format!("could not decode `{}` as an animated WebP", input.display()))?;
+	let animation = &source.animation;
 	// Every frame is held decoded at once, so the guard counts all of them.
 	let frames = u32::try_from(animation.frames.len()).unwrap_or(u32::MAX);
 	if let Some(refusal) = too_large_to_preview(animation.width, animation.height.saturating_mul(frames)) {
 		return Err(format!("{refusal} (an animation counts every frame: {frames} frames of {}x{})", animation.width, animation.height));
 	}
 
-	let encoded = animation::encode(&settings.webp, settings.resize, &animation, &mut |_| true).map_err(|error| error.to_string())?;
-	let original = animation::encode(&lossless(settings.resize).webp, settings.resize, &animation, &mut |_| true).map_err(|error| error.to_string())?;
+	let encoded = animation::encode_with(&settings.webp, settings.resize, animation, source.keyframes, &mut |_| true).map_err(|error| error.to_string())?;
+	let original = animation::encode(&lossless(settings.resize).webp, settings.resize, animation, &mut |_| true).map_err(|error| error.to_string())?;
 
 	let (width, height) = dimensions(&encoded).unwrap_or((animation.width, animation.height));
-	let saving_percent = Conversion { source_bytes: bytes.len() as u64, output_bytes: encoded.len() as u64, width, height }.saving_percent();
-	Ok(Preview { original: data_url(&original), encoded: data_url(&encoded), source_bytes: bytes.len() as u64, encoded_bytes: encoded.len() as u64, width, height, saving_percent, frames })
+	let saving_percent = Conversion { source_bytes, output_bytes: encoded.len() as u64, width, height }.saving_percent();
+	Ok(Preview { original: data_url(&original), encoded: data_url(&encoded), source_bytes, encoded_bytes: encoded.len() as u64, width, height, saving_percent, frames })
 }
 
 /// A lossless WebP job, for showing pixels exactly.

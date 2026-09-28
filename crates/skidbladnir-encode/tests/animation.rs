@@ -32,7 +32,7 @@ use std::{
 };
 
 use skidbladnir_encode::{
-	animation::{self, Animation, Frame}, settings::{FilterType, Mode, Resize, WebpSettings}
+	animation::{self, Animation, Frame}, settings::{AlphaFiltering, FilterType, Mode, Resize, WebpSettings}
 };
 
 const WIDTH: u32 = 48;
@@ -212,13 +212,14 @@ fn write_pam(path: &Path, pixels: &[u8]) {
 
 /// Our settings, and the `img2webp` flags that ask libwebp for the same per-frame config.
 ///
-/// The lossy cases pin two controls to libwebp's own defaults, because `img2webp` has no
-/// flag for either: the filter (the app defaults to auto; libwebp to strong, strength 60)
-/// and the pass count (the app defaults to 6; libwebp to 1). The pass count is not inert
+/// The lossy cases pin three controls to libwebp's own defaults, because `img2webp` has no
+/// flag for any of them: the filter (the app defaults to auto; libwebp to strong, strength
+/// 60), the pass count (the app 6; libwebp 1) and alpha filtering (the app "best"; libwebp
+/// "fast" — found by `tests/gif.rs`, where it moved mostly transparent frames by 2 bytes). The pass count is not inert
 /// without a target, as one might assume — at `-q 95 -m 1` it changes the output, found
 /// by this test.
 fn cases() -> Vec<(&'static str, WebpSettings, Vec<&'static str>)> {
-	let lossy = WebpSettings { filter: FilterType::Strong, filter_strength: 60, passes: 1, ..Default::default() };
+	let lossy = WebpSettings { filter: FilterType::Strong, filter_strength: 60, passes: 1, alpha_filtering: Some(AlphaFiltering::Fast), ..Default::default() };
 	let mut cases = Vec::new();
 	let mut add = |name: &'static str, settings: WebpSettings, flags: Vec<&'static str>| cases.push((name, settings, flags));
 	add("lossless", WebpSettings { mode: Mode::Lossless, ..Default::default() }, vec!["-lossless", "-exact", "-q", "75", "-m", "4"]);

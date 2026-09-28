@@ -8,6 +8,7 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+gif = { workspace = true }
 image = { workspace = true }
 libwebp-sys = { workspace = true }
 ravif = { workspace = true }

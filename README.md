@@ -18,6 +18,11 @@ without memorising the command line.
 
 ## Features
 
+**Input formats**
+
+- PNG, JPEG (including Photoshop's CMYK), TIFF and WebP (including animated WebP)
+- **AVIF**, and **GIF**, still or animated
+
 **Output formats**
 
 - **WebP**, through libwebp, byte-for-byte identical to `cwebp` at the same settings
@@ -46,7 +51,7 @@ without memorising the command line.
 **Workflow**
 
 - Preview the result beside the original, in either format, before anything is written
-- Animated WebP in, animated WebP out, every frame kept
+- Animated WebP or GIF in, animated WebP out, every frame kept
 - Batch conversion across multiple input files
 - Original and converted file sizes reported after each conversion
 - Advanced options hidden behind a disclosure so the common path stays simple
@@ -92,11 +97,12 @@ scripts/smoke-test.sh      # drives the built window: renders, IPC, a real conve
 scripts/a11y-audit.sh      # axe-core against the live window
 ```
 
-The parity tests compare this encoder against a real `cwebp` (and the animation encoder
-against `img2webp`) and require one: point `SKIDBLADNIR_REFERENCE_CWEBP` and
-`SKIDBLADNIR_REFERENCE_IMG2WEBP` at builds of the **same libwebp version** the binary links
-(`cargo run --example libwebp-version -p skidbladnir-encode` prints it), or they will say
-so and skip rather than pass quietly. Set `SKIDBLADNIR_REQUIRE_PARITY=1` to turn a skip
+The parity tests compare this encoder against libwebp's own tools and require them:
+point `SKIDBLADNIR_REFERENCE_CWEBP`, `SKIDBLADNIR_REFERENCE_IMG2WEBP` (animated WebP) and
+`SKIDBLADNIR_REFERENCE_GIF2WEBP` (GIF) at builds of the **same libwebp version** the binary
+links (`cargo run --example libwebp-version -p skidbladnir-encode` prints it). The AVIF
+tests use libavif's `avifdec` from `PATH`. Missing tools make the tests say
+so and skip rather than pass quietly; set `SKIDBLADNIR_REQUIRE_PARITY=1` to turn a skip
 into a failure.
 
 The two scripts need `tauri-driver` (`cargo install tauri-driver`) and `WebKitWebDriver`
@@ -135,14 +141,16 @@ What it can do:
   its loop count, with every WebP setting applied to each frame, and preview it as an
   animation before converting. Its output is byte-for-byte identical to libwebp's own
   `img2webp` for every setting `img2webp` can express.
+- Convert **GIFs**, still or animated, to WebP exactly as libwebp's own `gif2webp` does —
+  byte for byte, across disposal methods, transparency, timing and loop counts.
 - Remember your settings and destination between launches, and save named presets of
   your own.
 - Be driven entirely from the keyboard, with every control labelled for a screen reader.
 - Look like Skidbladnir: the original layout — dot-textured header and footer bands,
   dotted option groups, two-column controls and the circular action button — restyled
   in the Palenight palette.
-- Read PNG, JPEG, TIFF, WebP and **AVIF** input, identifying the format by its contents
-  rather than by its file extension. That includes **CMYK JPEGs** as Photoshop writes
+- Read PNG, JPEG, TIFF, WebP, **AVIF** and **GIF** input, identifying the format by its
+  contents rather than by its file extension. That includes **CMYK JPEGs** as Photoshop writes
   them, which `cwebp` itself refuses to read. AVIF input is checked against libavif's
   own `avifdec`, which must decode the same files to the same pixels.
 - Refuse to overwrite your source image, and stage every write through a temporary
@@ -162,9 +170,10 @@ Known gaps:
   Cancel takes effect when the current file finishes (which is then discarded, not
   written). There is no chroma subsampling control — AVIF is always written 4:4:4 — and
   animated AVIF is not read.
-- An animated WebP converts to WebP only. AVIF output refuses it by name rather than
-  keeping just the first frame, because the AVIF encoder writes still images. A target
-  size or PSNR applies to each frame of an animation, not to the whole file.
+- An animation (animated WebP or GIF) converts to WebP only. AVIF output refuses it by
+  name rather than keeping just the first frame, because the AVIF encoder writes still
+  images. A target size or PSNR applies to each frame of an animation, not to the whole
+  file.
 - JPEG XL is being watched until browsers enable it without a flag. The long-promised
   JPEG 2000 was dropped as a goal; it has no momentum outside medical and archival
   imaging.

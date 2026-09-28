@@ -1293,6 +1293,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "gif"
+version = "0.14.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee8cfcc411d9adbbaba82fb72661cc1bcca13e8bba98b364e62b2dba8f960159"
+dependencies = [
+ "weezl",
+]
+
+[[package]]
 name = "gio"
 version = "0.18.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3492,6 +3501,7 @@ name = "skidbladnir-encode"
 version = "0.1.0"
 dependencies = [
  "avif-decode",
+ "gif",
  "image",
  "libwebp-sys",
  "ravif",

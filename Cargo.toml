@@ -37,6 +37,9 @@ ravif = "0.13"
 # `binary` is off: it only adds a PNG writer for the crate's own command-line tool.
 avif-decode = { version = "3", default-features = false }
 libwebp-sys = "0.14"
+# GIF input (ROADMAP.md Phase 4), read as raw indexed frames so the compositing onto the
+# canvas can follow libwebp's own gif2webp exactly rather than image-rs's rules.
+gif = { version = "0.14", default-features = false, features = ["std"] }
 # The version is not redundant with the path: a path dependency without one resolves as a
 # wildcard `*`, which `cargo deny` rejects and which would publish as an unbounded range.
 skidbladnir-encode = { path = "crates/skidbladnir-encode", version = "0.1" }

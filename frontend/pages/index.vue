@@ -31,7 +31,7 @@ let unlistenDrop: (() => void) | null = null
 
 /** What the Rust core says about a path the user offered. */
 interface WebpInfo { width: number, height: number, hasAlpha: boolean, hasAnimation: boolean, compression: 'lossy' | 'lossless' | 'mixed' }
-interface PathInspection { path: string, supported: boolean, format: string | null, webp: WebpInfo | null }
+interface PathInspection { path: string, supported: boolean, format: string | null, webp: WebpInfo | null, animated: boolean }
 
 const inspected = ref<PathInspection[]>([])
 
@@ -41,7 +41,7 @@ interface FoundImage { path: string, relative: string }
 // output mirrors the source tree or lands flat.
 const scanned = ref<FoundImage[]>([])
 const mirrorStructure = ref(true)
-const animatedInputs = computed(() => inspected.value.filter(entry => entry.webp?.hasAnimation))
+const animatedInputs = computed(() => inspected.value.filter(entry => entry.animated))
 
 /** Preferences as the Rust side stores them, plus why it fell back if it did. */
 interface Preferences { settings: EncodeJob, outputDirectory: string | null }
@@ -206,7 +206,7 @@ onUnmounted(() => {
 
 async function chooseInputs() {
 	const { open } = await import('@tauri-apps/plugin-dialog')
-	const picked = await open({ multiple: true, filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'jpe', 'jif', 'jfif', 'jfi', 'tif', 'tiff', 'webp', 'avif'] }] })
+	const picked = await open({ multiple: true, filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'jpe', 'jif', 'jfif', 'jfi', 'tif', 'tiff', 'webp', 'avif', 'gif'] }] })
 	scanned.value = []
 	if (Array.isArray(picked)) inputPaths.value = picked
 	else if (typeof picked === 'string') inputPaths.value = [picked]
@@ -473,7 +473,7 @@ function basename(path: string): string {
 							{{ inspected[0]!.webp!.compression }}{{ inspected[0]!.webp!.hasAlpha ? ', with alpha' : '' }}.
 						</p>
 						<p v-if="animatedInputs.length > 0" class="text-center text-xs text-palenight-yellow">
-							{{ animatedInputs.length === 1 ? 'One selected file is an animated WebP' : `${animatedInputs.length} selected files are animated WebPs` }}.
+							{{ animatedInputs.length === 1 ? 'One selected file is an animation' : `${animatedInputs.length} selected files are animations` }} (animated WebP or GIF).
 							<template v-if="isAvif">
 								AVIF holds still images only, so {{ animatedInputs.length === 1 ? 'it' : 'they' }} will be
 								skipped with an error rather than cut down to one frame. Choose WebP to convert
@@ -486,10 +486,10 @@ function basename(path: string): string {
 						</p>
 						<p v-if="dropRejected > 0" class="text-center text-xs text-palenight-yellow">
 							{{ dropRejected }} dropped {{ dropRejected === 1 ? 'file was' : 'files were' }} not a
-							PNG, JPEG, TIFF, WebP or AVIF and {{ dropRejected === 1 ? 'was' : 'were' }} skipped.
+							PNG, JPEG, TIFF, WebP, AVIF or GIF and {{ dropRejected === 1 ? 'was' : 'were' }} skipped.
 						</p>
 						<p class="text-center text-xs text-palenight-muted">
-							PNG, JPEG, TIFF, WebP and AVIF — drop them anywhere on the window, or use the button.
+							PNG, JPEG, TIFF, WebP, AVIF and GIF — drop them anywhere on the window, or use the button.
 							Converted files are written as <code class="text-palenight-cyan">&lt;name&gt;.{{ extension }}</code>
 							in the destination. Your originals are never written over.
 						</p>
