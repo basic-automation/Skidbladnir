@@ -33,7 +33,7 @@ let unlistenDrop: (() => void) | null = null
 
 /** What the Rust core says about a path the user offered. */
 interface WebpInfo { width: number, height: number, hasAlpha: boolean, hasAnimation: boolean, compression: 'lossy' | 'lossless' | 'mixed' }
-interface PathInspection { path: string, supported: boolean, format: string | null, webp: WebpInfo | null }
+interface PathInspection { path: string, supported: boolean, format: string | null, webp: WebpInfo | null, animated: boolean }
 
 const inspected = ref<PathInspection[]>([])
 
@@ -48,7 +48,7 @@ const mirrorStructure = ref(true)
 const includeSubfolders = ref(false)
 // The folder the queue was scanned from, so the scan can be redone when the option changes.
 const scannedRoot = ref('')
-const animatedInputs = computed(() => inspected.value.filter(entry => entry.webp?.hasAnimation))
+const animatedInputs = computed(() => inspected.value.filter(entry => entry.animated))
 
 /** Preferences as the Rust side stores them, plus why it fell back if it did. */
 interface Preferences { settings: EncodeJob, outputDirectory: string | null }
@@ -223,7 +223,7 @@ onUnmounted(() => {
 
 async function chooseInputs() {
 	const { open } = await import('@tauri-apps/plugin-dialog')
-	const picked = await open({ multiple: true, filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'jpe', 'jif', 'jfif', 'jfi', 'tif', 'tiff', 'webp', 'avif', 'jxl', 'heic', 'heif'] }] })
+	const picked = await open({ multiple: true, filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'jpe', 'jif', 'jfif', 'jfi', 'tif', 'tiff', 'webp', 'avif', 'jxl', 'heic', 'heif', 'gif'] }] })
 	scanned.value = []
 	scannedRoot.value = ''
 	if (Array.isArray(picked)) inputPaths.value = picked
@@ -711,7 +711,7 @@ function basename(path: string): string {
 							{{ inspected[0]!.webp!.compression }}{{ inspected[0]!.webp!.hasAlpha ? ', with alpha' : '' }}.
 						</p>
 						<p v-if="animatedInputs.length > 0" class="text-paleday-warning">
-							{{ animatedInputs.length === 1 ? 'One queued file is an animated WebP' : `${animatedInputs.length} queued files are animated WebPs` }}.
+							{{ animatedInputs.length === 1 ? 'One queued file is an animation' : `${animatedInputs.length} queued files are animations` }} (animated WebP or GIF).
 							<template v-if="!isWebp">
 								This format holds still images only here, so {{ animatedInputs.length === 1 ? 'it' : 'they' }} will be
 								skipped with an error rather than cut down to one frame. Choose WebP to convert
@@ -724,7 +724,7 @@ function basename(path: string): string {
 						</p>
 						<p v-if="dropRejected > 0" class="text-paleday-warning">
 							{{ dropRejected }} dropped {{ dropRejected === 1 ? 'file was' : 'files were' }} not a
-							PNG, JPEG, TIFF, WebP, AVIF, JPEG XL or HEIC and {{ dropRejected === 1 ? 'was' : 'were' }} skipped.
+							PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC or GIF and {{ dropRejected === 1 ? 'was' : 'were' }} skipped.
 						</p>
 					</div>
 

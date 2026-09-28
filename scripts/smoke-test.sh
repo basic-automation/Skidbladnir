@@ -253,6 +253,15 @@ check "refuses to cut an animation down to an AVIF still" \
 	 const s=await I.invoke('default_settings'); s.format='avif';
 	 try { await I.invoke('convert_image', { settings: s, input: '$anim_in', outputDirectory: '$out_dir' }); return 'NOT REFUSED'; }
 	 catch (e) { return String(e); }" 'AVIF output takes still images only'
+# GIF input, with the ImageMagick-written fixture from tests/gif.rs.
+cp "$(dirname "$0")/../crates/skidbladnir-encode/tests/fixtures/animated.gif" "$scratch/clip.gif"
+gif_in=$(app_path "$scratch/clip.gif")
+check "converts an animated GIF to animated WebP" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const s=await I.invoke('default_settings');
+	 const r=await I.invoke('convert_image', { settings: s, input: '$gif_in', outputDirectory: '$out_dir' });
+	 const found=await I.invoke('inspect_dropped_paths', { paths: ['$gif_in'] });
+	 return r.outputPath.split(/[\\\\/]/).pop() + ' ' + r.width + 'x' + r.height + ' ' + found[0].format + ' animated=' + found[0].animated" 'clip.webp 24x16 GIF animated=true'
 check "previews an animation the webview can show" \
 	"const I=window.__TAURI_INTERNALS__;
 	 const s=await I.invoke('default_settings');

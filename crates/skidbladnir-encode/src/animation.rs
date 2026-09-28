@@ -59,8 +59,9 @@ pub struct Animation {
 	pub height: u32,
 	/// How many times to play it; `0` means forever.
 	pub loop_count: u32,
-	/// The background colour hint, as libwebp's mux API packs it: blue in the top byte,
-	/// then green, red and alpha in the bottom byte. Carried over untouched.
+	/// The background colour hint as `0xAARRGGBB` — the value `gif2webp` builds and
+	/// libwebp's mux stores, written to the file little-endian as blue, green, red, alpha.
+	/// Carried over untouched.
 	pub background: u32,
 	/// Every frame, in display order.
 	pub frames: Vec<Frame>,
@@ -157,7 +158,36 @@ pub fn decode(bytes: &[u8]) -> Option<Animation> {
 /// Returns [`EncodeError`] if the settings are invalid, the animation has no frames or a
 /// frame's buffer does not match the canvas, or libwebp fails.
 pub fn encode(settings: &WebpSettings, resize: Resize, animation: &Animation, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
+	encode_with(settings, resize, animation, Keyframes::Libwebp, on_progress)
+}
+
+/// How far apart the animation encoder may place keyframes.
+///
+/// A keyframe is a frame encoded whole rather than as a change to the one before; spacing
+/// them trades size against how far back a viewer must decode to show any given frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Keyframes {
+	/// libwebp's defaults, which `img2webp` uses. For re-encoding an animated WebP.
+	Libwebp,
+	/// What `gif2webp` uses: at least 9 and at most 17 frames apart for lossless, 3 and 5
+	/// for lossy. For GIF input, so the conversion matches `gif2webp`.
+	Gif,
+}
+
+/// [`encode`], choosing the keyframe spacing.
+///
+/// # Errors
+///
+/// As [`encode`].
+pub fn encode_with(settings: &WebpSettings, resize: Resize, animation: &Animation, keyframes: Keyframes, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
 	let config = build_config(settings)?;
+	// gif2webp decides from the finished config, so near-lossless (lossless underneath)
+	// gets the lossless spacing too.
+	let spacing = match keyframes {
+		Keyframes::Libwebp => None,
+		Keyframes::Gif if config.lossless != 0 => Some((9, 17)),
+		Keyframes::Gif => Some((3, 5)),
+	};
 	let frame_count = animation.frames.len();
 	if frame_count == 0 {
 		return Err(EncodeError::MalformedImage { width: animation.width, height: animation.height, actual: 0, expected: (animation.width as usize).saturating_mul(animation.height as usize).saturating_mul(4) });
@@ -174,7 +204,7 @@ pub fn encode(settings: &WebpSettings, resize: Resize, animation: &Animation, on
 		let (width, height) = (picture.0.width, picture.0.height);
 		let (encoder, canvas_w, canvas_h) = match &encoder {
 			Some(existing) => existing,
-			None => encoder.insert((new_encoder(width, height, animation)?, width, height)),
+			None => encoder.insert((new_encoder(width, height, animation, spacing)?, width, height)),
 		};
 		// Every frame goes through the same rescale, so a mismatch means a bug, not bad input.
 		if (width, height) != (*canvas_w, *canvas_h) {
@@ -209,9 +239,10 @@ pub fn encode(settings: &WebpSettings, resize: Resize, animation: &Animation, on
 }
 
 /// Create an animation encoder for a `width` x `height` canvas, carrying over the source's
-/// loop count and background colour. Every other option is libwebp's default, which is
-/// also what `img2webp` uses.
-fn new_encoder(width: c_int, height: c_int, animation: &Animation) -> Result<Encoder, EncodeError> {
+/// loop count and background colour, with the keyframe spacing given as `(kmin, kmax)`.
+/// Every other option is libwebp's default, which is also what `img2webp` and `gif2webp`
+/// use.
+fn new_encoder(width: c_int, height: c_int, animation: &Animation, spacing: Option<(c_int, c_int)>) -> Result<Encoder, EncodeError> {
 	// SAFETY: `options` is a live local for both calls; the encoder is owned by a guard.
 	unsafe {
 		let mut options = std::mem::zeroed::<WebPAnimEncoderOptions>();
@@ -220,6 +251,10 @@ fn new_encoder(width: c_int, height: c_int, animation: &Animation) -> Result<Enc
 		}
 		options.anim_params.loop_count = c_int::try_from(animation.loop_count).unwrap_or(0);
 		options.anim_params.bgcolor = animation.background;
+		if let Some((kmin, kmax)) = spacing {
+			options.kmin = kmin;
+			options.kmax = kmax;
+		}
 		let encoder = Encoder(WebPAnimEncoderNewInternal(width, height, &raw const options, WEBP_MUX_ABI_VERSION.cast_signed()));
 		if encoder.0.is_null() {
 			return Err(EncodeError::Libwebp("WebPAnimEncoderNew"));

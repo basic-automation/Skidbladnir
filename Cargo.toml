@@ -47,6 +47,9 @@ pkg-config = "0.3"
 # The JPEG XL decoder: our own output for the preview and the reported dimensions, and
 # JPEG XL input. Pure Rust, so no second copy of libjxl's decoder is needed.
 jxl-oxide = { version = "0.12", default-features = false }
+# GIF input (ROADMAP.md Phase 4), read as raw indexed frames so the compositing onto the
+# canvas can follow libwebp's own gif2webp exactly rather than image-rs's rules.
+gif = { version = "0.14", default-features = false, features = ["std"] }
 # The version is not redundant with the path: a path dependency without one resolves as a
 # wildcard `*`, which `cargo deny` rejects and which would publish as an unbounded range.
 skidbladnir-encode = { path = "crates/skidbladnir-encode", version = "0.1" }
