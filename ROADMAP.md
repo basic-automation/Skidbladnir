@@ -703,7 +703,7 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       rather than reading one from an environment variable, so it always runs — a test
       that skips unless someone remembered to set a variable is a test that never runs in
       CI, and this one guards a refusal users depend on.
-- [ ] Re-encode animated WebP rather than refusing it, using libwebp's `WebPAnimEncoder`.
+- [x] Re-encode animated WebP rather than refusing it, using libwebp's `WebPAnimEncoder`.
       This needs a per-frame settings story (do the advanced controls apply to every
       frame?) and a demuxer for the input, so it is a real piece of work, not a flag.
       *Slices:*
@@ -718,11 +718,19 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
          mutation-tested; CI builds a version-matched `img2webp` beside `cwebp`. Found on the
          way: the app's default `-pass 6` changes lossy output even with no target set.
          Controls `img2webp` has no flag for are only proven to *reach* the frames.
-      2. Wire it through `load`/`encode_file`: an animated WebP input converts instead of
-         being refused (`SourceError::Animated` goes), still-image preview shows frame 1.
-      3. The window: drop the "cannot re-encode" warning, say that target size/PSNR are
-         per frame, and decide what AVIF output does with an animation (refuse, or first
-         frame — `ravif` writes stills only).
+      2. **Done.** `encode_file` sends an animated WebP through the animation encoder.
+         `load` still refuses one (it returns a single picture, and handing back frame 1 as
+         if it were the image is the silent truncation this project refuses), and so does
+         **AVIF output — decided: refuse by name, never keep the first frame**, since
+         `ravif` writes stills only. The preview shows **both sides as animations**, every
+         frame, with a frame count; the size guard counts every decoded frame.
+      3. **Done.** The window's warning now says what will happen (WebP: every frame kept;
+         AVIF: refused, choose WebP) and the target controls say a target is per frame.
+         Verified in the running release binary: the smoke test converts an
+         `img2webp`-written 3-frame fixture, finds 3 `ANMF` frames on disk, gets the AVIF
+         refusal, and the webview displays the animated preview; axe clean.
+- [ ] Animated **AVIF** output (AVIF image sequences). `ravif` writes stills only; this
+      needs a different encoder path, and belongs with the AVIF-input decoder work.
 - [x] **HEIC output and input** (done 2026-09-28; the owner chose Kvazaar + libheif
       over x265, which would have made the binaries GPL, and over macOS-only ImageIO).
       libheif 1.23.5 (LGPL-3.0) is built by `scripts/build-libheif.sh` from pinned

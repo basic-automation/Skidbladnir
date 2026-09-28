@@ -89,6 +89,48 @@ fn lossy_round_trip_keeps_the_timing() {
 	}
 }
 
+/// A file written by libwebp's own `img2webp`, not by us, decodes to the frames, timing
+/// and loop count it was built from — so the decoder is not only ever tested against our
+/// own encoder.
+///
+/// `tests/fixtures/animated.webp` (348 bytes, SHA-256
+/// `1814118985636bc723fd3283502ff50b4bcc1ea3e2fa187c9907d13a5eb173ad`) was made with
+/// libwebp 1.6.0's `img2webp -lossless -loop 2 -d 80 f0.pam -d 120 f1.pam -d 160 f2.pam`
+/// from three 24x16 frames drawn by the pattern in [`fixture_frame`]. The smoke test
+/// converts the same file through the running window.
+#[test]
+fn a_reference_animation_decodes_as_built() {
+	let decoded = animation::decode(include_bytes!("fixtures/animated.webp")).expect("the img2webp fixture must decode");
+	assert_eq!((decoded.width, decoded.height, decoded.loop_count), (24, 16, 2));
+	assert_eq!(decoded.frames.iter().map(|frame| frame.duration_ms).collect::<Vec<_>>(), [80, 120, 160]);
+	for (index, frame) in decoded.frames.iter().enumerate() {
+		let expected = fixture_frame(u32::try_from(index).expect("small"));
+		for (at, (ours, theirs)) in frame.pixels.as_chunks::<4>().0.iter().zip(expected.as_chunks::<4>().0).enumerate() {
+			// Lossless without -exact may rewrite the colour under fully transparent pixels,
+			// which no one can see; only the alpha is guaranteed there.
+			if theirs[3] == 0 {
+				assert_eq!(ours[3], 0, "frame {index} pixel {at} must stay transparent");
+			} else {
+				assert_eq!(ours, theirs, "frame {index} pixel {at}");
+			}
+		}
+	}
+}
+
+/// Frame `index` of the `animated.webp` fixture: a red block moving over a gradient, with
+/// the top two rows transparent.
+fn fixture_frame(index: u32) -> Vec<u8> {
+	let mut pixels = Vec::new();
+	for y in 0..16_u32 {
+		for x in 0..24_u32 {
+			let inside = (index * 6..index * 6 + 8).contains(&x) && (4..12).contains(&y);
+			let pixel = if inside { [230, 60, 90, 255] } else { [u8::try_from(x * 10).unwrap_or(255), u8::try_from(y * 15).unwrap_or(255), 200, if y > 1 { 255 } else { 0 }] };
+			pixels.extend_from_slice(&pixel);
+		}
+	}
+	pixels
+}
+
 /// A still WebP decodes as a one-frame animation, so the decoder is not a second path
 /// that only animations exercise.
 #[test]
