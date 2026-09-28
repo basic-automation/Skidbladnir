@@ -135,3 +135,42 @@ fn reference_avifdec_reads_our_avif_correctly() {
 
 	eprintln!("AVIF REFERENCE OK: avifdec decoded {checked} of our AVIF files at the right size, colour and transparency (default {default_psnr:.1} dB, q20 {low:.1} dB, q95 {high:.1} dB).");
 }
+
+/// AVIF **input**: our decoder (`avif-decode`, over rav1d) must read an AVIF the way
+/// libavif's `avifdec` does. Both decode the same files — 10-bit and 8-bit, with alpha —
+/// and the pixels are compared directly, so a wrong bit-depth reduction or a swapped
+/// channel shows up as a collapse in agreement rather than as a plausible-looking image.
+#[test]
+fn our_avif_decoder_agrees_with_avifdec() {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let Some(avifdec) = reference_avifdec() else {
+		let message = "AVIF DECODE REFERENCE NOT RUN: no avifdec found. AVIF input is UNVERIFIED by a reference decoder in this run.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+	let pixels = fixture();
+	let mut agreements = Vec::new();
+	for (name, bit_depth) in [("10-bit", AvifBitDepth::Ten), ("8-bit", AvifBitDepth::Eight)] {
+		let avif = encode(AvifSettings { speed: 8, bit_depth, ..AvifSettings::default() }, Resize::default(), &pixels);
+		let reference = decode(&avifdec, &avif, &format!("agree-{name}"));
+		let (width, height, ours) = skidbladnir_encode::source::decode_avif(&avif).expect("our decoder reads our own AVIF");
+		assert_eq!((width, height), (reference.width, reference.height), "{name}: size");
+
+		// Colour agreement over every pixel, as PSNR between the two decodes.
+		let (mut squared, mut samples, mut worst_alpha) = (0.0_f64, 0.0_f64, 0_u8);
+		for (a, b) in ours.as_chunks::<4>().0.iter().zip(reference.rgba.as_chunks::<4>().0) {
+			for channel in 0..3 {
+				let difference = f64::from(a[channel]) - f64::from(b[channel]);
+				squared += difference * difference;
+				samples += 1.0;
+			}
+			worst_alpha = worst_alpha.max(a[3].abs_diff(b[3]));
+		}
+		let agreement = if squared == 0.0 { f64::INFINITY } else { 10.0 * (255.0 * 255.0 * samples / squared).log10() };
+		assert!(agreement > 40.0, "{name}: our decode and avifdec's agree at only {agreement:.1} dB");
+		assert!(worst_alpha <= 2, "{name}: alpha differs from avifdec's by up to {worst_alpha}");
+		agreements.push(format!("{name} {agreement:.1} dB, alpha within {worst_alpha}"));
+	}
+	eprintln!("AVIF DECODE OK: our decoder agrees with avifdec ({}).", agreements.join("; "));
+}

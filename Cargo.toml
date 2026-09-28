@@ -26,12 +26,16 @@ repository = "https://github.com/basic-automation/Skidbladnir"
 # features are off so the binary carries the four formats the app accepts and no more.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tiff"] }
 base64 = "0.22"
-# The AVIF encoder (ROADMAP.md Phase 7). Pure Rust over rav1e: no C toolchain on any
-# platform, which matters on the Windows runner. Default features are off because they
-# pull in rav1e's `asm`, which needs `nasm` at build time; the pure-Rust path is slower
-# but builds everywhere. `threading` is what lets the multi-threading control mean
-# something.
-ravif = { version = "0.13", default-features = false, features = ["threading"] }
+# The AVIF encoder (ROADMAP.md Phase 7). Rust over rav1e: no C library on any platform.
+# Default features on: `asm` is rav1e's hand-written SIMD, assembled with `nasm`, which is
+# therefore a build requirement (README "Build from source"; installed on every CI
+# runner). `threading` is what lets the multi-threading control mean something.
+ravif = "0.13"
+# The AVIF decoder: the user's AVIF input, and our own AVIF output for the preview, so
+# the comparison shows on every platform rather than only where the web engine happens
+# to decode AVIF. Rust over rav1d, the Rust port of dav1d, whose SIMD also needs `nasm`.
+# `binary` is off: it only adds a PNG writer for the crate's own command-line tool.
+avif-decode = { version = "3", default-features = false }
 libwebp-sys = "0.14"
 # The version is not redundant with the path: a path dependency without one resolves as a
 # wildcard `*`, which `cargo deny` rejects and which would publish as an unbounded range.

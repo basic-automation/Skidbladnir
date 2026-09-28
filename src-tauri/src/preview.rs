@@ -13,7 +13,7 @@ use std::path::Path;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::Serialize;
 use skidbladnir_encode::{
-	encoder::encode_rgba, settings::{EncodeJob, Mode, OutputFormat, WebpSettings}, source::{self, Conversion}
+	encoder::{RgbaImage, encode_rgba}, settings::{EncodeJob, Mode, OutputFormat, Resize, WebpSettings}, source::{self, Conversion}
 };
 
 /// Above this many pixels a preview is refused rather than attempted.
@@ -67,8 +67,7 @@ pub fn preview(settings: &EncodeJob, input: &Path) -> Result<Preview, String> {
 
 	// The original is shown at the same dimensions as the encoded side when a resize is in
 	// play, so the comparison is like for like rather than a big image next to a small one.
-	let original_settings = EncodeJob { resize: settings.resize, webp: WebpSettings { mode: Mode::Lossless, quality: 100, ..Default::default() }, ..Default::default() };
-	let original = encode_rgba(&original_settings, &image.as_rgba()).map_err(|error| error.to_string())?;
+	let original = encode_rgba(&lossless(settings.resize), &image.as_rgba()).map_err(|error| error.to_string())?;
 
 	let (width, height) = match settings.format {
 		OutputFormat::Webp => dimensions(&encoded),
@@ -76,10 +75,25 @@ pub fn preview(settings: &EncodeJob, input: &Path) -> Result<Preview, String> {
 	}
 	.unwrap_or((image.width, image.height));
 
-	// The original side is always lossless WebP; the encoded side is whatever format the
-	// job writes, and its `data:` URL has to say so or the webview will not decode it.
+	// Both sides reach the webview as WebP. For WebP that is the encoded file itself. For
+	// AVIF it is the encoded file decoded back to pixels here and re-wrapped losslessly:
+	// not every web engine can decode AVIF (Ubuntu's WebKitGTK cannot, and the AppImage
+	// bundles it), and an exact lossless copy of the decoded pixels shows precisely what
+	// the AVIF encoder did without depending on the engine.
+	let shown = match settings.format {
+		OutputFormat::Webp => encoded.clone(),
+		OutputFormat::Avif => {
+			let (decoded_width, decoded_height, pixels) = source::decode_avif(&encoded).map_err(|error| format!("could not decode the AVIF preview: {error}"))?;
+			encode_rgba(&lossless(Resize::default()), &RgbaImage { width: decoded_width, height: decoded_height, pixels: &pixels }).map_err(|error| error.to_string())?
+		}
+	};
 	let saving_percent = Conversion { source_bytes, output_bytes: encoded.len() as u64, width, height }.saving_percent();
-	Ok(Preview { original: data_url(&original, OutputFormat::Webp), encoded: data_url(&encoded, settings.format), source_bytes, encoded_bytes: encoded.len() as u64, width, height, saving_percent })
+	Ok(Preview { original: data_url(&original), encoded: data_url(&shown), source_bytes, encoded_bytes: encoded.len() as u64, width, height, saving_percent })
+}
+
+/// A lossless WebP job, for showing pixels exactly.
+fn lossless(resize: Resize) -> EncodeJob {
+	EncodeJob { resize, webp: WebpSettings { mode: Mode::Lossless, quality: 100, ..Default::default() }, ..Default::default() }
 }
 
 /// Whether an image is too large to hold two base64 copies of in the webview, and the
@@ -93,9 +107,9 @@ fn too_large_to_preview(width: u32, height: u32) -> Option<String> {
 	(pixels > MAX_PREVIEW_PIXELS).then(|| format!("{width}x{height} is too large to preview ({} megapixels; the limit is {}). Convert it and compare the files instead.", pixels / 1_000_000, MAX_PREVIEW_PIXELS / 1_000_000))
 }
 
-/// Wrap encoded bytes as a `data:` URL the webview can put in an `<img src>`.
-fn data_url(bytes: &[u8], format: OutputFormat) -> String {
-	format!("data:{};base64,{}", format.mime_type(), STANDARD.encode(bytes))
+/// Wrap WebP bytes as a `data:` URL the webview can put in an `<img src>`.
+fn data_url(webp: &[u8]) -> String {
+	format!("data:image/webp;base64,{}", STANDARD.encode(webp))
 }
 
 /// Read the dimensions back out of an encoded WebP.
@@ -162,15 +176,19 @@ mod tests {
 		assert_eq!(before, after, "a preview must not write anything to disk");
 	}
 
-	/// An AVIF preview is labelled as AVIF, or the webview cannot decode it; the original
-	/// side stays lossless WebP.
+	/// An AVIF preview reaches the webview as lossless WebP of the decoded AVIF, so it
+	/// displays on every web engine, including those built without AVIF.
 	#[test]
-	fn an_avif_preview_says_it_is_avif() {
+	fn an_avif_preview_can_be_shown_by_any_web_engine() {
 		let scratch = Scratch::new("avif");
 		let input = scratch.join_png();
 		let job = EncodeJob { format: OutputFormat::Avif, avif: AvifSettings { speed: 10, ..Default::default() }, ..Default::default() };
 		let result = preview(&job, &input).expect("preview");
-		assert!(result.encoded.starts_with("data:image/avif;base64,"), "{}", &result.encoded[..40]);
+		// Shown as lossless WebP of the decoded AVIF, so every web engine can display it.
+		assert!(result.encoded.starts_with("data:image/webp;base64,"), "{}", &result.encoded[..40]);
+		let shown = super::STANDARD.decode(result.encoded.trim_start_matches("data:image/webp;base64,")).expect("valid base64");
+		assert_eq!(super::dimensions(&shown), Some((result.width, result.height)), "the shown image is the encoded one, at its size");
+		assert!(result.encoded_bytes > 0);
 		assert!(result.original.starts_with("data:image/webp;base64,"));
 		assert!(result.width > 0 && result.height > 0);
 	}

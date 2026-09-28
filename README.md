@@ -136,9 +136,10 @@ What it can do:
 - Look like Skidbladnir: the original layout — dot-textured header and footer bands,
   dotted option groups, two-column controls and the circular action button — restyled
   in the Palenight palette.
-- Read PNG, JPEG, TIFF and WebP input, identifying the format by its contents rather
-  than by its file extension. That includes **CMYK JPEGs** as Photoshop writes them,
-  which `cwebp` itself refuses to read.
+- Read PNG, JPEG, TIFF, WebP and **AVIF** input, identifying the format by its contents
+  rather than by its file extension. That includes **CMYK JPEGs** as Photoshop writes
+  them, which `cwebp` itself refuses to read. AVIF input is checked against libavif's
+  own `avifdec`, which must decode the same files to the same pixels.
 - Refuse to overwrite your source image, and stage every write through a temporary
   file so a failed conversion cannot damage a file that was already there.
 - Report the before and after sizes, and the dimensions actually produced.
@@ -152,14 +153,10 @@ Known gaps:
 - No AppImage is produced on the maintainer's machine, because bundling one needs
   `patchelf`, which is not installed there. CI has it.
 - The app is not code-signed on any platform, and there is no auto-updater.
-- AVIF encoding is slow at the default speed on large images, and it cannot be
-  cancelled mid-file: the encoder reports no progress, so Cancel takes effect when the
-  current file finishes (which is then discarded, not written). AVIF input is not read
-  yet, and there is no chroma subsampling control — AVIF is always written 4:4:4.
-- The AVIF **preview** needs a web engine that can display AVIF. On Linux, WebKitGTK is
-  built without it on some distributions — Ubuntu 24.04's, which is also what the
-  AppImage bundles — and there the window shows a notice in place of the encoded image.
-  The AVIF files themselves are unaffected.
+- An AVIF encode cannot be cancelled mid-file: the encoder reports no progress, so
+  Cancel takes effect when the current file finishes (which is then discarded, not
+  written). There is no chroma subsampling control — AVIF is always written 4:4:4 — and
+  animated AVIF is not read.
 - JPEG XL is being watched until browsers enable it without a flag. The long-promised
   JPEG 2000 was dropped as a goal; it has no momentum outside medical and archival
   imaging.

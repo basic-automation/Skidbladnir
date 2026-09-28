@@ -206,7 +206,7 @@ onUnmounted(() => {
 
 async function chooseInputs() {
 	const { open } = await import('@tauri-apps/plugin-dialog')
-	const picked = await open({ multiple: true, filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'jpe', 'jif', 'jfif', 'jfi', 'tif', 'tiff', 'webp'] }] })
+	const picked = await open({ multiple: true, filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'jpe', 'jif', 'jfif', 'jfi', 'tif', 'tiff', 'webp', 'avif'] }] })
 	scanned.value = []
 	if (Array.isArray(picked)) inputPaths.value = picked
 	else if (typeof picked === 'string') inputPaths.value = [picked]
@@ -479,10 +479,10 @@ function basename(path: string): string {
 						</p>
 						<p v-if="dropRejected > 0" class="text-center text-xs text-palenight-yellow">
 							{{ dropRejected }} dropped {{ dropRejected === 1 ? 'file was' : 'files were' }} not a
-							PNG, JPEG, TIFF or WebP and {{ dropRejected === 1 ? 'was' : 'were' }} skipped.
+							PNG, JPEG, TIFF, WebP or AVIF and {{ dropRejected === 1 ? 'was' : 'were' }} skipped.
 						</p>
 						<p class="text-center text-xs text-palenight-muted">
-							PNG, JPEG, TIFF and WebP — drop them anywhere on the window, or use the button.
+							PNG, JPEG, TIFF, WebP and AVIF — drop them anywhere on the window, or use the button.
 							Converted files are written as <code class="text-palenight-cyan">&lt;name&gt;.{{ extension }}</code>
 							in the destination. Your originals are never written over.
 						</p>

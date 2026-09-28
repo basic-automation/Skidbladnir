@@ -180,20 +180,20 @@ else
 	printf 'FAIL %s\n' "no AVIF file at $scratch/out/smoke.avif"
 	failures=$((failures + 1))
 fi
-check "the AVIF preview is labelled AVIF" \
+# The AVIF preview is decoded in Rust and shown as lossless WebP, so it must display on
+# every platform's web engine — including Ubuntu's WebKitGTK, which cannot decode AVIF.
+check "the webview displays the AVIF preview" \
 	"const I=window.__TAURI_INTERNALS__;
 	 const s=await I.invoke('default_settings'); s.format='avif'; s.avif.speed=10;
 	 const p=await I.invoke('preview_encode', { settings: s, input: '$in_png' });
-	 return p.encoded.slice(5,15) + ' ' + p.width + 'x' + p.height" 'image/avif 48x48'
-# Whether this webview can DISPLAY AVIF is a property of the platform's web engine, not of
-# the app — WebKitGTK is built without AVIF on some distributions — so it is reported
-# rather than failed. The window shows a notice instead of the image when it cannot.
-avif_display=$("$HARNESS" exec --script \
+	 return await new Promise(res => { const i=new Image(); i.onload=()=>res('displays ' + i.naturalWidth + 'x' + i.naturalHeight); i.onerror=()=>res('cannot display'); i.src=p.encoded; })" 'displays 48x48'
+# AVIF input: the AVIF written above, converted back to WebP in another folder.
+mkdir -p "$scratch/from-avif"
+check "reads AVIF input" \
 	"const I=window.__TAURI_INTERNALS__;
-	 const s=await I.invoke('default_settings'); s.format='avif'; s.avif.speed=10;
-	 const p=await I.invoke('preview_encode', { settings: s, input: '$in_png' });
-	 return await new Promise(res => { const i=new Image(); i.onload=()=>res('displays AVIF (' + i.naturalWidth + 'x' + i.naturalHeight + ')'); i.onerror=()=>res('CANNOT display AVIF; the preview shows a notice instead'); i.src=p.encoded; })" 2>&1 | tail -1)
-printf 'info this webview %s\n' "$avif_display"
+	 const s=await I.invoke('default_settings');
+	 const r=await I.invoke('convert_image', { settings: s, input: '$out_dir/smoke.avif', outputDirectory: '$(app_path "$scratch/from-avif")' });
+	 return r.outputPath.split(/[\\\\/]/).pop() + ' ' + r.width + 'x' + r.height" 'smoke.webp 48x48'
 
 echo
 if [ "$failures" -gt 0 ]; then

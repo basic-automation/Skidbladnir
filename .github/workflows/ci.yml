@@ -106,6 +106,11 @@ jobs:
           npm --prefix frontend ci
           npm --prefix frontend run generate
 
+      - name: Install nasm
+        # The AV1 encoder (rav1e) and decoder (rav1d) assemble their SIMD with nasm; their
+        # build scripts fail outright without it.
+        uses: ilammy/setup-nasm@v1
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -188,6 +193,11 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Install nasm
+        # The AV1 encoder (rav1e) and decoder (rav1d) assemble their SIMD with nasm; their
+        # build scripts fail outright without it.
+        uses: ilammy/setup-nasm@v1
+
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
@@ -263,6 +273,11 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+
+      - name: Install nasm
+        # The AV1 encoder (rav1e) and decoder (rav1d) assemble their SIMD with nasm; their
+        # build scripts fail outright without it.
+        uses: ilammy/setup-nasm@v1
 
       - uses: dtolnay/rust-toolchain@stable
 
