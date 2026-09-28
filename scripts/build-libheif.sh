@@ -83,6 +83,7 @@ build libheif "$root/third_party/libheif" "$prefix" \
 	"${off[@]}" \
 	-DWITH_LIBSHARPYUV=OFF -DWITH_UNCOMPRESSED_CODEC=OFF -DWITH_HEADER_COMPRESSION=OFF \
 	-DWITH_EXAMPLES=OFF -DWITH_GDK_PIXBUF=OFF -DBUILD_TESTING=OFF -DWITH_FUZZERS=OFF \
+	-DBUILD_DOCUMENTATION=OFF \
 	"-DCMAKE_PREFIX_PATH=$(native "$deps")" \
 	"-DCMAKE_C_FLAGS=$static_defines" "-DCMAKE_CXX_FLAGS=$static_defines" \
 	"${extra[@]}"

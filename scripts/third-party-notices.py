@@ -14,7 +14,9 @@ meta = json.loads(subprocess.run(["cargo", "metadata", "--format-version", "1"],
 crate = {p["name"]: pathlib.Path(p["manifest_path"]).parent for p in meta["packages"]}
 webp = crate["libwebp-sys"] / "vendor"
 jxl = crate["jpegxl-src"] / "libjxl"
-submodule = lambda name: subprocess.run(["git", "-C", str(root / "third_party" / name), "describe", "--tags"], capture_output=True, text=True).stdout.strip()
+# The pinned tag is recorded beside each submodule in .gitmodules (`version = ...`): a
+# shallow CI checkout has no tags to describe.
+submodule = lambda name: subprocess.run(["git", "config", "-f", str(root / ".gitmodules"), f"submodule.third_party/{name}.version"], capture_output=True, text=True, check=True).stdout.strip()
 
 sections = [
 	("libwebp", "BSD-3-Clause", "The WebP encoder and decoder, statically linked.", [webp / "COPYING", webp / "PATENTS"]),
