@@ -145,3 +145,11 @@
 		background: transparent;
 	}
 }
+
+/* Behind the preview images, so transparency reads as transparency rather than as the
+   window colour showing through. */
+@utility checkerboard {
+	background-color: var(--color-paleday-field);
+	background-image: conic-gradient(var(--color-paleday-rule) 25%, transparent 0 50%, var(--color-paleday-rule) 0 75%, transparent 0);
+	background-size: 16px 16px;
+}

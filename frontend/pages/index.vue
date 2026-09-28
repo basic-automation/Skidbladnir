@@ -909,13 +909,13 @@ function basename(path: string): string {
 								</p>
 								<div class="grid grid-cols-2 gap-3">
 									<figure class="flex min-w-0 flex-col gap-1.5 px-2.5 py-[7px]">
-										<img :src="preview.original" alt="The original image" class="max-h-[480px] w-full rounded-lg object-contain">
+										<img :src="preview.original" alt="The original image" class="checkerboard max-h-[480px] w-full rounded-lg object-contain">
 										<figcaption class="text-xs text-paleday-dim">
 											Original · {{ formatBytes(preview.sourceBytes) }}
 										</figcaption>
 									</figure>
 									<figure class="flex min-w-0 flex-col gap-1.5 px-2.5 py-[7px]">
-										<img v-if="!encodedUndisplayable" :src="preview.encoded" :alt="`The image encoded as ${previewFormat.toUpperCase()}`" class="max-h-[480px] w-full rounded-lg object-contain" @error="encodedUndisplayable = true">
+										<img v-if="!encodedUndisplayable" :src="preview.encoded" :alt="`The image encoded as ${previewFormat.toUpperCase()}`" class="checkerboard max-h-[480px] w-full rounded-lg object-contain" @error="encodedUndisplayable = true">
 										<p v-else class="flex h-[480px] items-center rounded-lg bg-paleday-field p-4 text-xs text-paleday-warning" role="note">
 											This system's web view cannot display {{ previewFormat.toUpperCase() }}, so the encoded
 											image cannot be shown here. The file Skidbladnir writes is unaffected, and the size and
