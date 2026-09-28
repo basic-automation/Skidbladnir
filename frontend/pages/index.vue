@@ -354,6 +354,12 @@ async function cancel() {
 	}
 }
 
+// The results of a run stay until the next run replaces them, or until they are dismissed.
+function dismissResults() {
+	reports.value = []
+	failures.value = []
+}
+
 const converted = computed(() => reports.value.length > 0 && failures.value.length === 0 && !busy.value)
 
 // Preview: encode one of the selected files into memory with the current settings and
@@ -706,32 +712,45 @@ function basename(path: string): string {
 					<UAlert v-if="validationError" color="error" variant="soft" role="alert" :description="validationError" />
 
 					<ControlPanel v-if="reports.length || failures.length" title="Results">
+						<template #actions>
+							<UButton
+								color="neutral"
+								variant="ghost"
+								icon="i-material-symbols-close"
+								aria-label="Dismiss the results"
+								:ui="{ base: 'p-1', leadingIcon: 'size-4' }"
+								@click="dismissResults"
+							/>
+						</template>
 						<p class="sr-only" role="status" aria-live="polite">
 							{{ reports.length }} converted, {{ failures.length }} failed.
 						</p>
-						<table v-if="reports.length" class="w-full text-left text-xs">
-							<thead class="text-paleday-dim">
-								<tr>
-									<th class="px-2.5 py-1 font-semibold">File</th>
-									<th class="py-1 text-right font-semibold">Before</th>
-									<th class="py-1 text-right font-semibold">After</th>
-									<th class="py-1 text-right font-semibold">Change</th>
-									<th class="py-1 pr-2.5 text-right font-semibold">Size</th>
-								</tr>
-							</thead>
-							<tbody class="tabular-nums">
-								<tr v-for="report in reports" :key="report.outputPath">
-									<td class="px-2.5 py-1 text-paleday-bright" data-selectable>{{ basename(report.outputPath) }}</td>
-									<td class="py-1 text-right">{{ formatBytes(report.sourceBytes) }}</td>
-									<td class="py-1 text-right">{{ formatBytes(report.outputBytes) }}</td>
-									<td v-if="report.savingPercent === null" class="py-1 text-right">—</td>
-									<td v-else class="py-1 text-right font-semibold" :class="report.savingPercent >= 0 ? 'text-paleday-accent-text' : 'text-paleday-warning'">
-										{{ report.savingPercent >= 0 ? '−' : '+' }}{{ Math.abs(report.savingPercent).toFixed(1) }}%
-									</td>
-									<td class="py-1 pr-2.5 text-right">{{ report.width }}×{{ report.height }}</td>
-								</tr>
-							</tbody>
-						</table>
+						<!-- A big batch would push every setting off-screen, so the list scrolls on its own. -->
+						<div v-if="reports.length" class="max-h-80 overflow-y-auto">
+							<table class="w-full text-left text-xs">
+								<thead class="sticky top-0 bg-paleday-bg text-paleday-dim">
+									<tr>
+										<th class="px-2.5 py-1 font-semibold">File</th>
+										<th class="py-1 text-right font-semibold">Before</th>
+										<th class="py-1 text-right font-semibold">After</th>
+										<th class="py-1 text-right font-semibold">Change</th>
+										<th class="py-1 pr-2.5 text-right font-semibold">Size</th>
+									</tr>
+								</thead>
+								<tbody class="tabular-nums">
+									<tr v-for="report in reports" :key="report.outputPath">
+										<td class="px-2.5 py-1 text-paleday-bright" data-selectable>{{ basename(report.outputPath) }}</td>
+										<td class="py-1 text-right">{{ formatBytes(report.sourceBytes) }}</td>
+										<td class="py-1 text-right">{{ formatBytes(report.outputBytes) }}</td>
+										<td v-if="report.savingPercent === null" class="py-1 text-right">—</td>
+										<td v-else class="py-1 text-right font-semibold" :class="report.savingPercent >= 0 ? 'text-paleday-accent-text' : 'text-paleday-warning'">
+											{{ report.savingPercent >= 0 ? '−' : '+' }}{{ Math.abs(report.savingPercent).toFixed(1) }}%
+										</td>
+										<td class="py-1 pr-2.5 text-right">{{ report.width }}×{{ report.height }}</td>
+									</tr>
+								</tbody>
+							</table>
+						</div>
 						<ul v-if="failures.length" class="flex flex-col gap-1 px-2.5 text-xs text-paleday-error">
 							<li v-for="failure in failures" :key="failure.path" data-selectable>
 								<strong class="text-paleday-bright">{{ basename(failure.path) }}</strong>: {{ failure.message }}
