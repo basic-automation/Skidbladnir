@@ -172,8 +172,10 @@ jobs:
           version=$(cargo run -q --example libwebp-version --package skidbladnir-encode)
           echo "linked libwebp: $version"
           git clone --depth 1 --branch "v$version" https://github.com/webmproject/libwebp.git "$RUNNER_TEMP/libwebp"
-          make -C "$RUNNER_TEMP/libwebp" -f makefile.unix -j4 examples/cwebp
+          # img2webp is the reference for animated WebP (tests/animation.rs).
+          make -C "$RUNNER_TEMP/libwebp" -f makefile.unix -j4 examples/cwebp examples/img2webp
           echo "SKIDBLADNIR_REFERENCE_CWEBP=$RUNNER_TEMP/libwebp/examples/cwebp" >> "$GITHUB_ENV"
+          echo "SKIDBLADNIR_REFERENCE_IMG2WEBP=$RUNNER_TEMP/libwebp/examples/img2webp" >> "$GITHUB_ENV"
           echo "SKIDBLADNIR_REQUIRE_PARITY=1" >> "$GITHUB_ENV"
 
       - name: encoder parity against the reference cwebp
@@ -190,7 +192,8 @@ jobs:
         # avif_reference is the AVIF gate: libavif's avifdec decodes what we write, and
         # jxl_reference is JPEG XL's: libjxl's djxl decodes it and rebuilds recompressed JPEGs.
         # heic_reference is HEIC's: the runner's own libheif (`heif-dec`) decodes it.
-        run: cargo test --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_reference --test jxl_reference --test heic_reference -- --nocapture
+        # animation is the animated-WebP gate, byte for byte against img2webp.
+        run: cargo test --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_reference --test jxl_reference --test heic_reference --test animation -- --nocapture
 
   # Drives the real window over WebDriver. Separate from the compile matrix because it
   # needs a display, a WebKit driver and a full release build, and because a flaky display

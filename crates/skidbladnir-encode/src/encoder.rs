@@ -135,7 +135,7 @@ pub enum EncodeError {
 /// `WebPConfigPreset` resets the whole config to the preset's values, keeping only the
 /// quality. Applying it first, as the Electron app's command line does, means the
 /// explicit controls that follow win — which is the behaviour a user of the old app saw.
-fn build_config(settings: &WebpSettings) -> Result<WebPConfig, EncodeError> {
+pub(crate) fn build_config(settings: &WebpSettings) -> Result<WebPConfig, EncodeError> {
 	settings.validate()?;
 
 	// WebPConfigInit: the inline helper libwebp declares in its header is not exported,
@@ -266,7 +266,7 @@ const fn unpack_version(packed: c_int) -> (i32, i32, i32) {
 ///
 /// The `*Internal` functions take this so a binary built against one libwebp cannot
 /// silently pass a differently-shaped struct to another.
-const fn abi_version() -> c_int {
+pub(crate) const fn abi_version() -> c_int {
 	WEBP_ENCODER_ABI_VERSION.cast_signed()
 }
 
@@ -283,7 +283,7 @@ const fn webp_preset(preset: Preset) -> WebPPreset {
 }
 
 /// Owns a `WebPPicture` so its buffers are released even if an encode step fails.
-struct Picture(WebPPicture);
+pub(crate) struct Picture(pub(crate) WebPPicture);
 
 impl Drop for Picture {
 	fn drop(&mut self) {
@@ -383,7 +383,7 @@ fn checked_dimensions(image: &RgbaImage<'_>) -> Result<(c_int, c_int), EncodeErr
 }
 
 /// Import RGBA pixels into a fresh ARGB `WebPPicture`.
-fn argb_picture(image: &RgbaImage<'_>) -> Result<Picture, EncodeError> {
+pub(crate) fn argb_picture(image: &RgbaImage<'_>) -> Result<Picture, EncodeError> {
 	let (width, height) = checked_dimensions(image)?;
 	let mut picture = Picture(unsafe {
 		let mut picture = std::mem::zeroed::<WebPPicture>();
@@ -520,7 +520,7 @@ fn encode_webp(job: &EncodeJob, image: &RgbaImage<'_>, on_progress: &mut dyn FnM
 /// rescaling an opaque copy for the colour channels and the real picture for alpha, then
 /// reassembling. Without this, a lossless resize diverges from `cwebp` in every
 /// transparent pixel.
-fn resize_picture(picture: &mut Picture, resize: Resize, config: &WebPConfig) -> Result<(), EncodeError> {
+pub(crate) fn resize_picture(picture: &mut Picture, resize: Resize, config: &WebPConfig) -> Result<(), EncodeError> {
 	let target_w = i32::try_from(resize.width).map_err(|_| EncodeError::ImageTooLarge { width: resize.width, height: resize.height })?;
 	let target_h = i32::try_from(resize.height).map_err(|_| EncodeError::ImageTooLarge { width: resize.width, height: resize.height })?;
 

@@ -706,6 +706,23 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
 - [ ] Re-encode animated WebP rather than refusing it, using libwebp's `WebPAnimEncoder`.
       This needs a per-frame settings story (do the advanced controls apply to every
       frame?) and a demuxer for the input, so it is a real piece of work, not a flag.
+      *Slices:*
+      1. **Done (core only).** `crates/skidbladnir-encode/src/animation.rs`: decode every
+         frame with `WebPAnimDecoder` (full-canvas RGBA plus durations, loop count and
+         background), re-encode with `WebPAnimEncoder`. **The settings story: every WebP
+         control applies to every frame** — the per-frame `WebPConfig` comes from the same
+         `build_config` the still path uses; target size and PSNR become per-frame. Resize
+         uses the still path's `cwebp`-matching rescale on each frame. **Gate:**
+         `tests/animation.rs` is byte-identical to libwebp 1.6.0's `img2webp` in 18 cases
+         (lossless, lossy, quality, method, sharp YUV, near-lossless, loop count),
+         mutation-tested; CI builds a version-matched `img2webp` beside `cwebp`. Found on the
+         way: the app's default `-pass 6` changes lossy output even with no target set.
+         Controls `img2webp` has no flag for are only proven to *reach* the frames.
+      2. Wire it through `load`/`encode_file`: an animated WebP input converts instead of
+         being refused (`SourceError::Animated` goes), still-image preview shows frame 1.
+      3. The window: drop the "cannot re-encode" warning, say that target size/PSNR are
+         per frame, and decide what AVIF output does with an animation (refuse, or first
+         frame — `ravif` writes stills only).
 - [x] **HEIC output and input** (done 2026-09-28; the owner chose Kvazaar + libheif
       over x265, which would have made the binaries GPL, and over macOS-only ImageIO).
       libheif 1.23.5 (LGPL-3.0) is built by `scripts/build-libheif.sh` from pinned

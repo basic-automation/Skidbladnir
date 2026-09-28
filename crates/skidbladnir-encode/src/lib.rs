@@ -10,6 +10,7 @@
 //! retired in Phase 6; its last source is at the `electron-final` tag.
 //! Every control it exposes is represented in [`EncodeJob`]; see ROADMAP.md Phase 2.
 
+pub mod animation;
 pub mod avif;
 pub mod cwebp;
 pub mod encoder;
