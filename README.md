@@ -150,9 +150,11 @@ What it can do:
   dotted option groups, two-column controls and the circular action button — restyled
   in the Palenight palette.
 - Read PNG, JPEG, TIFF, WebP, **AVIF** and **GIF** input, identifying the format by its
-  contents rather than by its file extension. That includes **CMYK JPEGs** as Photoshop writes
-  them, which `cwebp` itself refuses to read. AVIF input is checked against libavif's
-  own `avifdec`, which must decode the same files to the same pixels.
+  contents rather than by its file extension. That includes **CMYK JPEGs** as Photoshop
+  writes them, which `cwebp` itself refuses to read. AVIF input is checked against
+  libavif's own `avifdec` across 17 colour encodings (bit depths, chroma subsampling,
+  range, colour matrices, alpha), and an AVIF's crop, rotation and mirror are applied, so
+  a sideways-stored portrait converts upright.
 - Refuse to overwrite your source image, and stage every write through a temporary
   file so a failed conversion cannot damage a file that was already there.
 - Report the before and after sizes, and the dimensions actually produced.
@@ -168,8 +170,8 @@ Known gaps:
 - The app is not code-signed on any platform, and there is no auto-updater.
 - An AVIF encode cannot be cancelled mid-file: the encoder reports no progress, so
   Cancel takes effect when the current file finishes (which is then discarded, not
-  written). There is no chroma subsampling control — AVIF is always written 4:4:4 — and
-  animated AVIF is not read.
+  written). There is no chroma subsampling control — AVIF is always written 4:4:4 —
+  animated AVIF is not read, and tiled (grid) AVIFs are refused.
 - An animation (animated WebP or GIF) converts to WebP only. AVIF output refuses it by
   name rather than keeping just the first frame, because the AVIF encoder writes still
   images. A target size or PSNR applies to each frame of an animation, not to the whole

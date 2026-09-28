@@ -265,7 +265,8 @@ fn to_rgba8(decoded: image::DynamicImage) -> image::RgbaImage {
 	image::RgbaImage::from_raw(width, height, narrowed).unwrap_or_else(|| image::RgbaImage::new(width, height))
 }
 
-/// Decode an AVIF file to `(width, height, rgba)`.
+/// Decode an AVIF file to `(width, height, rgba)`, with its `clap`/`irot`/`imir` crop,
+/// rotation and mirror applied (see [`crate::avif_transform`]).
 ///
 /// 16-bit output (from a 10- or 12-bit AVIF) is reduced by dropping the low byte, the
 /// same reduction `to_rgba8` makes for 16-bit PNG, so a deep source is narrowed the same
@@ -316,7 +317,10 @@ pub fn decode_avif(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
 	let (Ok(width), Ok(height)) = (u32::try_from(width), u32::try_from(height)) else {
 		return Err(format!("{width}x{height} is too large"));
 	};
-	Ok((width, height, pixels))
+	// Shown the way the file asks: its crop, rotation and mirror, which avif-decode leaves
+	// to the caller. A phone's sideways-stored portrait would otherwise convert sideways.
+	let transforms = crate::avif_transform::transforms(bytes, width, height);
+	Ok(crate::avif_transform::apply(width, height, pixels, &transforms))
 }
 
 /// Decode a WebP file with libwebp, returning `(width, height, rgba)`.
