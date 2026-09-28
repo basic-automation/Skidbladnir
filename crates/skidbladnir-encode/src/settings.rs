@@ -274,6 +274,9 @@ pub enum OutputFormat {
 	/// JPEG XL, through libjxl, the reference encoder. Checked by decoding with libjxl's
 	/// `djxl`, as AVIF is with `avifdec`.
 	Jxl,
+	/// HEIC: HEVC in HEIF, through libheif with the Kvazaar encoder. Checked by decoding
+	/// with libheif's `heif-dec`.
+	Heic,
 }
 
 impl OutputFormat {
@@ -284,6 +287,7 @@ impl OutputFormat {
 			Self::Webp => "webp",
 			Self::Avif => "avif",
 			Self::Jxl => "jxl",
+			Self::Heic => "heic",
 		}
 	}
 
@@ -294,6 +298,7 @@ impl OutputFormat {
 			Self::Webp => "image/webp",
 			Self::Avif => "image/avif",
 			Self::Jxl => "image/jxl",
+			Self::Heic => "image/heic",
 		}
 	}
 }
@@ -422,6 +427,36 @@ impl JxlSettings {
 	}
 }
 
+/// Every HEIC control. Kvazaar takes 4:2:0 input only, so there is no true lossless mode
+/// to offer; quality is the whole surface libheif exposes for it. 50 is libheif's own
+/// default, the one `heif-enc` uses.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct HeicSettings {
+	/// Quality, `0..=100`.
+	pub quality: u8,
+}
+
+impl Default for HeicSettings {
+	fn default() -> Self {
+		Self { quality: 50 }
+	}
+}
+
+impl HeicSettings {
+	/// Check the quality is in libheif's range.
+	///
+	/// # Errors
+	///
+	/// Returns [`ValidationError::OutOfRange`] for a quality above 100.
+	pub fn validate(&self) -> Result<(), ValidationError> {
+		if self.quality > 100 {
+			return Err(ValidationError::OutOfRange { field: "heic.quality", value: u32::from(self.quality), min: 0, max: 100 });
+		}
+		Ok(())
+	}
+}
+
 /// A complete encode job: the output format, the shared resize, and each format's own
 /// settings.
 ///
@@ -445,6 +480,8 @@ pub struct EncodeJob {
 	pub avif: AvifSettings,
 	/// The JPEG XL controls, kept alongside the others for the same reason.
 	pub jxl: JxlSettings,
+	/// The HEIC controls, likewise.
+	pub heic: HeicSettings,
 }
 
 impl From<WebpSettings> for EncodeJob {
@@ -471,12 +508,14 @@ impl<'de> Deserialize<'de> for EncodeJob {
 			avif: AvifSettings,
 			#[serde(default)]
 			jxl: JxlSettings,
+			#[serde(default)]
+			heic: HeicSettings,
 			#[serde(flatten)]
 			flat: WebpSettings,
 		}
 
 		let wire = Wire::deserialize(deserializer)?;
-		Ok(Self { format: wire.format, resize: wire.resize, webp: wire.webp.unwrap_or(wire.flat), avif: wire.avif, jxl: wire.jxl })
+		Ok(Self { format: wire.format, resize: wire.resize, webp: wire.webp.unwrap_or(wire.flat), avif: wire.avif, jxl: wire.jxl, heic: wire.heic })
 	}
 }
 
@@ -491,6 +530,7 @@ impl EncodeJob {
 			OutputFormat::Webp => self.webp.validate(),
 			OutputFormat::Avif => self.avif.validate(),
 			OutputFormat::Jxl => self.jxl.validate(),
+			OutputFormat::Heic => self.heic.validate(),
 		}
 	}
 }
@@ -716,7 +756,7 @@ mod tests {
 	fn the_flat_shape_from_before_the_split_still_loads() {
 		let legacy = r#"{"mode":"lossless","preset":null,"quality":92,"alphaQuality":80,"alphaFiltering":"fast","method":6,"segments":2,"partitionLimit":10,"sns":30,"passes":3,"filter":"strong","filterStrength":40,"filterSharpness":5,"target":{"kind":"size","value":5000},"sharpYuv":true,"lowMemory":true,"multiThreading":false,"resize":{"width":640,"height":0}}"#;
 		let job: EncodeJob = serde_json::from_str(legacy).expect("the legacy shape deserializes");
-		let expected = EncodeJob { format: OutputFormat::Webp, avif: AvifSettings::default(), jxl: JxlSettings::default(), resize: Resize { width: 640, height: 0, no_enlarge: false }, webp: WebpSettings { mode: Mode::Lossless, preset: None, quality: 92, alpha_quality: 80, alpha_filtering: Some(AlphaFiltering::Fast), method: 6, segments: 2, partition_limit: 10, sns: 30, passes: 3, filter: FilterType::Strong, filter_strength: 40, filter_sharpness: 5, target: Some(TargetMetric::Size(5000)), sharp_yuv: true, low_memory: true, multi_threading: false } };
+		let expected = EncodeJob { format: OutputFormat::Webp, avif: AvifSettings::default(), jxl: JxlSettings::default(), heic: HeicSettings::default(), resize: Resize { width: 640, height: 0, no_enlarge: false }, webp: WebpSettings { mode: Mode::Lossless, preset: None, quality: 92, alpha_quality: 80, alpha_filtering: Some(AlphaFiltering::Fast), method: 6, segments: 2, partition_limit: 10, sns: 30, passes: 3, filter: FilterType::Strong, filter_strength: 40, filter_sharpness: 5, target: Some(TargetMetric::Size(5000)), sharp_yuv: true, low_memory: true, multi_threading: false } };
 		assert_eq!(job, expected);
 
 		// And it is rewritten in the current shape, which reads back identically.

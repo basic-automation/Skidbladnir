@@ -53,11 +53,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The notices check reads the libheif, libde265 and Kvazaar licences from here.
+          submodules: true
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
       - run: cargo deny check
+      - name: Third-party notices are current
+        # THIRD-PARTY-NOTICES.md is generated from the licence files of the exact native
+        # sources that are built; bumping one without regenerating it fails here.
+        run: python3 scripts/third-party-notices.py --check
 
   rust:
     name: rust / ${{ matrix.os }}
@@ -71,17 +78,21 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          # libheif, Kvazaar and libde265 are pinned submodules under third_party/.
+          submodules: true
 
       - name: Install the Linux system dependencies Tauri needs
         # Needed from Phase 1 onward, when src-tauri/ joins the workspace: Tauri 2 links
         # against webkit2gtk-4.1, and patchelf is what bundles the AppImage. The image
         # libraries are for building the reference cwebp below, which needs a PNG reader.
         # libavif-bin is libavif's `avifdec`, the reference decoder for the AVIF gate, and
-        # libjxl-tools is libjxl's `djxl`, the reference decoder for the JPEG XL gate.
+        # libjxl-tools is libjxl's `djxl`, the reference decoder for the JPEG XL gate,
+        # and libheif-examples is libheif's `heif-dec`, the reference decoder for HEIC's.
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev libpng-dev libjpeg-dev libtiff-dev libavif-bin libjxl-tools
+          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev libpng-dev libjpeg-dev libtiff-dev libavif-bin libjxl-tools libheif-examples
 
       - uses: actions/setup-node@v7
         with:
@@ -114,6 +125,9 @@ jobs:
         # The AV1 encoder (rav1e) and decoder (rav1d) assemble their SIMD with nasm; their
         # build scripts fail outright without it.
         uses: ilammy/setup-nasm@v1
+
+      - name: Build libheif (Kvazaar + libde265)
+        uses: ./.github/actions/libheif
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -148,8 +162,9 @@ jobs:
           # so the Homebrew prefix is added without overriding the makefile's own
           # variables — passing EXTRA_FLAGS on the command line would replace them.
           if [ "$RUNNER_OS" = "macOS" ]; then
-            # libavif provides `avifdec` for the AVIF gate, jpeg-xl `djxl` for JPEG XL's.
-            brew install jpeg-turbo libpng libtiff libavif jpeg-xl
+            # libavif provides `avifdec` for the AVIF gate, jpeg-xl `djxl` for JPEG XL's and
+            # libheif `heif-dec` for HEIC's.
+            brew install jpeg-turbo libpng libtiff libavif jpeg-xl libheif
             prefix=$(brew --prefix)
             export CPATH="$prefix/include${CPATH:+:$CPATH}"
             export LIBRARY_PATH="$prefix/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
@@ -174,7 +189,8 @@ jobs:
         # still REFUSES CMYK JPEG, the one input Skidbladnir converts and cwebp does not.
         # avif_reference is the AVIF gate: libavif's avifdec decodes what we write, and
         # jxl_reference is JPEG XL's: libjxl's djxl decodes it and rebuilds recompressed JPEGs.
-        run: cargo test --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_reference --test jxl_reference -- --nocapture
+        # heic_reference is HEIC's: the runner's own libheif (`heif-dec`) decodes it.
+        run: cargo test --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_reference --test jxl_reference --test heic_reference -- --nocapture
 
   # Drives the real window over WebDriver. Separate from the compile matrix because it
   # needs a display, a WebKit driver and a full release build, and because a flaky display
@@ -184,6 +200,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # libheif, Kvazaar and libde265 are pinned submodules under third_party/.
+          submodules: true
 
       - name: Install the system dependencies
         run: |
@@ -202,6 +221,9 @@ jobs:
         # The AV1 encoder (rav1e) and decoder (rav1d) assemble their SIMD with nasm; their
         # build scripts fail outright without it.
         uses: ilammy/setup-nasm@v1
+
+      - name: Build libheif (Kvazaar + libde265)
+        uses: ./.github/actions/libheif
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -272,6 +294,9 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+        with:
+          # libheif, Kvazaar and libde265 are pinned submodules under third_party/.
+          submodules: true
 
       - uses: actions/setup-node@v7
         with:
@@ -283,6 +308,9 @@ jobs:
         # The AV1 encoder (rav1e) and decoder (rav1d) assemble their SIMD with nasm; their
         # build scripts fail outright without it.
         uses: ilammy/setup-nasm@v1
+
+      - name: Build libheif (Kvazaar + libde265)
+        uses: ./.github/actions/libheif
 
       - uses: dtolnay/rust-toolchain@stable
 

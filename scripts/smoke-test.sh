@@ -205,6 +205,24 @@ check "the webview displays the JPEG XL preview" \
 	 const s=await I.invoke('default_settings'); s.format='jxl'; s.jxl.effort=3;
 	 const p=await I.invoke('preview_encode', { settings: s, input: '$in_png' });
 	 return await new Promise(res => { const i=new Image(); i.onload=()=>res('displays ' + i.naturalWidth + 'x' + i.naturalHeight); i.onerror=()=>res('cannot display'); i.src=p.encoded; })" 'displays 48x48'
+# HEIC: a real conversion through the libheif this app ships (Kvazaar), checked on disk,
+# and the preview, decoded in Rust because only Safari displays HEIC.
+check "converts an image to HEIC end to end" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const s=await I.invoke('default_settings'); s.format='heic';
+	 const r=await I.invoke('convert_image', { settings: s, input: '$in_png', outputDirectory: '$out_dir' });
+	 return r.outputPath.split(/[\\\\/]/).pop() + ' ' + r.width + 'x' + r.height" 'smoke.heic 48x48'
+if [ "$(head -c 12 "$scratch/out/smoke.heic" 2>/dev/null | tail -c 8)" = "ftypheic" ]; then
+	printf 'ok   %s\n' "wrote a real HEIC to disk ($(wc -c < "$scratch/out/smoke.heic") bytes)"
+else
+	printf 'FAIL %s\n' "no HEIC file at $scratch/out/smoke.heic"
+	failures=$((failures + 1))
+fi
+check "the webview displays the HEIC preview" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const s=await I.invoke('default_settings'); s.format='heic';
+	 const p=await I.invoke('preview_encode', { settings: s, input: '$in_png' });
+	 return await new Promise(res => { const i=new Image(); i.onload=()=>res('displays ' + i.naturalWidth + 'x' + i.naturalHeight); i.onerror=()=>res('cannot display'); i.src=p.encoded; })" 'displays 48x48'
 # AVIF input: the AVIF written above, converted back to WebP in another folder.
 mkdir -p "$scratch/from-avif"
 check "reads AVIF input" \

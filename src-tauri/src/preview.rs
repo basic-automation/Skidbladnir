@@ -79,6 +79,7 @@ pub fn preview(settings: &EncodeJob, input: &Path) -> Result<Preview, String> {
 		OutputFormat::Webp => dimensions(&encoded),
 		OutputFormat::Avif => skidbladnir_encode::avif::dimensions(&encoded),
 		OutputFormat::Jxl => skidbladnir_encode::jxl::dimensions(&encoded),
+		OutputFormat::Heic => skidbladnir_encode::heic::dimensions(&encoded),
 	}
 	.unwrap_or((image.width, image.height));
 
@@ -96,6 +97,11 @@ pub fn preview(settings: &EncodeJob, input: &Path) -> Result<Preview, String> {
 		// The same for JPEG XL, which most web engines cannot display at all yet.
 		OutputFormat::Jxl => {
 			let (decoded_width, decoded_height, pixels) = skidbladnir_encode::jxl::decode(&encoded).map_err(|error| format!("could not decode the JPEG XL preview: {error}"))?;
+			encode_rgba(&lossless(Resize::default()), &RgbaImage { width: decoded_width, height: decoded_height, pixels: &pixels }).map_err(|error| error.to_string())?
+		}
+		// And for HEIC, which only Safari displays.
+		OutputFormat::Heic => {
+			let (decoded_width, decoded_height, pixels) = skidbladnir_encode::heic::decode(&encoded).map_err(|error| format!("could not decode the HEIC preview: {error}"))?;
 			encode_rgba(&lossless(Resize::default()), &RgbaImage { width: decoded_width, height: decoded_height, pixels: &pixels }).map_err(|error| error.to_string())?
 		}
 	};

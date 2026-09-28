@@ -1,0 +1,47 @@
+# Build (or restore) the libheif Skidbladnir ships — libheif with the Kvazaar encoder and
+# the libde265 decoder built in — and make it findable for the rest of the job.
+#
+# Needs the third_party/ submodules checked out. The result is cached on the pinned
+# submodule commits and the build script, so a routine run does not rebuild three C/C++
+# libraries. See scripts/build-libheif.sh for what is built and why.
+name: libheif
+description: Build or restore libheif with Kvazaar and libde265, and put it on the library path.
+inputs:
+  target-arch:
+    description: Set for a cross build (x86_64 on an Apple Silicon runner).
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: libheif cache key
+      id: key
+      shell: bash
+      run: echo "key=libheif-${{ runner.os }}-${{ inputs.target-arch }}-$(git submodule status third_party | awk '{print $1}' | tr -d '+-' | tr '\n' '-')${{ hashFiles('scripts/build-libheif.sh') }}" >> "$GITHUB_OUTPUT"
+
+    - name: Restore libheif
+      id: cache
+      uses: actions/cache@v6
+      with:
+        path: build/libheif
+        key: ${{ steps.key.outputs.key }}
+
+    - name: Build libheif
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        SKIDBLADNIR_TARGET_ARCH: ${{ inputs.target-arch }}
+      run: scripts/build-libheif.sh
+
+    - name: Put libheif on the library path
+      shell: bash
+      run: |
+        # The app is linked against this build and must never fall back to a system libheif.
+        echo "SKIDBLADNIR_LIBHEIF=vendored" >> "$GITHUB_ENV"
+        case "$RUNNER_OS" in
+          # For the release binary run from target/ and for AppImage bundling, which
+          # resolves the app's libraries with ldd.
+          Linux) echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/build/libheif/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV" ;;
+          # Test binaries in target/*/deps load heif.dll from PATH.
+          Windows) echo "$GITHUB_WORKSPACE/build/libheif/bin" >> "$GITHUB_PATH" ;;
+        esac

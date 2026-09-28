@@ -78,3 +78,6 @@ rustc-ice-*.txt
 .nuxt/
 .output/
 .nitro/
+
+# libheif with its HEVC encoder and decoder, built by scripts/build-libheif.sh
+/build/

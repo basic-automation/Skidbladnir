@@ -123,6 +123,9 @@ pub enum EncodeError {
 	/// libjxl failed.
 	#[error("JPEG XL encoding failed: {0}")]
 	Jxl(String),
+	/// libheif failed.
+	#[error("HEIC encoding failed: {0}")]
+	Heic(String),
 }
 
 /// Translate settings into a libwebp `WebPConfig`.
@@ -362,6 +365,7 @@ pub fn encode_rgba_with_progress(job: &EncodeJob, image: &RgbaImage<'_>, on_prog
 		OutputFormat::Webp => encode_webp(&EncodeJob { resize, ..job.clone() }, image, on_progress),
 		OutputFormat::Avif => crate::avif::encode(&job.avif, resize, image, on_progress),
 		OutputFormat::Jxl => crate::jxl::encode(&job.jxl, resize, image, on_progress),
+		OutputFormat::Heic => crate::heic::encode(&job.heic, resize, image, on_progress),
 	}
 }
 

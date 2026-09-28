@@ -1,7 +1,7 @@
 # Skidbladnir
 
-A desktop GUI for converting images to next-generation open-source formats — **WebP**,
-**AVIF** and **JPEG XL**. For WebP it drives libwebp with `cwebp`'s full control surface — not just a
+A desktop GUI for converting images to next-generation formats — **WebP**, **AVIF**,
+**JPEG XL** and **HEIC**. For WebP it drives libwebp with `cwebp`'s full control surface — not just a
 quality slider — so you can tune an encode the way the command-line tool allows,
 without memorising the command line.
 
@@ -26,6 +26,8 @@ without memorising the command line.
 - **JPEG XL**, through libjxl, the reference encoder: quality, effort, lossless, and
   **lossless JPEG recompression** — a JPEG is repacked about 20% smaller without being
   decoded, and the original JPEG can be rebuilt from it bit for bit
+- **HEIC**, the format iPhones use, through libheif with the Kvazaar HEVC encoder:
+  quality, with transparency kept
 
 **WebP encoding modes**
 
@@ -78,7 +80,9 @@ binary release is [v0.4.3](https://github.com/basic-automation/Skidbladnir/relea
 Requires a stable Rust toolchain, Node.js and npm, **`nasm`** — the AV1 encoder and
 decoder assemble their SIMD code with it (Arch: `nasm`; Debian/Ubuntu: `nasm`; macOS:
 `brew install nasm`; Windows: `choco install nasm`) — and **CMake** with a C++ compiler,
-which build libjxl from source so it is linked statically. On Linux you also need
+which build libjxl from source so it is linked statically. HEIC needs libheif, built with
+`scripts/build-libheif.sh` from the pinned sources in `third_party/` (clone with
+`--recurse-submodules`); without that build, the system libheif is linked instead. On Linux you also need
 `webkit2gtk-4.1` and its development headers.
 
 Without CMake, the build links the system libjxl (0.11 or newer, with its development
@@ -154,7 +158,11 @@ What it can do:
 - Be driven entirely from the keyboard, with every control labelled for a screen reader.
 - A frameless window with a format rail, a sidebar for the queue, destination and
   presets, and one column of settings with Convert at its head.
-- Read PNG, JPEG, TIFF, WebP, **AVIF** and **JPEG XL** input, identifying the format by its contents
+- Write **HEIC** through libheif with Kvazaar, a BSD-licensed HEVC encoder, and read
+  HEIC input with libde265. libheif ships as a separate shared library beside the app,
+  with its codec plugins switched off, so it can never pick up a GPL encoder from your
+  system. Checked by the runner's own libheif (`heif-dec`), a separate build.
+- Read PNG, JPEG, TIFF, WebP, **AVIF**, **JPEG XL** and **HEIC** input, identifying the format by its contents
   rather than by its file extension. That includes **CMYK JPEGs** as Photoshop writes
   them, which `cwebp` itself refuses to read. AVIF input is checked against libavif's
   own `avifdec`, and JPEG XL input against libjxl's `djxl`; each must decode the same
@@ -172,14 +180,19 @@ Known gaps:
 - No AppImage is produced on the maintainer's machine, because bundling one needs
   `patchelf`, which is not installed there. CI has it.
 - The app is not code-signed on any platform.
-- An AVIF or JPEG XL encode cannot be cancelled mid-file: neither encoder reports progress, so
+- An AVIF, JPEG XL or HEIC encode cannot be cancelled mid-file: none of those encoders reports progress, so
   Cancel takes effect when the current file finishes (which is then discarded, not
   written). There is no chroma subsampling control — AVIF is always written 4:4:4 — and
   animated AVIF is not read.
 - JPEG XL files open in Safari, and in Firefox and Chrome as each enables it by default;
   until then, most web pages cannot show them. The long-promised JPEG 2000 was dropped
   as a goal; it has no momentum outside medical and archival imaging.
+- HEIC is HEVC, which is covered by patent pools; Skidbladnir ships an open-source HEVC
+  encoder and decoder as GIMP, ImageMagick and ffmpeg do. HEIC is written 4:2:0, so there
+  is no lossless HEIC.
 
 ## License
 
-ISC, as declared in the workspace `Cargo.toml`.
+ISC, as declared in the workspace `Cargo.toml`. The native libraries it ships, and their
+licences, are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), which every
+installer includes.

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/lib/skidbladnir/libheif.so.1": "../build/libheif/lib/libheif.so.1"
+        }
+      }
+    }
+  }
+}
