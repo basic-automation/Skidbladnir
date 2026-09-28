@@ -76,6 +76,7 @@ const FORMATS: { value: OutputFormat, label: string, icon: string }[] = [
 	{ value: 'webp', label: 'WebP', icon: 'i-iconoir-webp-format' },
 	{ value: 'avif', label: 'AVIF', icon: 'i-vscode-icons-file-type-avif' },
 	{ value: 'jxl', label: 'JPEG XL', icon: 'i-skid-jxl-format' },
+	{ value: 'heic', label: 'HEIC', icon: 'i-bi-filetype-heic' },
 ]
 
 const BIT_DEPTH_ITEMS = [
@@ -127,6 +128,7 @@ const TARGET_ITEMS = [
 const isWebp = computed(() => settings.value?.format === 'webp')
 const isAvif = computed(() => settings.value?.format === 'avif')
 const isJxl = computed(() => settings.value?.format === 'jxl')
+const isHeic = computed(() => settings.value?.format === 'heic')
 const extension = computed(() => settings.value?.format ?? 'webp')
 const lossy = computed(() => (settings.value && isWebp.value ? usesLossyOptions(settings.value.webp.mode) : false))
 const manualFilter = computed(() => (settings.value ? usesManualFilter(settings.value.webp.filter) : false))
@@ -221,7 +223,7 @@ onUnmounted(() => {
 
 async function chooseInputs() {
 	const { open } = await import('@tauri-apps/plugin-dialog')
-	const picked = await open({ multiple: true, filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'jpe', 'jif', 'jfif', 'jfi', 'tif', 'tiff', 'webp', 'avif', 'jxl'] }] })
+	const picked = await open({ multiple: true, filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'jpe', 'jif', 'jfif', 'jfi', 'tif', 'tiff', 'webp', 'avif', 'jxl', 'heic', 'heif'] }] })
 	scanned.value = []
 	scannedRoot.value = ''
 	if (Array.isArray(picked)) inputPaths.value = picked
@@ -715,7 +717,7 @@ function basename(path: string): string {
 						</p>
 						<p v-if="dropRejected > 0" class="text-paleday-warning">
 							{{ dropRejected }} dropped {{ dropRejected === 1 ? 'file was' : 'files were' }} not a
-							PNG, JPEG, TIFF, WebP, AVIF or JPEG XL and {{ dropRejected === 1 ? 'was' : 'were' }} skipped.
+							PNG, JPEG, TIFF, WebP, AVIF, JPEG XL or HEIC and {{ dropRejected === 1 ? 'was' : 'were' }} skipped.
 						</p>
 					</div>
 
@@ -731,8 +733,8 @@ function basename(path: string): string {
 							</div>
 							<UProgress v-model="currentPercent" :max="100" size="sm" class="mt-2" :ui="{ base: 'bg-paleday-dim' }" />
 							<p class="mt-2 text-xs text-paleday-dim">
-								<template v-if="isAvif || isJxl">
-									The {{ isAvif ? 'AVIF' : 'JPEG XL' }} encoder reports no progress while it works, so the bar moves only
+								<template v-if="isAvif || isJxl || isHeic">
+									The {{ isAvif ? 'AVIF' : isJxl ? 'JPEG XL' : 'HEIC' }} encoder reports no progress while it works, so the bar moves only
 									when a file starts and when it finishes. Cancel cannot stop a file mid-encode,
 									but that file is then discarded rather than written.
 								</template>
@@ -862,6 +864,15 @@ function basename(path: string): string {
 							</div>
 							<p class="px-2.5 text-xs text-paleday-dim">
 								Browsers are still turning JPEG XL on, so the preview here decodes it itself rather than relying on the web engine.
+							</p>
+						</ControlPanel>
+
+						<ControlPanel v-if="isHeic" title="Quality" class="pt-8">
+							<div class="grid grid-cols-3 gap-4">
+								<ControlSlider v-model="settings.heic.quality" label="Quality" :min="0" :max="100" help="quality factor (0: small .. 100: big); 50 is libheif's default" />
+							</div>
+							<p class="px-2.5 text-xs text-paleday-dim">
+								HEVC in HEIF, the format iPhones use, encoded by Kvazaar. Kvazaar writes 4:2:0 colour only, so there is no lossless mode.
 							</p>
 						</ControlPanel>
 

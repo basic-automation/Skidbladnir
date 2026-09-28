@@ -10,7 +10,7 @@ export type FilterType = 'auto' | 'simple' | 'strong'
 export type AlphaFiltering = 'off' | 'fast' | 'best'
 export type TargetMetric = { kind: 'size', value: number } | { kind: 'psnr', value: number } | null
 
-export type OutputFormat = 'webp' | 'avif' | 'jxl'
+export type OutputFormat = 'webp' | 'avif' | 'jxl' | 'heic'
 
 /** `noEnlarge` leaves an image smaller than the target at its own size. */
 export interface Resize { width: number, height: number, noEnlarge: boolean }
@@ -23,6 +23,12 @@ export interface EncodeJob {
 	webp: WebpSettings
 	avif: AvifSettings
 	jxl: JxlSettings
+	heic: HeicSettings
+}
+
+/** The HEIC controls, as libheif exposes them for the Kvazaar encoder. */
+export interface HeicSettings {
+	quality: number
 }
 
 /** The JPEG XL controls, as libjxl exposes them. Defaults come from the Rust core. */

@@ -699,7 +699,24 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
 - [ ] Re-encode animated WebP rather than refusing it, using libwebp's `WebPAnimEncoder`.
       This needs a per-frame settings story (do the advanced controls apply to every
       frame?) and a demuxer for the input, so it is a real piece of work, not a flag.
-- [ ] **HEIF/HEIC input.** The common case is iPhone and macOS photos, which are HEIC
+- [x] **HEIC output and input** (done 2026-09-28; the owner chose Kvazaar + libheif
+      over x265, which would have made the binaries GPL, and over macOS-only ImageIO).
+      libheif 1.23.5 (LGPL-3.0) is built by `scripts/build-libheif.sh` from pinned
+      submodules as one **shared** library with Kvazaar 2.3.2 (BSD-3, the encoder) and
+      libde265 1.1.3 (LGPL-3.0, the decoder) static inside it and **plugin loading off**,
+      so no system x265 can ever be loaded. It ships beside the app (`tauri.<platform>
+      .conf.json`), found through rpaths set in `src-tauri/build.rs`; its C API is bound in
+      `src/heic.rs`. The encoder is requested by name, `kvazaar`. Kvazaar is 4:2:0 only, so
+      quality is the only control and there is no lossless HEIC. **Gate:**
+      `tests/heic_reference.rs` has the runner's own libheif (`heif-dec`, a separate
+      build, with our library path removed) decode our files at the right size and
+      alpha with PSNR rising with quality, and agree with our decode. Licence notices for
+      every shipped native library are generated into `THIRD-PARTY-NOTICES.md` by
+      `scripts/third-party-notices.py`, bundled into every installer, and checked in CI.
+      **Not yet:** HEVC patent-pool licensing is unexamined (the owner accepted the risk,
+      as GIMP, ImageMagick and ffmpeg do); iPhone grid images and HDR gain maps decode as
+      libheif decodes them but are untested with real phone files.
+      *Original plan, kept for the record:* **HEIF/HEIC input.** The common case is iPhone and macOS photos, which are HEIC
       by default. Converting those to WebP/AVIF is something users do, so this is a
       real input format, not a curiosity. Added to the queue 2026-09-28.
       - *Sniffing already half-exists:* `SourceFormat` reads the `ftyp` box for AVIF and

@@ -43,6 +43,8 @@ pub enum SourceFormat {
 	Avif,
 	/// JPEG XL, as a bare codestream or in its ISO-BMFF container, decoded by `jxl-oxide`.
 	Jxl,
+	/// HEIC, decoded by libheif with libde265. The primary image only.
+	Heic,
 }
 
 impl SourceFormat {
@@ -58,6 +60,7 @@ impl SourceFormat {
 			[b'I', b'I', 42, 0, ..] | [b'M', b'M', 0, 42, ..] => Some(Self::Tiff),
 			[b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => Some(Self::Webp),
 			[_, _, _, _, b'f', b't', b'y', b'p', ..] if is_avif_ftyp(bytes) => Some(Self::Avif),
+			[_, _, _, _, b'f', b't', b'y', b'p', ..] if is_heic_ftyp(bytes) => Some(Self::Heic),
 			[0xff, 0x0a, ..] | [0, 0, 0, 0x0c, b'J', b'X', b'L', b' ', 0x0d, 0x0a, 0x87, 0x0a, ..] => Some(Self::Jxl),
 			_ => None,
 		}
@@ -73,19 +76,29 @@ impl SourceFormat {
 			Self::Webp => "WebP",
 			Self::Avif => "AVIF",
 			Self::Jxl => "JPEG XL",
+			Self::Heic => "HEIC",
 		}
 	}
 }
 
-/// Whether an ISO-BMFF `ftyp` box names an AVIF brand, as its major brand or among the
-/// compatible brands that fit in `bytes`. HEIC files share the container, so the brand
-/// is what tells them apart; a HEIC must not be accepted and then fail to decode.
-fn is_avif_ftyp(bytes: &[u8]) -> bool {
+/// Whether an ISO-BMFF `ftyp` box names one of `brands`, as its major brand or among the
+/// compatible brands that fit in `bytes`. AVIF and HEIC share the container, so the brand
+/// is what tells them apart.
+fn ftyp_has_brand(bytes: &[u8], brands: &[&[u8; 4]]) -> bool {
 	let Some(declared) = bytes.get(0..4).and_then(|len| len.try_into().ok()).map(u32::from_be_bytes) else { return false };
 	let end = usize::try_from(declared).unwrap_or(usize::MAX).min(bytes.len());
 	// Major brand at 8..12, minor version at 12..16, compatible brands from 16 on.
-	let is_avif = |brand: &[u8]| brand == b"avif" || brand == b"avis";
-	bytes.get(8..12).is_some_and(is_avif) || bytes.get(16..end).unwrap_or_default().as_chunks::<4>().0.iter().any(|brand| is_avif(brand))
+	let wanted = |brand: &[u8]| brands.iter().any(|candidate| brand == candidate.as_slice());
+	bytes.get(8..12).is_some_and(wanted) || bytes.get(16..end).unwrap_or_default().as_chunks::<4>().0.iter().any(|brand| wanted(brand))
+}
+
+fn is_avif_ftyp(bytes: &[u8]) -> bool {
+	ftyp_has_brand(bytes, &[b"avif", b"avis"])
+}
+
+/// HEVC-in-HEIF brands: still images, image collections and their sequences.
+fn is_heic_ftyp(bytes: &[u8]) -> bool {
+	ftyp_has_brand(bytes, &[b"heic", b"heix", b"heim", b"heis", b"hevc", b"hevx"])
 }
 
 /// An image decoded into the 8-bit RGBA the encoder wants.
@@ -121,7 +134,7 @@ pub enum SourceError {
 		source: io::Error,
 	},
 	/// The leading bytes match none of the accepted formats.
-	#[error("`{path}` is not a PNG, JPEG, TIFF, WebP, AVIF or JPEG XL image")]
+	#[error("`{path}` is not a PNG, JPEG, TIFF, WebP, AVIF, JPEG XL or HEIC image")]
 	Unsupported {
 		/// The path that failed.
 		path: PathBuf,
@@ -173,6 +186,7 @@ pub fn load(path: &Path) -> Result<SourceImage, SourceError> {
 			decode_webp(&bytes).ok_or_else(|| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: "libwebp rejected the file".to_owned() })?
 		}
 		SourceFormat::Avif => decode_avif(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?,
+		SourceFormat::Heic => crate::heic::decode(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?,
 		SourceFormat::Jxl => crate::jxl::decode(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?,
 		SourceFormat::Png | SourceFormat::Jpeg | SourceFormat::Tiff => {
 			let decoded = image::load_from_memory(&bytes).map_err(|error| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: error.to_string() })?;
@@ -583,6 +597,7 @@ pub fn encode_file_with_progress(settings: &EncodeJob, input: &Path, output: &Pa
 		OutputFormat::Webp => encoded_dimensions(&encoded),
 		OutputFormat::Avif => crate::avif::dimensions(&encoded),
 		OutputFormat::Jxl => crate::jxl::dimensions(&encoded),
+		OutputFormat::Heic => crate::heic::dimensions(&encoded),
 	}
 	.unwrap_or(fallback_dimensions);
 	Ok(Conversion { source_bytes, output_bytes: encoded.len() as u64, width, height })
@@ -675,7 +690,8 @@ mod tests {
 		assert_eq!(SourceFormat::sniff(b"RIFF\x00\x00\x00\x00WEBPVP8 "), Some(SourceFormat::Webp));
 		assert_eq!(SourceFormat::sniff(b"\0\0\0\x1cftypavif\0\0\0\0avifmif1miaf"), Some(SourceFormat::Avif));
 		assert_eq!(SourceFormat::sniff(b"\0\0\0\x1cftypmif1\0\0\0\0mif1avifmiaf"), Some(SourceFormat::Avif), "AVIF declared as a compatible brand");
-		assert_eq!(SourceFormat::sniff(b"\0\0\0\x18ftypheic\0\0\0\0mif1heic"), None, "HEIC shares the container but is not AVIF");
+		assert_eq!(SourceFormat::sniff(b"\0\0\0\x18ftypheic\0\0\0\0mif1heic"), Some(SourceFormat::Heic), "HEIC shares the container and is told apart by its brand");
+		assert_eq!(SourceFormat::sniff(b"\0\0\0\x18ftypmif1\0\0\0\0mif1heic"), Some(SourceFormat::Heic), "HEIC declared as a compatible brand");
 		assert_eq!(SourceFormat::sniff(b"\0\0\0\x10ftypmif1\0\0\0\0avif"), None, "a brand past the end of the ftyp box does not count");
 		assert_eq!(SourceFormat::sniff(b"\xff\x0a\x00\x00...."), Some(SourceFormat::Jxl), "a bare JPEG XL codestream");
 		assert_eq!(SourceFormat::sniff(b"\0\0\0\x0cJXL \r\n\x87\n\0\0"), Some(SourceFormat::Jxl), "a JPEG XL container");
@@ -807,7 +823,7 @@ mod tests {
 		let input = scratch.join("notes.txt");
 		fs::write(&input, b"this is not an image").expect("write the file");
 		let error = load(&input).expect_err("must refuse");
-		assert!(error.to_string().contains("not a PNG, JPEG, TIFF, WebP, AVIF or JPEG XL"), "got {error}");
+		assert!(error.to_string().contains("not a PNG, JPEG, TIFF, WebP, AVIF, JPEG XL or HEIC"), "got {error}");
 	}
 
 	/// WebP input goes through libwebp itself, so a WebP -> WebP conversion does not

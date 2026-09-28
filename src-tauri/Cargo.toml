@@ -3,7 +3,7 @@
 name = "skidbladnir"
 # The product version — the only copy. tauri.conf.json deliberately omits `version` so it
 # reads this one; the root package.json that used to be a second copy left with Electron.
-version = "0.10.0"
+version = "0.11.0"
 description = "Convert images to next-generation formats, with the whole encoder exposed."
 edition.workspace = true
 license.workspace = true

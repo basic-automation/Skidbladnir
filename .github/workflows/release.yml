@@ -48,6 +48,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ (inputs.dry_run && github.ref) || inputs.tag || github.ref }}
+          # libheif, Kvazaar and libde265 are pinned submodules under third_party/.
+          submodules: true
 
       - name: Install the Linux system dependencies Tauri needs
         # patchelf is what bundles the AppImage. It is unavailable on the dev host, which
@@ -68,6 +70,13 @@ jobs:
         # The AV1 encoder (rav1e) and decoder (rav1d) assemble their SIMD with nasm; their
         # build scripts fail outright without it.
         uses: ilammy/setup-nasm@v1
+
+      - name: Build libheif (Kvazaar + libde265)
+        # Every installer ships this libheif beside the app (tauri.<platform>.conf.json).
+        # The Intel Mac build is a cross build on an Apple Silicon runner.
+        uses: ./.github/actions/libheif
+        with:
+          target-arch: ${{ matrix.target == 'x86_64-apple-darwin' && 'x86_64' || '' }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
