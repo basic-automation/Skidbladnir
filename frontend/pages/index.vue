@@ -43,6 +43,11 @@ interface FoundImage { path: string, relative: string }
 // output mirrors the source tree or lands flat.
 const scanned = ref<FoundImage[]>([])
 const mirrorStructure = ref(true)
+// Whether choosing a folder also takes the folders inside it. Off by default: a folder
+// often holds earlier output in a subfolder, and sweeping that up is rarely what was meant.
+const includeSubfolders = ref(false)
+// The folder the queue was scanned from, so the scan can be redone when the option changes.
+const scannedRoot = ref('')
 const animatedInputs = computed(() => inspected.value.filter(entry => entry.webp?.hasAnimation))
 
 /** Preferences as the Rust side stores them, plus why it fell back if it did. */
@@ -200,6 +205,7 @@ onMounted(async () => {
 		dropRejected.value = dropped.length - usable.length
 		if (usable.length > 0) {
 			scanned.value = []
+			scannedRoot.value = ""
 			inputPaths.value = usable.map(entry => entry.path)
 			inspected.value = usable
 		}
@@ -215,6 +221,7 @@ async function chooseInputs() {
 	const { open } = await import('@tauri-apps/plugin-dialog')
 	const picked = await open({ multiple: true, filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'jpe', 'jif', 'jfif', 'jfi', 'tif', 'tiff', 'webp', 'avif'] }] })
 	scanned.value = []
+	scannedRoot.value = ''
 	if (Array.isArray(picked)) inputPaths.value = picked
 	else if (typeof picked === 'string') inputPaths.value = [picked]
 	await describeInputs()
@@ -236,10 +243,21 @@ async function chooseFolder() {
 	const { open } = await import('@tauri-apps/plugin-dialog')
 	const picked = await open({ directory: true })
 	if (typeof picked !== 'string') return
-	scanned.value = await invokeCommand<FoundImage[]>('scan_folder', { directory: picked, recursive: true })
+	scannedRoot.value = picked
+	await scanQueuedFolder()
+}
+
+async function scanQueuedFolder() {
+	scanned.value = await invokeCommand<FoundImage[]>('scan_folder', { directory: scannedRoot.value, recursive: includeSubfolders.value })
 	inputPaths.value = scanned.value.map(entry => entry.path)
 	await describeInputs()
 }
+
+// Changing the option with a folder queued rescans it, so the queue always matches what
+// the checkbox says rather than what it said when the folder was chosen.
+watch(includeSubfolders, () => {
+	if (scannedRoot.value && !busy.value) scanQueuedFolder()
+})
 
 async function chooseOutput() {
 	const { open } = await import('@tauri-apps/plugin-dialog')
@@ -412,10 +430,19 @@ const queueFolder = computed(() => {
 	return common || folders[0]!
 })
 
-const queueMenu = [[
+const queueMenu = computed(() => [[
 	{ label: 'Choose images…', icon: 'i-lucide-images', onSelect: () => chooseInputs() },
 	{ label: 'Choose a folder…', icon: 'i-lucide-folder-search', onSelect: () => chooseFolder() },
-]]
+], [
+	{
+		label: 'Include subfolders',
+		type: 'checkbox' as const,
+		checked: includeSubfolders.value,
+		onUpdateChecked: (checked: boolean) => { includeSubfolders.value = checked },
+		// Keep the menu open, so the box can be ticked and then a folder chosen.
+		onSelect: (event: Event) => event.preventDefault(),
+	},
+]])
 
 const fileCount = computed(() => `${inputPaths.value.length} file${inputPaths.value.length === 1 ? '' : 's'}`)
 
@@ -496,7 +523,8 @@ function basename(path: string): string {
 					/>
 					<template #content>
 						<div class="flex w-72 flex-col gap-2 p-2 text-xs">
-							<ControlToggle v-model="mirrorStructure" label="Recreate folder structure" help="When a whole folder is queued, mirror its subfolders in the destination. Off writes every file side by side." />
+							<ControlToggle v-model="includeSubfolders" label="Include subfolders" help="Choosing a folder also takes every folder inside it. Off takes only the images directly in it." />
+							<ControlToggle v-model="mirrorStructure" label="Recreate folder structure" help="When subfolders are included, mirror them in the destination. Off writes every file side by side." :disabled="!includeSubfolders" />
 							<p v-if="backendVersion" class="px-2.5 pb-1 text-paleday-dim" data-selectable>
 								{{ backendVersion }}
 							</p>
@@ -664,11 +692,16 @@ function basename(path: string): string {
 						:description="startupError"
 					/>
 
-					<div v-if="scanned.length || animatedInputs.length || dropRejected || (inspected.length === 1 && inspected[0]?.webp)" class="flex flex-col gap-1 px-2.5 text-xs">
-						<p v-if="scanned.length > 0" class="text-paleday-dim">
-							Found {{ scanned.length }} image{{ scanned.length === 1 ? '' : 's' }} in that folder, including
-							subfolders. Symlinks are skipped. {{ mirrorStructure ? 'The folder structure is recreated in the destination.' : 'Every file is written side by side in the destination.' }}
-						</p>
+					<div v-if="scannedRoot || animatedInputs.length || dropRejected || (inspected.length === 1 && inspected[0]?.webp)" class="flex flex-col gap-1 px-2.5 text-xs">
+						<div v-if="scannedRoot" class="flex flex-wrap items-start gap-x-6">
+							<p class="min-w-0 flex-1 py-[7px] text-paleday-dim">
+								Found {{ scanned.length }} image{{ scanned.length === 1 ? '' : 's' }} in that folder{{ includeSubfolders ? ', including subfolders. Symlinks are skipped.' : '. Subfolders are left out.' }}
+								<template v-if="includeSubfolders">
+									{{ mirrorStructure ? 'The folder structure is recreated in the destination.' : 'Every file is written side by side in the destination.' }}
+								</template>
+							</p>
+							<ControlToggle v-model="includeSubfolders" label="Include subfolders" class="shrink-0" />
+						</div>
 						<p v-if="inspected.length === 1 && inspected[0]?.webp" class="text-paleday-dim" data-selectable>
 							Already a WebP: {{ inspected[0]!.webp!.width }}&times;{{ inspected[0]!.webp!.height }},
 							{{ inspected[0]!.webp!.compression }}{{ inspected[0]!.webp!.hasAlpha ? ', with alpha' : '' }}.
