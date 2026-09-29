@@ -46,6 +46,7 @@ struct HeifWriter {
 const HEIF_ERROR_OK: c_int = 0;
 const HEIF_COMPRESSION_HEVC: c_int = 1;
 const HEIF_COLORSPACE_RGB: c_int = 1;
+const HEIF_CHROMA_INTERLEAVED_RGB: c_int = 10;
 const HEIF_CHROMA_INTERLEAVED_RGBA: c_int = 11;
 const HEIF_CHANNEL_INTERLEAVED: c_int = 10;
 
@@ -208,21 +209,32 @@ fn encode_pixels(settings: &HeicSettings, width: u32, height: u32, pixels: &[u8]
 		// SAFETY: `encoder` is live; quality is validated to 0..=100.
 		check("heif_encoder_set_lossy_quality", unsafe { heif_encoder_set_lossy_quality(encoder, c_int::from(settings.quality)) })?;
 
+		// An opaque image goes as RGB, so the file carries no alpha plane and does not tell
+		// viewers it has transparency (as jxl.rs does for JPEG XL).
+		let opaque = pixels.as_chunks::<4>().0.iter().all(|pixel| pixel[3] == u8::MAX);
+		let (chroma, channels) = if opaque { (HEIF_CHROMA_INTERLEAVED_RGB, 3) } else { (HEIF_CHROMA_INTERLEAVED_RGBA, 4) };
 		let mut image = Image(ptr::null_mut());
 		// SAFETY: plain creation into a live out-pointer, then a plane of the declared size.
-		check("heif_image_create", unsafe { heif_image_create(w, h, HEIF_COLORSPACE_RGB, HEIF_CHROMA_INTERLEAVED_RGBA, &raw mut image.0) })?;
+		check("heif_image_create", unsafe { heif_image_create(w, h, HEIF_COLORSPACE_RGB, chroma, &raw mut image.0) })?;
 		check("heif_image_add_plane", unsafe { heif_image_add_plane(image.0, HEIF_CHANNEL_INTERLEAVED, w, h, 8) })?;
 		let mut stride = 0_usize;
 		// SAFETY: the plane was just added; libheif reports its stride.
 		let plane = unsafe { heif_image_get_plane2(image.0, HEIF_CHANNEL_INTERLEAVED, &raw mut stride) };
-		let row = width as usize * 4;
+		let row = width as usize * channels;
 		if plane.is_null() || stride < row {
 			return Err("libheif gave no usable image plane".to_owned());
 		}
-		for (y, source) in pixels.chunks_exact(row).enumerate() {
+		let mut line = Vec::with_capacity(row);
+		for (y, source) in pixels.chunks_exact(width as usize * 4).enumerate() {
+			line.clear();
+			if opaque {
+				line.extend(source.as_chunks::<4>().0.iter().flat_map(|&[r, g, b, _]| [r, g, b]));
+			} else {
+				line.extend_from_slice(source);
+			}
 			// SAFETY: row `y` of the plane starts at `y * stride` and holds at least `row`
 			// bytes, since `stride >= row` and the plane is `height` rows tall.
-			unsafe { ptr::copy_nonoverlapping(source.as_ptr(), plane.add(y * stride), row) };
+			unsafe { ptr::copy_nonoverlapping(line.as_ptr(), plane.add(y * stride), row) };
 		}
 
 		if let Some(icc) = metadata.icc.as_deref() {
@@ -317,7 +329,9 @@ pub fn dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
 
 #[cfg(test)]
 mod tests {
-	use super::{decode, dimensions, encode, linked_version};
+	use std::{ffi::c_int, ptr};
+
+	use super::{Context, Opaque, check, decode, dimensions, encode, heif_context_get_primary_image_handle, heif_context_read_from_memory_without_copy, heif_image_handle_release, linked_version};
 	use crate::{
 		encoder::{EncodeError, RgbaImage}, settings::{HeicSettings, Resize}
 	};
@@ -371,6 +385,32 @@ mod tests {
 			} else {
 				assert!(decoded[3] > 239, "an opaque pixel decoded with alpha {}", decoded[3]);
 			}
+		}
+	}
+
+	/// An opaque image carries no alpha plane; one with transparency does.
+	#[test]
+	fn only_transparent_images_carry_alpha() {
+		unsafe extern "C" {
+			fn heif_image_handle_has_alpha_channel(handle: *const Opaque) -> c_int;
+		}
+		let has_alpha = |bytes: &[u8]| {
+			let ctx = Context::new().expect("a context");
+			// SAFETY: `bytes` outlives the context, which is dropped at the end of the closure.
+			check("read", unsafe { heif_context_read_from_memory_without_copy(ctx.0, bytes.as_ptr().cast(), bytes.len(), ptr::null()) }).expect("read our own file");
+			let mut handle: *mut Opaque = ptr::null_mut();
+			check("primary", unsafe { heif_context_get_primary_image_handle(ctx.0, &raw mut handle) }).expect("a primary image");
+			// SAFETY: `handle` is live until released just below.
+			let alpha = unsafe { heif_image_handle_has_alpha_channel(handle) } != 0;
+			unsafe { heif_image_handle_release(handle) };
+			alpha
+		};
+		for (alpha, expected) in [(false, false), (true, true)] {
+			let pixels = fixture(64, 48, alpha);
+			let bytes = encode(&HeicSettings::default(), Resize::default(), &RgbaImage { width: 64, height: 48, pixels: &pixels }, &mut |_| true).expect("encode");
+			assert_eq!(has_alpha(&bytes), expected, "fixture with alpha {alpha}");
+			let (_, _, rgba) = decode(&bytes).expect("decode");
+			assert!(psnr(&pixels, &rgba) > 30.0, "alpha {alpha}: decodes at only {:.1} dB", psnr(&pixels, &rgba));
 		}
 	}
 

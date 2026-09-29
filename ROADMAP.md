@@ -576,10 +576,13 @@ prettier subset.
       and libheif's own `heif-info` (the runner's separate build in CI) lists the profile,
       `Exif` and `XMP`; nothing when nothing is kept. Mutation-tested: an unset profile and
       a missing EXIF item each fail it.
-- [ ] **An opaque image is written to HEIC with an alpha channel** (found 2026-09-28:
-      `heif-info` reports "alpha channel: yes" for a JPEG). `heic.rs` always hands libheif
-      interleaved RGBA; an opaque image should go as RGB, as `jxl.rs` already does, to save
-      the alpha plane's bytes and not tell viewers the image has transparency.
+- [x] **An opaque image was written to HEIC with an alpha channel** (found and fixed
+      2026-09-28: `heif-info` reported "alpha channel: yes" for a JPEG). `heic.rs` handed
+      libheif interleaved RGBA for everything; an opaque image now goes as RGB, as `jxl.rs`
+      already did, so no alpha plane is stored or advertised. **Gate:**
+      `only_transparent_images_carry_alpha` (libheif's `has_alpha_channel` on our output, for
+      an opaque and a transparent fixture); `heif-info` confirms "alpha channel: no".
+      Mutation-tested: always writing RGBA fails it.
 - [ ] Keep metadata in **animated** WebP output (`gif2webp -metadata` keeps ICC and XMP
       from a GIF's application extensions), and in **AVIF** output. `ravif`
       0.13 embeds EXIF (`with_exif`) but has no ICC setter, so AVIF's profile needs another
