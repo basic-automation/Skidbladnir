@@ -23,7 +23,7 @@ mod jxl;
 pub(crate) mod legacy;
 mod webp;
 
-pub use avif::{AvifAlphaMode, AvifBitDepth, AvifColorModel, AvifSettings};
+pub use avif::{AvifSettings, Cicp, CleanAperture, CodecOption, Fraction, Grid, QuantizerRange, Tiling, YuvFormat};
 pub use heic::HeicSettings;
 pub use jxl::{JxlColorSpace, JxlSettings, JxlTarget, MetadataSource, Primaries, RenderingIntent, TransferFunction, Tristate, WhitePoint};
 use serde::{Deserialize, Serialize};

@@ -1112,7 +1112,7 @@ mod tests {
 		write_png(&input, 48, 32);
 		let output = output_path_in(scratch.0.clone(), &input, OutputFormat::Avif);
 		assert!(output.ends_with("in.avif"));
-		let job = EncodeJob { format: OutputFormat::Avif, resize: Resize::to(24, 0), avif: AvifSettings { speed: 10, ..Default::default() }, ..Default::default() };
+		let job = EncodeJob { format: OutputFormat::Avif, resize: Resize::to(24, 0), avif: AvifSettings { speed: Some(10), ..Default::default() }, ..Default::default() };
 		let conversion = encode_file(&job, &input, &output).expect("AVIF conversion succeeds");
 		assert_eq!((conversion.width, conversion.height), (24, 16));
 		let bytes = std::fs::read(&output).expect("read the output");
@@ -1128,7 +1128,7 @@ mod tests {
 		let png = scratch.join("in.png");
 		write_png(&png, 48, 32);
 		let avif = scratch.join("in.avif");
-		let job = EncodeJob { format: OutputFormat::Avif, avif: AvifSettings { speed: 10, ..Default::default() }, ..Default::default() };
+		let job = EncodeJob { format: OutputFormat::Avif, avif: AvifSettings { speed: Some(10), ..Default::default() }, ..Default::default() };
 		encode_file(&job, &png, &avif).expect("write an AVIF to read back");
 
 		let loaded = load(&avif).expect("an AVIF must load");
@@ -1152,7 +1152,7 @@ mod tests {
 		let scratch = Scratch::new("avif-same");
 		let png = scratch.join("photo.png");
 		write_png(&png, 16, 16);
-		let job = EncodeJob { format: OutputFormat::Avif, avif: AvifSettings { speed: 10, ..Default::default() }, ..Default::default() };
+		let job = EncodeJob { format: OutputFormat::Avif, avif: AvifSettings { speed: Some(10), ..Default::default() }, ..Default::default() };
 		let avif = scratch.join("photo.avif");
 		encode_file(&job, &png, &avif).expect("write the AVIF");
 		let before = std::fs::read(&avif).expect("read it");

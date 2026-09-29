@@ -197,7 +197,7 @@ mod tests {
 	fn an_avif_preview_can_be_shown_by_any_web_engine() {
 		let scratch = Scratch::new("avif");
 		let input = scratch.join_png();
-		let job = EncodeJob { format: OutputFormat::Avif, avif: AvifSettings { speed: 10, ..Default::default() }, ..Default::default() };
+		let job = EncodeJob { format: OutputFormat::Avif, avif: AvifSettings { speed: Some(10), ..Default::default() }, ..Default::default() };
 		let result = preview(&job, &input).expect("preview");
 		// Shown as lossless WebP of the decoded AVIF, so every web engine can display it.
 		assert!(result.encoded.starts_with("data:image/webp;base64,"), "{}", &result.encoded[..40]);

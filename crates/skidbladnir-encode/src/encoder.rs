@@ -347,13 +347,10 @@ pub fn encode_source_with_progress(job: &EncodeJob, source: &SourceImage, on_pro
 	match job.format {
 		OutputFormat::Webp => encode_webp(job, source, on_progress),
 		OutputFormat::Jxl => crate::jxl::encode(job, source, on_progress),
-		OutputFormat::Avif | OutputFormat::Heic => {
+		OutputFormat::Avif => crate::avif::encode(job, source, on_progress),
+		OutputFormat::Heic => {
 			let (width, height, pixels) = crop_and_rescale_rgba(&source.as_rgba(), job.crop, job.resize)?;
-			let image = RgbaImage { width, height, pixels: &pixels };
-			match job.format {
-				OutputFormat::Avif => crate::avif::encode(&job.avif, Resize::default(), &image, on_progress),
-				_ => crate::heic::encode(&job.heic, Resize::default(), &image, on_progress),
-			}
+			crate::heic::encode(&job.heic, Resize::default(), &RgbaImage { width, height, pixels: &pixels }, on_progress)
 		}
 	}
 }

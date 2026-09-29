@@ -26,11 +26,6 @@ repository = "https://github.com/basic-automation/Skidbladnir"
 # features are off so the binary carries the four formats the app accepts and no more.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tiff"] }
 base64 = "0.23"
-# The AVIF encoder (ROADMAP.md Phase 7). Rust over rav1e: no C library on any platform.
-# Default features on: `asm` is rav1e's hand-written SIMD, assembled with `nasm`, which is
-# therefore a build requirement (README "Build from source"; installed on every CI
-# runner). `threading` is what lets the multi-threading control mean something.
-ravif = "0.13"
 # The AVIF decoder: the user's AVIF input, and our own AVIF output for the preview, so
 # the comparison shows on every platform rather than only where the web engine happens
 # to decode AVIF. Rust over rav1d, the Rust port of dav1d, whose SIMD also needs `nasm`.
@@ -49,6 +44,10 @@ flate2 = "1"
 # it runs at build time only and nothing of it is linked. `pkg-config` is the fallback
 # for a dev host without CMake, which links the system libjxl instead (see build.rs).
 jpegxl-src = "0.12"
+# libavif and libaom are built from the pinned submodules with CMake (see
+# crates/skidbladnir-encode/build.rs), and the avifenc shim beside them with `cc`.
+cmake = "0.1"
+cc = "1"
 pkg-config = "0.3"
 # The JPEG XL decoder: our own output for the preview and the reported dimensions, and
 # JPEG XL input. Pure Rust, so no second copy of libjxl's decoder is needed.

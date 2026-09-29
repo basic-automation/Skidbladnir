@@ -10,7 +10,6 @@ repository.workspace = true
 [dependencies]
 image = { workspace = true }
 libwebp-sys = { workspace = true }
-ravif = { workspace = true }
 avif-decode = { workspace = true }
 jxl-oxide = { workspace = true }
 png = { workspace = true }
@@ -21,6 +20,8 @@ thiserror = { workspace = true }
 
 [build-dependencies]
 jpegxl-src = { workspace = true }
+cmake = { workspace = true }
+cc = { workspace = true }
 pkg-config = { workspace = true }
 
 [dev-dependencies]

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Regenerate THIRD-PARTY-NOTICES.md from the licence files of the native libraries the
 app ships, read from the exact sources that are built: the libwebp-sys and jpegxl-src
-crates in Cargo's registry, and the libheif, libde265 and Kvazaar submodules.
+crates in Cargo's registry, and the libavif, libaom, libheif, libde265 and Kvazaar
+submodules.
 
     scripts/third-party-notices.py
 
@@ -24,6 +25,8 @@ sections = [
 	("Highway (part of libjxl)", "BSD-3-Clause", "SIMD library used by libjxl.", [jxl / "third_party/highway/LICENSE-BSD3"]),
 	("Brotli (part of libjxl)", "MIT", "Compression used by libjxl.", [jxl / "third_party/brotli/LICENSE"]),
 	("skcms (part of libjxl)", "BSD-3-Clause", "Colour management used by libjxl.", [jxl / "third_party/skcms/LICENSE"]),
+	(f"libavif {submodule('libavif')}", "BSD-2-Clause", "AVIF writing, statically linked, with parts of its avifenc app adapted in native/avif_shim.c.", [root / "third_party/libavif/LICENSE"]),
+	(f"libaom {submodule('aom')}", "BSD-2-Clause", "The AV1 encoder for AVIF, statically linked.", [root / "third_party/aom/LICENSE", root / "third_party/aom/PATENTS"]),
 	(f"Kvazaar {submodule('kvazaar')}", "BSD-3-Clause", "The HEVC encoder for HEIC, built into the shipped libheif.", [root / "third_party/kvazaar/LICENSE"]),
 	(f"libde265 {submodule('libde265')}", "LGPL-3.0", "The HEVC decoder for HEIC, built into the shipped libheif.", [root / "third_party/libde265/COPYING"]),
 	(f"libheif {submodule('libheif')}", "LGPL-3.0", "HEIF/HEIC reading and writing, shipped as a separate shared library.", [root / "third_party/libheif/COPYING"]),

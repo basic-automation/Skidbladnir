@@ -16,7 +16,7 @@
 use std::{env, fs, path::PathBuf, process::Command};
 
 use skidbladnir_encode::{
-	RgbaImage, encode_rgba, settings::{AvifBitDepth, AvifColorModel, AvifSettings, EncodeJob, OutputFormat, Resize}
+	RgbaImage, encode_rgba, settings::{AvifSettings, Cicp, EncodeJob, OutputFormat, Resize, YuvFormat}
 };
 
 const WIDTH: u32 = 64;
@@ -95,7 +95,7 @@ fn reference_avifdec_reads_our_avif_correctly() {
 	};
 	let pixels = fixture();
 	// Speed 8 keeps the test quick without being rav1e's least representative preset.
-	let fast = AvifSettings { speed: 8, ..AvifSettings::default() };
+	let fast = AvifSettings { speed: Some(8), ..AvifSettings::default() };
 	let mut checked = 0;
 
 	// Default settings, 10-bit: the right size, the right colour, the right alpha.
@@ -113,14 +113,14 @@ fn reference_avifdec_reads_our_avif_correctly() {
 	checked += 1;
 
 	// Quality must actually mean something: higher quality, closer pixels.
-	let low = opaque_psnr(&pixels, &decode(&avifdec, &encode(AvifSettings { quality: 20, ..fast.clone() }, Resize::default(), &pixels), "q20").rgba);
-	let high = opaque_psnr(&pixels, &decode(&avifdec, &encode(AvifSettings { quality: 95, ..fast.clone() }, Resize::default(), &pixels), "q95").rgba);
+	let low = opaque_psnr(&pixels, &decode(&avifdec, &encode(AvifSettings { quality: Some(20), ..fast.clone() }, Resize::default(), &pixels), "q20").rgba);
+	let high = opaque_psnr(&pixels, &decode(&avifdec, &encode(AvifSettings { quality: Some(95), ..fast.clone() }, Resize::default(), &pixels), "q95").rgba);
 	assert!(high > low, "quality 95 decodes at {high:.1} dB but quality 20 at {low:.1} dB");
 	assert!(high > default_psnr - 0.5, "quality 95 ({high:.1} dB) is no better than the default ({default_psnr:.1} dB)");
 	checked += 2;
 
 	// The other storage options must still produce files a reference decoder reads well.
-	for (name, settings) in [("8-bit", AvifSettings { bit_depth: AvifBitDepth::Eight, ..fast.clone() }), ("rgb model", AvifSettings { color_model: AvifColorModel::Rgb, ..fast.clone() }), ("single thread", AvifSettings { multi_threading: false, ..fast.clone() })] {
+	for (name, settings) in [("8-bit", AvifSettings { depth: Some(8), ..fast.clone() }), ("12-bit", AvifSettings { depth: Some(12), ..fast.clone() }), ("4:2:0", AvifSettings { yuv: YuvFormat::Yuv420, ..fast.clone() }), ("identity matrix", AvifSettings { cicp: Some(Cicp { primaries: 1, transfer: 13, matrix: 0 }), ..fast.clone() }), ("single thread", AvifSettings { jobs: Some(1), ..fast.clone() })] {
 		let decoded = decode(&avifdec, &encode(settings, Resize::default(), &pixels), name);
 		assert_eq!((decoded.width, decoded.height), (WIDTH, HEIGHT), "{name}");
 		let psnr = opaque_psnr(&pixels, &decoded.rgba);
@@ -151,8 +151,8 @@ fn our_avif_decoder_agrees_with_avifdec() {
 	};
 	let pixels = fixture();
 	let mut agreements = Vec::new();
-	for (name, bit_depth) in [("10-bit", AvifBitDepth::Ten), ("8-bit", AvifBitDepth::Eight)] {
-		let avif = encode(AvifSettings { speed: 8, bit_depth, ..AvifSettings::default() }, Resize::default(), &pixels);
+	for (name, depth) in [("10-bit", 10_u8), ("8-bit", 8)] {
+		let avif = encode(AvifSettings { speed: Some(8), depth: Some(depth), ..AvifSettings::default() }, Resize::default(), &pixels);
 		let reference = decode(&avifdec, &avif, &format!("agree-{name}"));
 		let (width, height, ours) = skidbladnir_encode::source::decode_avif(&avif).expect("our decoder reads our own AVIF");
 		assert_eq!((width, height), (reference.width, reference.height), "{name}: size");

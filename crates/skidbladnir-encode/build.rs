@@ -10,6 +10,16 @@
 //! `pkg-config` instead, with a warning. `SKIDBLADNIR_LIBJXL=vendored` forces the static
 //! build and fails loudly if it cannot run, which is what CI and releases want.
 //!
+//! libavif and libaom (both BSD-2) are built the same way, from the pinned submodules in
+//! `third_party/`, and linked statically: libaom first, then libavif configured to use it,
+//! with no libyuv and with libwebp's sharpyuv — the copy `libwebp-sys` already compiles, so
+//! its headers are in `third_party/sharpyuv` and its symbols come from `libwebp-sys` at the
+//! final link. Then `native/avif_shim.c`, which is `avifenc`'s still-image path as a
+//! function (see `src/avif.rs`), is compiled against them with libavif's own
+//! `apps/shared/iccmaker.c` and `avifexif.c`. Without `CMake`, or with
+//! `SKIDBLADNIR_LIBAVIF=system`, the system libavif is used instead through `pkg-config`;
+//! `SKIDBLADNIR_LIBAVIF=vendored` insists on the static build.
+//!
 //! libheif is different: it is LGPL, so it is linked **dynamically** and shipped beside the
 //! app. `scripts/build-libheif.sh` builds it (with the Kvazaar encoder and the libde265
 //! decoder inside) into `build/libheif`, or wherever `SKIDBLADNIR_LIBHEIF_DIR` points.
@@ -21,11 +31,89 @@ use std::{env, path::PathBuf, process::Command};
 
 fn main() {
 	link_libjxl();
+	link_libavif();
 	link_libheif();
+}
+
+fn link_libavif() {
+	println!("cargo:rerun-if-env-changed=SKIDBLADNIR_LIBAVIF");
+	println!("cargo:rerun-if-changed=native/avif_shim.c");
+	let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"));
+	let third_party = manifest.join("../../third_party");
+	let choice = env::var("SKIDBLADNIR_LIBAVIF").unwrap_or_default();
+	let have_cmake = Command::new("cmake").arg("--version").output().is_ok_and(|out| out.status.success());
+	let have_sources = third_party.join("libavif/CMakeLists.txt").exists() && third_party.join("aom/CMakeLists.txt").exists();
+	let system = match choice.as_str() {
+		"system" => true,
+		"vendored" => false,
+		_ => !(have_cmake && have_sources),
+	};
+
+	let mut shim = cc::Build::new();
+	shim.file(manifest.join("native/avif_shim.c")).include(third_party.join("libavif/apps/shared")).file(third_party.join("libavif/apps/shared/iccmaker.c")).file(third_party.join("libavif/apps/shared/avifexif.c")).warnings(false);
+
+	if system {
+		println!("cargo:warning=linking the SYSTEM libavif through pkg-config (no CMake, no third_party/libavif and third_party/aom, or SKIDBLADNIR_LIBAVIF=system); release builds link a static libavif and libaom instead");
+		let library = pkg_config::Config::new().atleast_version("1.4").probe("libavif").unwrap_or_else(|error| panic!("AVIF needs libavif 1.4: install CMake and check out the submodules to build it, or install the system libavif development files. {error}"));
+		for include in library.include_paths {
+			shim.include(include);
+		}
+		shim.compile("skidavif");
+		return;
+	}
+
+	// libaom: static, no tools, tests, docs or examples. The decoder is built too, because
+	// `avifenc -d 12,8` reconstructs the primary image to encode the residual beside it.
+	let aom = cmake::Config::new(third_party.join("aom")).profile("Release").define("BUILD_SHARED_LIBS", "OFF").define("CONFIG_AV1_DECODER", "1").define("CONFIG_AV1_ENCODER", "1").define("ENABLE_DOCS", "OFF").define("ENABLE_EXAMPLES", "OFF").define("ENABLE_TESTDATA", "OFF").define("ENABLE_TESTS", "OFF").define("ENABLE_TOOLS", "OFF").define("CMAKE_POLICY_VERSION_MINIMUM", "3.5").build();
+	let aom_lib = ["lib", "lib64"].iter().map(|dir| aom.join(dir)).find(|dir| dir.join("libaom.a").exists() || dir.join("aom.lib").exists()).unwrap_or_else(|| aom.join("lib"));
+	let aom_library = if aom_lib.join("aom.lib").exists() { aom_lib.join("aom.lib") } else { aom_lib.join("libaom.a") };
+
+	// libavif, using that libaom and libwebp's sharpyuv. The sharpyuv "library" handed to
+	// CMake is never linked by it — a static library links nothing — so it only has to
+	// exist as a path; the symbols come from libwebp-sys.
+	let placeholder = PathBuf::from(env::var("OUT_DIR").expect("cargo sets OUT_DIR")).join(if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") { "sharpyuv.lib" } else { "libsharpyuv.a" });
+	std::fs::write(&placeholder, b"").expect("write the sharpyuv placeholder");
+	let avif = cmake::Config::new(third_party.join("libavif"))
+		.profile("Release")
+		.define("BUILD_SHARED_LIBS", "OFF")
+		.define("AVIF_CODEC_AOM", "SYSTEM")
+		.define("AVIF_CODEC_AOM_DECODE", "ON")
+		.define("AVIF_CODEC_AOM_ENCODE", "ON")
+		.define("AOM_INCLUDE_DIR", aom.join("include"))
+		.define("AOM_LIBRARY", &aom_library)
+		.define("AVIF_LIBYUV", "OFF")
+		.define("AVIF_LIBSHARPYUV", "SYSTEM")
+		.define("LIBSHARPYUV_INCLUDE_DIR", third_party.join("sharpyuv"))
+		.define("LIBSHARPYUV_LIBRARY", &placeholder)
+		.define("AVIF_JPEG", "OFF")
+		.define("AVIF_ZLIBPNG", "OFF")
+		.define("AVIF_BUILD_APPS", "OFF")
+		.define("AVIF_BUILD_TESTS", "OFF")
+		.define("AVIF_BUILD_EXAMPLES", "OFF")
+		.define("AVIF_ENABLE_WERROR", "OFF")
+		// Only the library itself. libavif's `avif_static` target merges its LOCAL
+		// dependencies into `libavif.a` with an `ar` script, which breaks on a build
+		// directory with a space in it; with every dependency SYSTEM there is nothing to
+		// merge, and `avif_internal` is the same objects.
+		.build_target("avif")
+		.build();
+	let avif_build = avif.join("build");
+	let avif_lib = [avif_build.clone(), avif_build.join("Release")].into_iter().find(|dir| dir.join("libavif_internal.a").exists() || dir.join("avif_internal.lib").exists()).unwrap_or(avif_build);
+
+	shim.include(third_party.join("libavif/include")).compile("skidavif");
+	println!("cargo:rustc-link-search=native={}", avif_lib.display());
+	println!("cargo:rustc-link-search=native={}", aom_lib.display());
+	println!("cargo:rustc-link-lib=static=avif_internal");
+	println!("cargo:rustc-link-lib=static=aom");
+	if env::var("CARGO_CFG_TARGET_FAMILY").as_deref() == Ok("unix") && env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
+		println!("cargo:rustc-link-lib=m");
+	}
+	println!("cargo:rustc-cfg=skidbladnir_vendored_libavif");
 }
 
 fn link_libheif() {
 	println!("cargo:rustc-check-cfg=cfg(skidbladnir_system_libheif)");
+	println!("cargo:rustc-check-cfg=cfg(skidbladnir_vendored_libavif)");
 	println!("cargo:rerun-if-env-changed=SKIDBLADNIR_LIBHEIF");
 	println!("cargo:rerun-if-env-changed=SKIDBLADNIR_LIBHEIF_DIR");
 	let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"));
