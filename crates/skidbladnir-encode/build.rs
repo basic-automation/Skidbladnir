@@ -13,8 +13,8 @@
 //! libavif and libaom (both BSD-2) are built the same way, from the pinned submodules in
 //! `third_party/`, and linked statically: libaom first, then libavif configured to use it,
 //! with no libyuv and with libwebp's sharpyuv — the copy `libwebp-sys` already compiles, so
-//! its headers are in `third_party/sharpyuv` and its symbols come from `libwebp-sys` at the
-//! final link. Then `native/avif_shim.c`, which is `avifenc`'s still-image path as a
+//! its headers come from the libwebp submodule at the same version (`third_party/libwebp`)
+//! and its symbols from `libwebp-sys` at the final link. Then `native/avif_shim.c`, which is `avifenc`'s still-image path as a
 //! function (see `src/avif.rs`), is compiled against them with libavif's own
 //! `apps/shared/iccmaker.c` and `avifexif.c`. Without `CMake`, or with
 //! `SKIDBLADNIR_LIBAVIF=system`, the system libavif is used instead through `pkg-config`;
@@ -42,7 +42,7 @@ fn link_libavif() {
 	let third_party = manifest.join("../../third_party");
 	let choice = env::var("SKIDBLADNIR_LIBAVIF").unwrap_or_default();
 	let have_cmake = Command::new("cmake").arg("--version").output().is_ok_and(|out| out.status.success());
-	let have_sources = third_party.join("libavif/CMakeLists.txt").exists() && third_party.join("aom/CMakeLists.txt").exists();
+	let have_sources = ["libavif/CMakeLists.txt", "aom/CMakeLists.txt", "libwebp/sharpyuv/sharpyuv.h"].iter().all(|file| third_party.join(file).exists());
 	let system = match choice.as_str() {
 		"system" => true,
 		"vendored" => false,
@@ -83,7 +83,7 @@ fn link_libavif() {
 		.define("AOM_LIBRARY", &aom_library)
 		.define("AVIF_LIBYUV", "OFF")
 		.define("AVIF_LIBSHARPYUV", "SYSTEM")
-		.define("LIBSHARPYUV_INCLUDE_DIR", third_party.join("sharpyuv"))
+		.define("LIBSHARPYUV_INCLUDE_DIR", third_party.join("libwebp"))
 		.define("LIBSHARPYUV_LIBRARY", &placeholder)
 		.define("AVIF_JPEG", "OFF")
 		.define("AVIF_ZLIBPNG", "OFF")

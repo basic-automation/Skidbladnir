@@ -817,6 +817,28 @@ mod tests {
 		}
 	}
 
+	/// libavif and libheif are compiled against the sharpyuv headers in `third_party/libwebp`
+	/// but linked with the sharpyuv `libwebp-sys` compiles, so the submodule has to be the
+	/// libwebp `libwebp-sys` vendors. Bumping one without the other fails here.
+	#[test]
+	fn the_libwebp_submodule_matches_the_linked_libwebp() {
+		unsafe extern "C" {
+			fn SharpYuvGetVersion() -> std::ffi::c_int;
+		}
+		let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+		let gitmodules = std::fs::read_to_string(root.join(".gitmodules")).expect("read .gitmodules");
+		let pinned = gitmodules.split("[submodule ").find(|section| section.starts_with("\"third_party/libwebp\"")).and_then(|section| section.lines().find_map(|line| line.trim().strip_prefix("version = v"))).expect("third_party/libwebp has a version in .gitmodules");
+		let (major, minor, revision) = super::linked_encoder_version();
+		assert_eq!(pinned, format!("{major}.{minor}.{revision}"), "third_party/libwebp is pinned to {pinned}, libwebp-sys links {major}.{minor}.{revision}");
+
+		let Ok(header) = std::fs::read_to_string(root.join("third_party/libwebp/sharpyuv/sharpyuv.h")) else { return };
+		let part = |name: &str| header.lines().find_map(|line| line.strip_prefix(&format!("#define SHARPYUV_VERSION_{name} "))).and_then(|value| value.trim().parse::<i32>().ok()).unwrap_or_else(|| panic!("SHARPYUV_VERSION_{name} in sharpyuv.h"));
+		let headers = (part("MAJOR") << 24) | (part("MINOR") << 16) | part("PATCH");
+		// SAFETY: takes no arguments and returns a constant.
+		let linked = unsafe { SharpYuvGetVersion() };
+		assert_eq!(headers, linked, "the sharpyuv headers are {headers:#x}, the linked sharpyuv is {linked:#x}");
+	}
+
 	#[test]
 	fn a_default_encode_produces_a_webp() {
 		let bytes = encode(&EncodeJob::default()).expect("default settings encode");

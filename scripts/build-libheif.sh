@@ -2,7 +2,11 @@
 # Build the libheif Skidbladnir ships: one shared library with the Kvazaar HEVC encoder
 # (BSD-3-Clause) and the libde265 HEVC decoder (LGPL-3.0) built into it, and nothing else.
 #
-#   scripts/build-libheif.sh [--prefix <dir>]
+#   scripts/build-libheif.sh [--prefix <dir>] [--with-heif-enc]
+#
+# --with-heif-enc also builds libheif's heif-enc, linked to this same libheif: the reference
+# tests/heic_parity.rs compares against (it needs the libpng and libjpeg development files).
+# Never ship that build; the app's libheif is the one without it.
 #
 # Installs into build/libheif (or --prefix, or $SKIDBLADNIR_LIBHEIF_DIR): lib/ holds the
 # shared library (bin/heif.dll on Windows, beside the import library in lib/), include/
@@ -16,6 +20,9 @@
 # GPL encoder (x265) that happens to be installed on the user's machine, and every other
 # codec is off because the app does not use it.
 #
+# Sharp YUV (`-C sharp-yuv` in heif-enc) comes from libwebp's libsharpyuv, built from the
+# libwebp submodule (the version libwebp-sys vendors) and linked into libheif statically.
+#
 # Sources are the pinned submodules under third_party/. Needs CMake and a C/C++ compiler;
 # on Windows it runs from Git Bash with Visual Studio's compiler. For an Intel build on an
 # Apple Silicon Mac, set SKIDBLADNIR_TARGET_ARCH=x86_64.
@@ -23,13 +30,15 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 prefix="${SKIDBLADNIR_LIBHEIF_DIR:-$root/build/libheif}"
+examples=OFF
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--prefix) prefix="$2"; shift 2;;
+		--with-heif-enc) examples=ON; shift;;
 		*) echo "unknown argument: $1" >&2; exit 2;;
 	esac
 done
-for module in libheif kvazaar libde265; do
+for module in libheif kvazaar libde265 libwebp; do
 	[ -f "$root/third_party/$module/CMakeLists.txt" ] || { echo "third_party/$module is missing: run git submodule update --init third_party/$module" >&2; exit 1; }
 done
 
@@ -68,6 +77,14 @@ build kvazaar "$root/third_party/kvazaar" "$deps" \
 build libde265 "$root/third_party/libde265" "$deps" \
 	-DBUILD_SHARED_LIBS=OFF -DENABLE_SDL=OFF -DENABLE_DECODER=OFF -DENABLE_ENCODER=OFF
 
+# libsharpyuv alone: the target, not libwebp's whole install.
+echo "==> libsharpyuv"
+cmake -S "$(native "$root/third_party/libwebp")" -B "$(native "$work/libwebp")" "${common[@]}" -DBUILD_SHARED_LIBS=OFF \
+	-DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_CWEBP=OFF -DWEBP_BUILD_DWEBP=OFF -DWEBP_BUILD_GIF2WEBP=OFF -DWEBP_BUILD_IMG2WEBP=OFF \
+	-DWEBP_BUILD_VWEBP=OFF -DWEBP_BUILD_WEBPINFO=OFF -DWEBP_BUILD_WEBPMUX=OFF -DWEBP_BUILD_EXTRAS=OFF
+cmake --build "$(native "$work/libwebp")" --config Release --parallel "$jobs" --target sharpyuv
+sharpyuv=$(find "$work/libwebp" -maxdepth 2 \( -name libsharpyuv.a -o -name sharpyuv.lib \) | head -1)
+
 # The two static libraries are compiled into libheif, so their headers must not declare
 # their functions as DLL imports.
 static_defines="-DKVZ_STATIC_LIB -DLIBDE265_STATIC_BUILD"
@@ -81,8 +98,9 @@ build libheif "$root/third_party/libheif" "$prefix" \
 	-DBUILD_SHARED_LIBS=ON -DENABLE_PLUGIN_LOADING=OFF \
 	-DWITH_KVAZAAR=ON -DWITH_KVAZAAR_PLUGIN=OFF -DWITH_LIBDE265=ON -DWITH_LIBDE265_PLUGIN=OFF \
 	"${off[@]}" \
-	-DWITH_LIBSHARPYUV=OFF -DWITH_UNCOMPRESSED_CODEC=OFF -DWITH_HEADER_COMPRESSION=OFF \
-	-DWITH_EXAMPLES=OFF -DWITH_GDK_PIXBUF=OFF -DBUILD_TESTING=OFF -DWITH_FUZZERS=OFF \
+	-DWITH_LIBSHARPYUV=ON "-DLIBSHARPYUV_INCLUDE_DIR=$(native "$root/third_party/libwebp")" "-DLIBSHARPYUV_LIBRARY=$(native "$sharpyuv")" \
+	-DWITH_UNCOMPRESSED_CODEC=OFF -DWITH_HEADER_COMPRESSION=OFF \
+	-DWITH_EXAMPLES=$examples -DWITH_GDK_PIXBUF=OFF -DBUILD_TESTING=OFF -DWITH_FUZZERS=OFF \
 	-DBUILD_DOCUMENTATION=OFF \
 	"-DCMAKE_PREFIX_PATH=$(native "$deps")" \
 	"-DCMAKE_C_FLAGS=$static_defines" "-DCMAKE_CXX_FLAGS=$static_defines" \
