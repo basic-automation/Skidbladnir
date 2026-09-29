@@ -6,10 +6,9 @@
 //! or with `ImageMagick`-style hex "raw profile" and XMP text chunks, a TIFF with an ICC
 //! tag, and WebP files written by `cwebp -metadata all` itself.
 //!
-//! **Byte for byte** for PNG, TIFF and WebP sources, which both sides decode to the same
-//! pixels. A JPEG is decoded by libjpeg in `cwebp` and not by us, so its image chunk may
-//! legitimately differ by a rounding; there every *other* chunk — the `VP8X` header, the
-//! order, and each metadata payload — must still be identical.
+//! Every conversion must be **byte for byte** `cwebp`'s: the metadata chunks, their order,
+//! the `VP8X` header, and the image itself (both sides decode each source the same way —
+//! see the JPEG- and WebP-source parity tests in `parity.rs`).
 //!
 //! Needs the reference `cwebp` (`SKIDBLADNIR_REFERENCE_CWEBP` or `PATH`), as the parity
 //! gate does; `SKIDBLADNIR_REQUIRE_PARITY=1` makes its absence a failure.
@@ -147,24 +146,6 @@ fn tiff_with_icc() -> Vec<u8> {
 	out.into_inner()
 }
 
-/// The top-level chunks of a WebP file.
-fn chunks(webp: &[u8]) -> Vec<([u8; 4], &[u8])> {
-	let mut out = Vec::new();
-	let mut at = 12;
-	while let Some(header) = webp.get(at..at + 8) {
-		let fourcc: [u8; 4] = header[..4].try_into().expect("four bytes");
-		let size = u32::from_le_bytes(header[4..8].try_into().expect("four bytes")) as usize;
-		out.push((fourcc, &webp[at + 8..at + 8 + size]));
-		at += 8 + size + (size & 1);
-	}
-	out
-}
-
-/// The chunks with the image data emptied, for comparing everything else.
-fn without_image(webp: &[u8]) -> Vec<([u8; 4], &[u8])> {
-	chunks(webp).into_iter().map(|(fourcc, body)| (fourcc, if matches!(&fourcc, b"VP8 " | b"VP8L" | b"ALPH") { &[][..] } else { body })).collect()
-}
-
 fn keep(names: &str) -> KeepMetadata {
 	KeepMetadata { icc: names.contains("icc"), exif: names.contains("exif"), xmp: names.contains("xmp") }
 }
@@ -194,37 +175,35 @@ fn keeps_metadata_exactly_as_cwebp_does() {
 	let big_icc = icc_profile(140_000);
 	let exif = exif_block();
 	let xmp = xmp_packet();
-	// (name, path, whether the image data must match too: [lossy, lossless])
-	let mut sources: Vec<(&str, PathBuf, [bool; 2])> = Vec::new();
-	let mut add = |name: &'static str, bytes: Vec<u8>, extension: &str, exact: [bool; 2]| {
+	let mut sources: Vec<(&str, PathBuf)> = Vec::new();
+	let mut add = |name: &'static str, bytes: Vec<u8>, extension: &str| {
 		let path = dir.join(format!("{name}.{extension}"));
 		fs::write(&path, bytes).expect("write a fixture");
-		sources.push((name, path, exact));
+		sources.push((name, path));
 	};
-	add("jpeg, ICC in 3 segments out of order + EXIF + XMP", jpeg_with(&[icc_segments(&big_icc, 65_519, &[2, 3, 1]), vec![app1(b"Exif\0\0", &exif), app1(b"http://ns.adobe.com/xap/1.0/\0", xmp.as_bytes()), app1(b"Exif\0\0", b"a second EXIF, ignored")]].concat()), "jpg", [false; 2]);
-	add("jpeg, EXIF only", jpeg_with(&[app1(b"Exif\0\0", &exif)]), "jpg", [false; 2]);
-	add("png, iCCP + eXIf", png_with_icc_and_exif(false), "png", [true; 2]);
-	add("png with alpha, iCCP + eXIf", png_with_icc_and_exif(true), "png", [true; 2]);
-	add("png, raw-profile EXIF + iTXt XMP", png_with_text_chunks(), "png", [true; 2]);
-	add("tiff, ICC", tiff_with_icc(), "tif", [true; 2]);
+	add("jpeg, ICC in 3 segments out of order + EXIF + XMP", jpeg_with(&[icc_segments(&big_icc, 65_519, &[2, 3, 1]), vec![app1(b"Exif\0\0", &exif), app1(b"http://ns.adobe.com/xap/1.0/\0", xmp.as_bytes()), app1(b"Exif\0\0", b"a second EXIF, ignored")]].concat()), "jpg");
+	add("jpeg, EXIF only", jpeg_with(&[app1(b"Exif\0\0", &exif)]), "jpg");
+	add("png, iCCP + eXIf", png_with_icc_and_exif(false), "png");
+	add("png with alpha, iCCP + eXIf", png_with_icc_and_exif(true), "png");
+	add("png, raw-profile EXIF + iTXt XMP", png_with_text_chunks(), "png");
+	add("tiff, ICC", tiff_with_icc(), "tif");
 	// WebP input carrying all three, written by cwebp itself from a PNG.
 	let seed = dir.join("seed.png");
 	fs::write(&seed, png_with_icc_and_exif(true)).expect("write");
 	let webp_source = dir.join("webp, ICC + EXIF (cwebp-written).webp");
 	let status = Command::new(&cwebp).args(["-quiet", "-lossless", "-metadata", "all"]).arg(&seed).arg("-o").arg(&webp_source).status().expect("run cwebp");
 	assert!(status.success(), "cwebp must write the WebP fixture");
-	sources.push(("webp, ICC + EXIF (cwebp-written)", webp_source, [true; 2]));
+	sources.push(("webp, ICC + EXIF (cwebp-written)", webp_source));
 
 	let jobs = [("lossy", WebpSettings::default()), ("lossless", WebpSettings { mode: Mode::Lossless, ..WebpSettings::default() })];
-	let mut whole = 0;
 	let kinds = ["all", "icc", "exif", "xmp", "exif,xmp", "none"];
 	let mut failures = Vec::new();
 	let mut compared = 0;
-	for (name, input, exact) in &sources {
+	for (name, input) in &sources {
 		let source_bytes = fs::read(input).expect("read");
 		let found = metadata::extract(&source_bytes).expect("the fixtures' metadata is well formed");
 		assert!(!found.is_empty(), "{name}: the fixture must carry metadata, or this compares nothing");
-		for ((mode, webp), exact) in jobs.iter().zip(exact) {
+		for (mode, webp) in &jobs {
 			for kind in kinds {
 				let job = EncodeJob { webp: webp.clone(), metadata: keep(kind), ..EncodeJob::default() };
 				let tag = format!("{compared}");
@@ -237,17 +216,8 @@ fn keeps_metadata_exactly_as_cwebp_does() {
 						continue;
 					}
 				};
-				if *exact {
-					whole += 1;
-					if ours != theirs {
-						failures.push(format!("{case}: {} bytes, cwebp {} — not identical", ours.len(), theirs.len()));
-					}
-				} else {
-					// Every chunk but the image data must match, in order.
-					if without_image(&ours) != without_image(&theirs) {
-						let names = |webp: &[u8]| chunks(webp).iter().map(|(fourcc, body)| format!("{}:{}", String::from_utf8_lossy(fourcc), body.len())).collect::<Vec<_>>().join(" ");
-						failures.push(format!("{case}: chunks differ: ours [{}] cwebp [{}]", names(&ours), names(&theirs)));
-					}
+				if ours != theirs {
+					failures.push(format!("{case}: {} bytes, cwebp {} — not identical", ours.len(), theirs.len()));
 				}
 				// And what was kept is exactly the source's, so the gate is not vacuous.
 				let kept = metadata::extract(&ours).expect("our output's metadata reads back");
@@ -276,5 +246,5 @@ fn keeps_metadata_exactly_as_cwebp_does() {
 
 	let _ = fs::remove_dir_all(&dir);
 	assert!(failures.is_empty(), "METADATA FAILED ({} of {compared}):\n{}", failures.len(), failures.join("\n"));
-	eprintln!("METADATA OK: {compared} conversions ({} sources x 2 modes x {} -metadata choices) match cwebp — {whole} whole-file, the rest chunk for chunk apart from the image data; malformed ICC refused as cwebp refuses it", sources.len(), kinds.len());
+	eprintln!("METADATA OK: {compared} conversions ({} sources x 2 modes x {} -metadata choices) match cwebp byte for byte; malformed ICC refused as cwebp refuses it", sources.len(), kinds.len());
 }

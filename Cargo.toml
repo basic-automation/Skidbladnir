@@ -28,6 +28,11 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 # Read directly (the same version `image` uses) for the PNG text chunks that carry EXIF
 # and XMP, which `image` does not expose; see `src/metadata.rs`.
 png = "0.18"
+# JPEG input is decoded by libjpeg-turbo's decoder (inside MozJPEG, built from source with
+# `cc`, no CMake), because that is what `cwebp` decodes JPEGs with: any other decoder rounds
+# its IDCT and upsampling differently, and JPEG-to-WebP output drifts off `cwebp`'s. CMYK
+# JPEGs, which `cwebp` refuses, stay with `image`. See `decode_jpeg` in `src/source.rs`.
+mozjpeg = "0.10"
 base64 = "0.23"
 # The AVIF encoder (ROADMAP.md Phase 7). Rust over rav1e: no C library on any platform.
 # Default features on: `asm` is rav1e's hand-written SIMD, assembled with `nasm`, which is

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Regenerate THIRD-PARTY-NOTICES.md from the licence files of the native libraries the
-app ships, read from the exact sources that are built: the libwebp-sys and jpegxl-src
-crates in Cargo's registry, and the libheif, libde265 and Kvazaar submodules.
+app ships, read from the exact sources that are built: the libwebp-sys, mozjpeg-sys and
+jpegxl-src crates in Cargo's registry, and the libheif, libde265 and Kvazaar submodules.
 
     scripts/third-party-notices.py
 
@@ -14,12 +14,14 @@ meta = json.loads(subprocess.run(["cargo", "metadata", "--format-version", "1"],
 crate = {p["name"]: pathlib.Path(p["manifest_path"]).parent for p in meta["packages"]}
 webp = crate["libwebp-sys"] / "vendor"
 jxl = crate["jpegxl-src"] / "libjxl"
+mozjpeg = crate["mozjpeg-sys"]
 # The pinned tag is recorded beside each submodule in .gitmodules (`version = ...`): a
 # shallow CI checkout has no tags to describe.
 submodule = lambda name: subprocess.run(["git", "config", "-f", str(root / ".gitmodules"), f"submodule.third_party/{name}.version"], capture_output=True, text=True, check=True).stdout.strip()
 
 sections = [
 	("libwebp", "BSD-3-Clause", "The WebP encoder and decoder, statically linked.", [webp / "COPYING", webp / "PATENTS"]),
+	("MozJPEG (libjpeg-turbo)", "IJG AND BSD-3-Clause AND Zlib", "The JPEG decoder for JPEG input, statically linked. This software is based in part on the work of the Independent JPEG Group.", [mozjpeg / "LICENSE"]),
 	("libjxl", "BSD-3-Clause", "The JPEG XL encoder, statically linked.", [jxl / "LICENSE", jxl / "PATENTS"]),
 	("Highway (part of libjxl)", "BSD-3-Clause", "SIMD library used by libjxl.", [jxl / "third_party/highway/LICENSE-BSD3"]),
 	("Brotli (part of libjxl)", "MIT", "Compression used by libjxl.", [jxl / "third_party/brotli/LICENSE"]),

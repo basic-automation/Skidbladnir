@@ -283,6 +283,25 @@ The Electron app shells out to `cwebp.exe`. The Rust port should not.
       opaque): 304 of 304 byte-identical; with the old route, 220 diverge. The metadata
       gate now compares WebP sources whole in both modes.
 
+- [x] **JPEG to WebP matched `cwebp` in 17 of 456 cases** (found and fixed 2026-09-28) —
+      the most common conversion. The encoder was never the problem: `cwebp` reads JPEGs
+      with libjpeg(-turbo) as `JCS_RGB` with fancy upsampling (`imageio/jpegdec.c`), and
+      the `image` crate's decoder (zune-jpeg) rounds its IDCT and chroma upsampling
+      differently, so the pixels handed to the encoder differed (2114 vs 2130 bytes at the
+      defaults). JPEG input now decodes through libjpeg-turbo's decoder, as MozJPEG
+      carries it (`mozjpeg` crate, built from source with `cc` and `nasm`, no CMake),
+      configured as `cwebp` configures libjpeg; CMYK/YCCK JPEGs, which `cwebp` refuses,
+      keep the `image` decoder and its Photoshop-inversion handling. Licence: IJG AND
+      BSD-3-Clause AND Zlib — `IJG` added to `deny.toml`, its notice (with the credit the
+      IJG licence asks for) in `THIRD-PARTY-NOTICES.md`.
+      **Gate:** `matches_reference_cwebp_through_a_jpeg_file` in `tests/parity.rs` — six
+      committed `magick`-written JPEGs (4:4:4, 4:2:2, 4:2:0, progressive, restart markers,
+      greyscale; 97x63 so the upsampler's edges count) × the 76-setting surface: 456 of 456
+      byte-identical; with the old decoder, 439 diverge. The metadata gate's JPEG sources
+      are now compared whole too (84 of 84). **CI's cwebp links the runner's libjpeg-turbo**
+      (2.1 on Ubuntu 24.04, 3.x on Arch and Homebrew), so the gate also shows whether
+      libjpeg-turbo versions agree with each other.
+
 ## Phase 3 — Frontend parity (Nuxt + Tailwind)
 
 Parity means a user of the Electron app finds every control they had, not a
@@ -461,9 +480,8 @@ prettier subset.
       does. The preview keeps it too, so its size is the size written.
       **Gate:** `tests/metadata.rs` — 84 conversions (7 fixtures with hand-built metadata,
       incl. a 140 KB ICC profile in three out-of-order JPEG segments, × lossy/lossless × six
-      `-metadata` choices) against `cwebp -metadata`: 60 byte-identical whole files; the
-      JPEG sources (libjpeg decodes their pixels in `cwebp`, not us) match chunk for chunk
-      apart from the image data. A JPEG with a
+      `-metadata` choices) against `cwebp -metadata`: all 84 byte-identical whole files
+      (once JPEG and WebP sources decoded as `cwebp` decodes them; below). A JPEG with a
       missing ICC segment is refused as `cwebp` refuses it. Mutation-tested: unsorted ICC
       segments, a missing `VP8X` alpha flag, no RIFF padding, `ICCP` after the image and
       last-EXIF-wins each fail it.

@@ -438,3 +438,63 @@ fn matches_reference_cwebp_through_a_webp_file() {
 	assert!(mismatches.is_empty(), "{} of {total} WebP-file conversions diverged from cwebp:\n  {}", mismatches.len(), mismatches.join("\n  "));
 	eprintln!("WEBP-SOURCE PARITY OK: {total} WebP-to-WebP conversions ({} sources x {} settings) matched the reference cwebp byte for byte.", sources.len(), cases.len());
 }
+
+/// Parity through a **JPEG file**, across the whole control surface: JPEG to WebP is the
+/// conversion most people make.
+///
+/// It needs the same *decoder* as `cwebp`, not just the same encoder: `cwebp` reads JPEGs
+/// with libjpeg(-turbo) as `JCS_RGB` with fancy upsampling, and a decoder that rounds its
+/// IDCT or chroma upsampling differently moves every output (2114 vs 2130 bytes at the
+/// defaults, before JPEG input went through libjpeg-turbo's decoder here too).
+///
+/// The fixtures were written by `ImageMagick` 7.1.2-31 from one 97x63 image (odd sizes, so
+/// the upsampler's edge handling is exercised), stripped of metadata:
+/// `magick base.png -strip -quality Q -sampling-factor F [-interlace JPEG |
+/// -define jpeg:restart-interval=2 | -colorspace Gray] out.jpg`.
+/// SHA-256: 4:4:4 643732ce…, 4:2:2 d4da8bc6…, 4:2:0 29857427…, 4:2:0 progressive
+/// 9dc9915c…, 4:2:0 with restart markers c0a654d2…, greyscale 66fc23e5….
+#[test]
+fn matches_reference_cwebp_through_a_jpeg_file() {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let Some(cwebp) = reference_cwebp() else {
+		let message = "JPEG-SOURCE PARITY NOT RUN: no reference cwebp found.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+	let linked = skidbladnir_encode::encoder::linked_encoder_version();
+	if reference_version(&cwebp) != Some(linked) {
+		let message = "JPEG-SOURCE PARITY NOT RUN: reference cwebp and the linked libwebp are different versions.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	}
+
+	let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+	let sources = ["jpeg-444.jpg", "jpeg-422.jpg", "jpeg-420.jpg", "jpeg-420-progressive.jpg", "jpeg-420-restart.jpg", "jpeg-grey.jpg"];
+	let dir = env::temp_dir().join(format!("skidbladnir-parity-jpeg-{}", std::process::id()));
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+
+	let mut mismatches: Vec<String> = Vec::new();
+	let cases = cases();
+	for source_name in sources {
+		let source = fixtures.join(source_name);
+		for (index, (name, settings)) in cases.iter().enumerate() {
+			let theirs_path = dir.join(format!("cwebp-{index}.webp"));
+			let run = Command::new(&cwebp).args(cwebp_args(settings, &source, &theirs_path)).output().expect("run the reference cwebp");
+			assert!(run.status.success(), "reference cwebp failed for `{name}` from {source_name}: {}", String::from_utf8_lossy(&run.stderr));
+			let expected = fs::read(&theirs_path).expect("read the reference output");
+			let ours_path = dir.join(format!("ours-{index}.webp"));
+			skidbladnir_encode::source::encode_file(settings, &source, &ours_path).expect("our pipeline encodes");
+			let actual = fs::read(&ours_path).expect("read our output");
+			if actual != expected {
+				mismatches.push(format!("{source_name}, `{name}`: ours {} bytes, cwebp {} bytes", actual.len(), expected.len()));
+			}
+		}
+	}
+
+	let _ = fs::remove_dir_all(&dir);
+	let total = sources.len() * cases.len();
+	assert!(mismatches.is_empty(), "{} of {total} JPEG-file conversions diverged from cwebp:\n  {}", mismatches.len(), mismatches.join("\n  "));
+	eprintln!("JPEG-SOURCE PARITY OK: {total} JPEG-to-WebP conversions ({} JPEGs x {} settings) matched the reference cwebp byte for byte.", sources.len(), cases.len());
+}

@@ -84,7 +84,7 @@ binary release is [v0.4.3](https://github.com/basic-automation/Skidbladnir/relea
 ## Build from source
 
 Requires a stable Rust toolchain, Node.js and npm, **`nasm`** — the AV1 encoder and
-decoder assemble their SIMD code with it (Arch: `nasm`; Debian/Ubuntu: `nasm`; macOS:
+decoder and the JPEG decoder assemble their SIMD code with it (Arch: `nasm`; Debian/Ubuntu: `nasm`; macOS:
 `brew install nasm`; Windows: `choco install nasm`) — and **CMake** with a C++ compiler,
 which build libjxl from source so it is linked statically. HEIC needs libheif, built with
 `scripts/build-libheif.sh` from the pinned sources in `third_party/` (clone with
@@ -187,6 +187,9 @@ What it can do:
   exactly as `cwebp -metadata` does, checked against `cwebp` itself. Off by default, as
   in `cwebp`: without the profile a wide-gamut (Display P3, Adobe RGB) photo's colours
   are read as sRGB.
+- Convert **JPEG and WebP files to WebP byte for byte as `cwebp` itself would**, across
+  every setting, checked against `cwebp` in CI: JPEGs are decoded with libjpeg-turbo's
+  decoder, as `cwebp` decodes them, and WebP sources take `cwebp`'s route straight to YUV.
 - Refuse to overwrite your source image, and stage every write through a temporary
   file so a failed conversion cannot damage a file that was already there.
 - Report the before and after sizes, and the dimensions actually produced.

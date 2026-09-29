@@ -260,6 +260,7 @@ fn decode(path: &Path, bytes: &[u8]) -> Result<SourceImage, SourceError> {
 			}
 			(animation.width, animation.height, animation.frames.swap_remove(0).pixels)
 		}
+		SourceFormat::Jpeg if let Some(decoded) = decode_jpeg(bytes) => decoded.map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?,
 		SourceFormat::Png | SourceFormat::Jpeg | SourceFormat::Tiff => {
 			let decoded = image::load_from_memory(bytes).map_err(|error| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: error.to_string() })?;
 			let rgba = to_rgba8(decoded);
@@ -293,6 +294,47 @@ fn to_rgba8(decoded: image::DynamicImage) -> image::RgbaImage {
 	// `sample >> 8` of a u16 is always within u8, so this cannot lose anything further.
 	let narrowed: Vec<u8> = wide.into_raw().into_iter().map(|sample| u8::try_from(sample >> 8).unwrap_or(u8::MAX)).collect();
 	image::RgbaImage::from_raw(width, height, narrowed).unwrap_or_else(|| image::RgbaImage::new(width, height))
+}
+
+/// Decode a JPEG to `(width, height, rgba)` exactly as `cwebp` does: through libjpeg-turbo's
+/// decoder (`MozJPEG`'s copy of it), asking for `JCS_RGB` with fancy upsampling and the
+/// default integer IDCT (`imageio/jpegdec.c`). A different decoder rounds its IDCT and
+/// chroma upsampling differently, which moved every JPEG-to-WebP conversion off
+/// `cwebp`'s output.
+///
+/// `None` for a CMYK or YCCK JPEG, which `cwebp` refuses (libjpeg cannot convert it to RGB);
+/// those keep the `image` crate's decoder, which reads Photoshop's inverted CMYK correctly.
+fn decode_jpeg(bytes: &[u8]) -> Option<Result<crate::avif_grid::Decoded, String>> {
+	use mozjpeg::{ColorSpace, Decompress};
+
+	// libjpeg reports a damaged file through `error_exit`, which the crate turns into an
+	// unwind; a user's broken file must come back as an error, never end the conversion.
+	let decoded = std::panic::catch_unwind(|| -> Option<std::io::Result<(usize, usize, Vec<u8>)>> {
+		let mut decompress = match Decompress::new_mem(bytes) {
+			Ok(decompress) => decompress,
+			Err(error) => return Some(Err(error)),
+		};
+		if matches!(decompress.color_space(), ColorSpace::JCS_CMYK | ColorSpace::JCS_YCCK) {
+			return None;
+		}
+		decompress.do_fancy_upsampling(true);
+		Some((|| {
+			let mut started = decompress.rgb()?;
+			let (width, height) = (started.width(), started.height());
+			let rgb: Vec<[u8; 3]> = started.read_scanlines()?;
+			started.finish()?;
+			Ok((width, height, rgb.into_iter().flat_map(|[r, g, b]| [r, g, b, 255]).collect()))
+		})())
+	});
+	let result = match decoded {
+		Ok(None) => return None,
+		Ok(Some(result)) => result.map_err(|error| error.to_string()),
+		Err(_) => Err("libjpeg could not read this file".to_owned()),
+	};
+	Some(result.and_then(|(width, height, pixels)| match (u32::try_from(width), u32::try_from(height)) {
+		(Ok(width), Ok(height)) => Ok((width, height, pixels)),
+		_ => Err(format!("{width}x{height} is too large")),
+	}))
 }
 
 /// Decode an AVIF file to `(width, height, rgba)` — a grid (tiled) AVIF stitched whole
@@ -1335,5 +1377,18 @@ mod tests {
 		std::fs::write(&path, b"\0\0\0\x14ftypavif\0\0\0\0avifgarbage-not-a-box").expect("write");
 		let error = load(&path).expect_err("must not decode");
 		assert!(error.to_string().contains("AVIF"), "{error}");
+	}
+
+	/// libjpeg reports a broken file by unwinding out of its error handler; that must come
+	/// back as a decode error naming JPEG, never take the conversion (or the app) down.
+	#[test]
+	fn a_corrupt_jpeg_is_a_decode_error() {
+		let scratch = Scratch::new("jpeg-bad");
+		for (name, bytes) in [("header", &b"\xff\xd8\xff\xc0\x00\x11\x08garbage-not-a-frame"[..]), ("no frame", &b"\xff\xd8\xff\xd9"[..])] {
+			let path = scratch.join(&format!("{name}.jpg"));
+			std::fs::write(&path, bytes).expect("write");
+			let error = load(&path).expect_err("must not decode");
+			assert!(error.to_string().contains("JPEG"), "{name}: {error}");
+		}
 	}
 }
