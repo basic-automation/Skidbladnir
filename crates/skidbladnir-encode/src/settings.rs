@@ -451,33 +451,274 @@ impl JxlSettings {
 	}
 }
 
-/// Every HEIC control. Kvazaar takes 4:2:0 input only, so there is no true lossless mode
-/// to offer; quality is the whole surface libheif exposes for it. 50 is libheif's own
-/// default, the one `heif-enc` uses.
+/// Whether this build encodes HEIC with x265 — the GPL edition, the `x265` feature — rather
+/// than Kvazaar. Settings only x265 can honour are refused without it.
+pub const HEIC_X265: bool = cfg!(feature = "x265");
+
+/// How much of a HEIC's colour detail is kept: the chroma subsampling.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HeicChroma {
+	/// Colour at half the resolution in both directions. What cameras and phones write,
+	/// and what every HEIC reader decodes. Kvazaar's only choice.
+	#[default]
+	#[serde(rename = "420")]
+	Yuv420,
+	/// Colour at half the horizontal resolution.
+	#[serde(rename = "422")]
+	Yuv422,
+	/// Colour at full resolution: sharp coloured edges, text and pixel art survive, at a
+	/// larger size. Not every HEIC reader decodes it.
+	#[serde(rename = "444")]
+	Yuv444,
+}
+
+impl HeicChroma {
+	/// The value of libheif's `chroma` encoder parameter.
+	#[must_use]
+	pub const fn parameter(self) -> &'static str {
+		match self {
+			Self::Yuv420 => "420",
+			Self::Yuv422 => "422",
+			Self::Yuv444 => "444",
+		}
+	}
+}
+
+/// The precision of the encoded HEVC data.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HeicBitDepth {
+	/// 8 bits per channel, HEVC Main. Kvazaar's only choice, and the default because every
+	/// reader decodes it.
+	#[default]
+	Eight,
+	/// 10 bits per channel, HEVC Main 10, as phones write their HDR photos. Keeps more
+	/// precision through the colour conversion even for 8-bit sources, so smooth gradients
+	/// band less.
+	Ten,
+}
+
+/// x265's speed presets, fastest first. Each trades encode time for compression.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HeicPreset {
+	/// The fastest.
+	Ultrafast,
+	/// Nearly the fastest.
+	Superfast,
+	/// Very fast.
+	Veryfast,
+	/// Faster than `fast`.
+	Faster,
+	/// Fast.
+	Fast,
+	/// x265's own default for video.
+	Medium,
+	/// libheif's default for still images.
+	#[default]
+	Slow,
+	/// Slower.
+	Slower,
+	/// Very slow.
+	Veryslow,
+	/// The slowest, and exhaustive.
+	Placebo,
+}
+
+impl HeicPreset {
+	/// Every preset, fastest first.
+	pub const ALL: [Self; 10] = [Self::Ultrafast, Self::Superfast, Self::Veryfast, Self::Faster, Self::Fast, Self::Medium, Self::Slow, Self::Slower, Self::Veryslow, Self::Placebo];
+
+	/// The name x265 and libheif's `preset` parameter use.
+	#[must_use]
+	pub const fn parameter(self) -> &'static str {
+		match self {
+			Self::Ultrafast => "ultrafast",
+			Self::Superfast => "superfast",
+			Self::Veryfast => "veryfast",
+			Self::Faster => "faster",
+			Self::Fast => "fast",
+			Self::Medium => "medium",
+			Self::Slow => "slow",
+			Self::Slower => "slower",
+			Self::Veryslow => "veryslow",
+			Self::Placebo => "placebo",
+		}
+	}
+}
+
+/// What x265 tunes its decisions for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HeicTune {
+	/// The best PSNR, at the cost of the psycho-visual tuning below.
+	Psnr,
+	/// The best SSIM. libheif's default.
+	#[default]
+	Ssim,
+	/// Keep film grain and noise rather than smoothing it away.
+	Grain,
+	/// Cheaper to decode.
+	Fastdecode,
+}
+
+impl HeicTune {
+	/// The name x265 and libheif's `tune` parameter use.
+	#[must_use]
+	pub const fn parameter(self) -> &'static str {
+		match self {
+			Self::Psnr => "psnr",
+			Self::Ssim => "ssim",
+			Self::Grain => "grain",
+			Self::Fastdecode => "fastdecode",
+		}
+	}
+}
+
+/// x265's adaptive quantisation: how bits move between flat and detailed areas.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HeicAqMode {
+	/// None: every area is quantised alike.
+	Off,
+	/// By each block's variance. What libheif sets.
+	#[default]
+	Variance,
+	/// By variance, with the strength set per image.
+	AutoVariance,
+	/// Auto-variance, biased to spend more on dark areas.
+	AutoVarianceDark,
+	/// Auto-variance, guided by edges.
+	AutoVarianceEdge,
+}
+
+impl HeicAqMode {
+	/// x265's `aq-mode` number.
+	#[must_use]
+	pub const fn parameter(self) -> &'static str {
+		match self {
+			Self::Off => "0",
+			Self::Variance => "1",
+			Self::AutoVariance => "2",
+			Self::AutoVarianceDark => "3",
+			Self::AutoVarianceEdge => "4",
+		}
+	}
+}
+
+/// Every HEIC control.
+///
+/// The standard edition encodes with Kvazaar, which takes 4:2:0 8-bit input only and
+/// whose one control libheif exposes is quality. The GPL edition encodes with x265, and
+/// every other field is x265's: libheif's own parameters (lossless, chroma, preset, tune,
+/// TU intra depth) and x265 options passed through to it. The defaults are what libheif
+/// sets for x265 itself, so a default GPL HEIC is what `heif-enc` writes.
+///
+/// Both editions read and store every field, so a preset carries its x265 tuning through
+/// the standard edition unchanged; the standard edition refuses only the fields that would
+/// change what file is written ([`HeicSettings::validate`]) and ignores the tuning. The
+/// fractional x265 options are held in tenths, so the settings stay exact and comparable.
+///
+/// Transparency is a second, monochrome image, which libheif encodes with a fresh x265
+/// that it gives its own parameters (quality, lossless, preset, tune, TU intra depth) but
+/// not the options it passes straight to x265 (adaptive quantisation, psycho-visual
+/// tuning, deblocking, SAO). Those shape the colour image only; the alpha image gets
+/// libheif's and the preset's values for them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct HeicSettings {
-	/// Quality, `0..=100`.
+	/// Quality, `0..=100`; libheif maps it to x265's CRF as `(100 - quality) / 2`.
+	/// Ignored when [`HeicSettings::lossless`] is set.
 	pub quality: u8,
+	/// Encode the pixels exactly: RGB kept as RGB at 4:4:4, with x265's lossless mode.
+	/// Chroma, bit depth and the tuning below do not apply.
+	pub lossless: bool,
+	/// Chroma subsampling.
+	pub chroma: HeicChroma,
+	/// Precision of the encoded data.
+	pub bit_depth: HeicBitDepth,
+	/// Speed preset.
+	pub preset: HeicPreset,
+	/// What to tune for.
+	pub tune: HeicTune,
+	/// How deep x265 splits intra transform units, `1..=4`; deeper finds more detail more
+	/// slowly. libheif sets 2.
+	pub tu_intra_depth: u8,
+	/// Adaptive quantisation.
+	pub aq_mode: HeicAqMode,
+	/// Its strength, in tenths, `0..=30` (0.0 to 3.0). x265's default is 1.0.
+	pub aq_strength: u8,
+	/// Psycho-visual rate-distortion, in tenths, `0..=50` (0.0 to 5.0): keeps texture and
+	/// energy rather than the smoothest match. libheif sets 1.0.
+	pub psy_rd: u8,
+	/// Psycho-visual quantisation, in tenths, `0..=500` (0.0 to 50.0). libheif sets 1.0.
+	pub psy_rdoq: u16,
+	/// The in-loop deblocking filter.
+	pub deblock: bool,
+	/// Deblocking strength offset (`tC`), `-6..=6`; higher smooths more.
+	pub deblock_strength: i8,
+	/// Deblocking threshold offset (`beta`), `-6..=6`; higher treats more edges as blocking.
+	pub deblock_threshold: i8,
+	/// Sample adaptive offset, which smooths ringing around edges.
+	pub sao: bool,
 }
 
 impl Default for HeicSettings {
 	fn default() -> Self {
-		Self { quality: 50 }
+		Self { quality: 50, lossless: false, chroma: HeicChroma::Yuv420, bit_depth: HeicBitDepth::Eight, preset: HeicPreset::Slow, tune: HeicTune::Ssim, tu_intra_depth: 2, aq_mode: HeicAqMode::Variance, aq_strength: 10, psy_rd: 10, psy_rdoq: 10, deblock: true, deblock_strength: 0, deblock_threshold: 0, sao: true }
 	}
 }
 
 impl HeicSettings {
-	/// Check the quality is in libheif's range.
+	/// Check every control against the range x265 accepts, and, in the standard edition,
+	/// refuse what only x265 can write.
+	///
+	/// Ranges are checked in both editions, so a settings file stays valid when it moves
+	/// between them.
 	///
 	/// # Errors
 	///
-	/// Returns [`ValidationError::OutOfRange`] for a quality above 100.
+	/// Returns the first [`ValidationError`] found, checking in field order.
 	pub fn validate(&self) -> Result<(), ValidationError> {
-		if self.quality > 100 {
-			return Err(ValidationError::OutOfRange { field: "heic.quality", value: u32::from(self.quality), min: 0, max: 100 });
+		for (field, value, min, max) in [("heic.quality", self.quality, 0, 100), ("heic.tu_intra_depth", self.tu_intra_depth, 1, 4), ("heic.aq_strength", self.aq_strength, 0, 30), ("heic.psy_rd", self.psy_rd, 0, 50)] {
+			if value < min || value > max {
+				return Err(ValidationError::OutOfRange { field, value: u32::from(value), min: u32::from(min), max: u32::from(max) });
+			}
+		}
+		if self.psy_rdoq > 500 {
+			return Err(ValidationError::OutOfRange { field: "heic.psy_rdoq", value: u32::from(self.psy_rdoq), min: 0, max: 500 });
+		}
+		for (field, value) in [("heic.deblock_strength", self.deblock_strength), ("heic.deblock_threshold", self.deblock_threshold)] {
+			if !(-6..=6).contains(&value) {
+				return Err(ValidationError::OutOfSignedRange { field, value: i32::from(value), min: -6, max: 6 });
+			}
+		}
+		if !HEIC_X265 {
+			if self.lossless {
+				return Err(ValidationError::NeedsX265 { field: "heic.lossless" });
+			}
+			if self.chroma != HeicChroma::Yuv420 {
+				return Err(ValidationError::NeedsX265 { field: "heic.chroma" });
+			}
+			if self.bit_depth != HeicBitDepth::Eight {
+				return Err(ValidationError::NeedsX265 { field: "heic.bit_depth" });
+			}
 		}
 		Ok(())
+	}
+
+	/// These settings with anything this edition cannot write put back to what it can.
+	///
+	/// In the GPL edition that is nothing. In the standard edition lossless, chroma and bit
+	/// depth return to Kvazaar's 8-bit 4:2:0, which is what lets a preset or preferences
+	/// file saved by the GPL edition still open there rather than being thrown away. The
+	/// window shows none of those controls in this edition, so nothing it displays changes.
+	#[must_use]
+	pub fn for_this_edition(self) -> Self {
+		if HEIC_X265 {
+			return self;
+		}
+		Self { lossless: false, chroma: HeicChroma::Yuv420, bit_depth: HeicBitDepth::Eight, ..self }
 	}
 }
 
@@ -562,6 +803,13 @@ impl EncodeJob {
 			OutputFormat::Heic => self.heic.validate(),
 		}
 	}
+
+	/// This job with anything this edition cannot write put back to what it can; see
+	/// [`HeicSettings::for_this_edition`]. Applied to settings read from disk.
+	#[must_use]
+	pub fn for_this_edition(self) -> Self {
+		Self { heic: self.heic.for_this_edition(), ..self }
+	}
 }
 
 /// Why a set of [`WebpSettings`] cannot be encoded.
@@ -588,6 +836,25 @@ pub enum ValidationError {
 	/// A target size of zero bytes cannot be met.
 	#[error("target size must be at least 1 byte")]
 	ZeroTargetSize,
+	/// A signed control is outside the range the encoder accepts.
+	#[error("{field} is {value}, but must be in {min}..={max}")]
+	OutOfSignedRange {
+		/// The field's name, spelled as the struct field.
+		field: &'static str,
+		/// The rejected value.
+		value: i32,
+		/// Lowest accepted value.
+		min: i32,
+		/// Highest accepted value.
+		max: i32,
+	},
+	/// Only x265 can write this, and this is the standard edition, which encodes with
+	/// Kvazaar.
+	#[error("{field} needs x265, which only the GPL edition of Skidbladnir has")]
+	NeedsX265 {
+		/// The field's name, spelled as the struct field.
+		field: &'static str,
+	},
 }
 
 impl WebpSettings {
@@ -864,5 +1131,55 @@ mod tests {
 	fn formats_name_their_files() {
 		assert_eq!((OutputFormat::Webp.extension(), OutputFormat::Webp.mime_type()), ("webp", "image/webp"));
 		assert_eq!((OutputFormat::Avif.extension(), OutputFormat::Avif.mime_type()), ("avif", "image/avif"));
+	}
+
+	/// The HEIC defaults are what libheif sets for x265 itself, so a default GPL-edition
+	/// HEIC is what `heif-enc` writes; quality 50 is libheif's default for either encoder.
+	#[test]
+	fn heic_defaults_are_libheifs() {
+		let s = HeicSettings::default();
+		assert_eq!((s.quality, s.lossless, s.chroma, s.bit_depth), (50, false, HeicChroma::Yuv420, HeicBitDepth::Eight));
+		assert_eq!((s.preset, s.tune, s.tu_intra_depth), (HeicPreset::Slow, HeicTune::Ssim, 2));
+		assert_eq!((s.aq_mode, s.aq_strength, s.psy_rd, s.psy_rdoq), (HeicAqMode::Variance, 10, 10, 10));
+		assert_eq!((s.deblock, s.deblock_strength, s.deblock_threshold, s.sao), (true, 0, 0, true));
+		assert_eq!(s.validate(), Ok(()));
+	}
+
+	#[test]
+	fn heic_settings_read_the_names_the_window_sends() {
+		let json = r#"{"quality":70,"lossless":true,"chroma":"444","bitDepth":"ten","preset":"veryslow","tune":"grain","tuIntraDepth":4,"aqMode":"autoVarianceEdge","aqStrength":15,"psyRd":20,"psyRdoq":50,"deblock":false,"deblockStrength":-2,"deblockThreshold":3,"sao":false}"#;
+		let s: HeicSettings = serde_json::from_str(json).expect("parse");
+		assert_eq!(s, HeicSettings { quality: 70, lossless: true, chroma: HeicChroma::Yuv444, bit_depth: HeicBitDepth::Ten, preset: HeicPreset::Veryslow, tune: HeicTune::Grain, tu_intra_depth: 4, aq_mode: HeicAqMode::AutoVarianceEdge, aq_strength: 15, psy_rd: 20, psy_rdoq: 50, deblock: false, deblock_strength: -2, deblock_threshold: 3, sao: false });
+		assert_eq!(serde_json::from_str::<HeicSettings>(&serde_json::to_string(&s).expect("write")).expect("reparse"), s);
+		// A file from before x265 had only the quality.
+		assert_eq!(serde_json::from_str::<HeicSettings>(r#"{"quality":30}"#).expect("parse"), HeicSettings { quality: 30, ..HeicSettings::default() });
+	}
+
+	#[test]
+	fn heic_ranges_are_enforced_in_both_editions() {
+		for (settings, field, value, min, max) in [(HeicSettings { quality: 101, ..HeicSettings::default() }, "heic.quality", 101, 0, 100), (HeicSettings { tu_intra_depth: 0, ..HeicSettings::default() }, "heic.tu_intra_depth", 0, 1, 4), (HeicSettings { tu_intra_depth: 5, ..HeicSettings::default() }, "heic.tu_intra_depth", 5, 1, 4), (HeicSettings { aq_strength: 31, ..HeicSettings::default() }, "heic.aq_strength", 31, 0, 30), (HeicSettings { psy_rd: 51, ..HeicSettings::default() }, "heic.psy_rd", 51, 0, 50), (HeicSettings { psy_rdoq: 501, ..HeicSettings::default() }, "heic.psy_rdoq", 501, 0, 500)] {
+			assert_eq!(settings.validate(), Err(ValidationError::OutOfRange { field, value, min, max }));
+		}
+		assert_eq!(HeicSettings { deblock_strength: -7, ..HeicSettings::default() }.validate(), Err(ValidationError::OutOfSignedRange { field: "heic.deblock_strength", value: -7, min: -6, max: 6 }));
+		assert_eq!(HeicSettings { deblock_threshold: 7, ..HeicSettings::default() }.validate(), Err(ValidationError::OutOfSignedRange { field: "heic.deblock_threshold", value: 7, min: -6, max: 6 }));
+	}
+
+	/// What only x265 can write is refused by the standard edition, and put back to what
+	/// Kvazaar writes when read from disk; the GPL edition takes it as it is.
+	#[test]
+	fn heic_settings_only_x265_can_write_follow_the_edition() {
+		let x265 = HeicSettings { lossless: true, chroma: HeicChroma::Yuv444, bit_depth: HeicBitDepth::Ten, preset: HeicPreset::Placebo, ..HeicSettings::default() };
+		let job = EncodeJob { format: OutputFormat::Heic, heic: x265.clone(), ..EncodeJob::default() };
+		if HEIC_X265 {
+			assert_eq!(x265.validate(), Ok(()));
+			assert_eq!(job.clone().for_this_edition(), job);
+		} else {
+			assert_eq!(x265.validate(), Err(ValidationError::NeedsX265 { field: "heic.lossless" }));
+			assert_eq!(HeicSettings { chroma: HeicChroma::Yuv422, ..HeicSettings::default() }.validate(), Err(ValidationError::NeedsX265 { field: "heic.chroma" }));
+			assert_eq!(HeicSettings { bit_depth: HeicBitDepth::Ten, ..HeicSettings::default() }.validate(), Err(ValidationError::NeedsX265 { field: "heic.bit_depth" }));
+			let kept = job.for_this_edition();
+			assert_eq!(kept.heic, HeicSettings { preset: HeicPreset::Placebo, ..HeicSettings::default() }, "only what Kvazaar cannot write is reset; the tuning rides along");
+			assert_eq!(kept.validate(), Ok(()));
+		}
 	}
 }

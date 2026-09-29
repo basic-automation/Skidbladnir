@@ -128,6 +128,10 @@ print(f"no violations at or above {os.environ["THRESHOLD"]}.")
 audit "as it opens (WebP)" ""
 audit "with AVIF selected" \
 	'[...document.querySelectorAll("[aria-label=\"Output format\"] [role=radio]")][1].click(); await sleep(300); return "ok"'
+# HEIC's panel is the one that differs by edition: quality alone in the standard edition,
+# x265's controls in the GPL one.
+audit "with HEIC selected" \
+	'[...document.querySelectorAll("[aria-label=\"Output format\"] [role=radio]")][3].click(); await sleep(300); return "ok"'
 # Tauri's own drop event is the one way to hand the window a file without a native
 # dialog, and a preview needs a file.
 audit "with a preview on screen" \
