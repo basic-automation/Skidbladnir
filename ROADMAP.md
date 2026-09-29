@@ -270,12 +270,18 @@ The Electron app shells out to `cwebp.exe`. The Rust port should not.
       reading of the file, and fails if the decoder ever starts honouring the missing
       marker. The reference `cwebp` refuses this file too, now checked alongside the Adobe one.
 
-- [ ] **A WebP source converted to lossy WebP differs from `cwebp` by a few bytes**
-      (found 2026-09-28 by the metadata gate: 4 bytes on a 232-byte file, with no metadata
-      involved). For a lossy encode with no resize and no sharp YUV, `cwebp` decodes a WebP
-      input straight into a YUV 4:2:0 picture with libwebp's decoder (`imageio/webpdec.c`,
-      `use_argb` off), where Skidbladnir decodes to RGBA and lets the encoder convert. PAM,
-      PNG, JPEG and TIFF sources are unaffected: `cwebp` imports their RGB the same way we do.
+- [x] **A WebP source converted to lossy WebP matched `cwebp` in only 84 of 304 cases**
+      (found 2026-09-28 by the metadata gate as a 4-byte difference, fixed the same day).
+      For a lossy encode with no resize and no sharp YUV, `cwebp` decodes a WebP input
+      straight into a YUV 4:2:0 picture with libwebp's decoder (`imageio/webpdec.c`,
+      `use_argb` off); Skidbladnir decoded to RGBA and let the encoder convert back.
+      `encoder::encode_webp_source_with_progress` now takes `cwebp`'s route, for conversion
+      and preview alike (`source::encode_decoded`). PAM, PNG, JPEG and TIFF sources were
+      never affected: `cwebp` imports their RGB the way we do.
+      **Gate:** `matches_reference_cwebp_through_a_webp_file` in `tests/parity.rs` — the
+      whole 76-setting surface from four `cwebp`-written sources (lossless/lossy × alpha/
+      opaque): 304 of 304 byte-identical; with the old route, 220 diverge. The metadata
+      gate now compares WebP sources whole in both modes.
 
 ## Phase 3 — Frontend parity (Nuxt + Tailwind)
 
@@ -455,9 +461,9 @@ prettier subset.
       does. The preview keeps it too, so its size is the size written.
       **Gate:** `tests/metadata.rs` — 84 conversions (7 fixtures with hand-built metadata,
       incl. a 140 KB ICC profile in three out-of-order JPEG segments, × lossy/lossless × six
-      `-metadata` choices) against `cwebp -metadata`: 54 byte-identical whole files; the
-      JPEG sources (libjpeg decodes their pixels in `cwebp`, not us) and lossy output from
-      a WebP source (below) match chunk for chunk apart from the image data. A JPEG with a
+      `-metadata` choices) against `cwebp -metadata`: 60 byte-identical whole files; the
+      JPEG sources (libjpeg decodes their pixels in `cwebp`, not us) match chunk for chunk
+      apart from the image data. A JPEG with a
       missing ICC segment is refused as `cwebp` refuses it. Mutation-tested: unsorted ICC
       segments, a missing `VP8X` alpha flag, no RIFF padding, `ICCP` after the image and
       last-EXIF-wins each fail it.

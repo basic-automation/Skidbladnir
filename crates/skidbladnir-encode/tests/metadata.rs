@@ -213,10 +213,7 @@ fn keeps_metadata_exactly_as_cwebp_does() {
 	let webp_source = dir.join("webp, ICC + EXIF (cwebp-written).webp");
 	let status = Command::new(&cwebp).args(["-quiet", "-lossless", "-metadata", "all"]).arg(&seed).arg("-o").arg(&webp_source).status().expect("run cwebp");
 	assert!(status.success(), "cwebp must write the WebP fixture");
-	// Lossy output from a WebP source is not byte-identical even with no metadata: cwebp
-	// decodes a WebP input straight to YUV for a lossy encode (ROADMAP.md), so only its
-	// lossless output is compared whole.
-	sources.push(("webp, ICC + EXIF (cwebp-written)", webp_source, [false, true]));
+	sources.push(("webp, ICC + EXIF (cwebp-written)", webp_source, [true; 2]));
 
 	let jobs = [("lossy", WebpSettings::default()), ("lossless", WebpSettings { mode: Mode::Lossless, ..WebpSettings::default() })];
 	let mut whole = 0;

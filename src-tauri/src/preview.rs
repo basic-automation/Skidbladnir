@@ -79,7 +79,7 @@ pub fn preview(settings: &EncodeJob, input: &Path) -> Result<Preview, String> {
 	let bytes = std::fs::read(input).map_err(|error| format!("could not read `{}`: {error}", input.display()))?;
 	let encoded = match source::transcode_jpeg(settings, &bytes, &mut |_| true).map_err(|error| error.to_string())? {
 		Some(encoded) => encoded,
-		None => encode_rgba(settings, &image.as_rgba()).map_err(|error| error.to_string())?,
+		None => source::encode_decoded(settings, &bytes, &image, &mut |_| true).map_err(|error| error.to_string())?,
 	};
 	// With the metadata the conversion would keep, so the size shown is the size written
 	// and an ICC profile is shown as the webview colour-manages it.

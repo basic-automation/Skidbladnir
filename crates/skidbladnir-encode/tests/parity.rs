@@ -371,3 +371,70 @@ fn matches_reference_cwebp_across_png_colour_types() {
 	assert!(mismatches.is_empty(), "{} of {} PNG colour types diverged. This is a DECODER difference — check how `image` reduces the sample depth against what libpng does:\n  {}", mismatches.len(), fixtures.len(), mismatches.join("\n  "));
 	eprintln!("COLOUR-TYPE PARITY OK: {} PNG colour types matched the reference cwebp.", fixtures.len());
 }
+
+/// Parity through a **WebP file**: a WebP re-encoded to WebP, across the whole control
+/// surface, from lossless and lossy sources with and without alpha.
+///
+/// This caught a real divergence. For a plain lossy encode `cwebp` has libwebp decode a
+/// WebP input straight into YUV 4:2:0 (`imageio/webpdec.c`), never through RGB, and
+/// decoding to RGBA then letting the encoder convert landed a few bytes away (228 vs 232
+/// on the metadata gate's fixture). Both sides use the same libwebp decoder here, so any
+/// mismatch is the route the pixels take, not a decoder.
+#[test]
+fn matches_reference_cwebp_through_a_webp_file() {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let Some(cwebp) = reference_cwebp() else {
+		let message = "WEBP-SOURCE PARITY NOT RUN: no reference cwebp found.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+	let linked = skidbladnir_encode::encoder::linked_encoder_version();
+	if reference_version(&cwebp) != Some(linked) {
+		let message = "WEBP-SOURCE PARITY NOT RUN: reference cwebp and the linked libwebp are different versions.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	}
+
+	let (width, height) = (64_u32, 48_u32);
+	let translucent = fixture(width, height);
+	let opaque: Vec<u8> = translucent.chunks(4).flat_map(|p| [p[0], p[1], p[2], 255]).collect();
+	let dir = env::temp_dir().join(format!("skidbladnir-parity-webp-{}", std::process::id()));
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+
+	// The sources are written by cwebp itself, from PAM.
+	let mut sources = Vec::new();
+	for (alpha, pixels) in [("alpha", &translucent), ("opaque", &opaque)] {
+		let pam = dir.join(format!("{alpha}.pam"));
+		write_pam(&pam, pixels, width, height);
+		for (kind, flags) in [("lossless", &["-lossless"][..]), ("lossy", &["-q", "90"][..])] {
+			let webp = dir.join(format!("source-{kind}-{alpha}.webp"));
+			let run = Command::new(&cwebp).arg("-quiet").args(flags).arg(&pam).arg("-o").arg(&webp).output().expect("run cwebp");
+			assert!(run.status.success(), "cwebp must write the {kind} {alpha} source");
+			sources.push((format!("{kind} {alpha}"), webp));
+		}
+	}
+
+	let mut mismatches: Vec<String> = Vec::new();
+	let cases = cases();
+	for (source_name, source) in &sources {
+		for (index, (name, settings)) in cases.iter().enumerate() {
+			let theirs_path = dir.join(format!("cwebp-{index}.webp"));
+			let run = Command::new(&cwebp).args(cwebp_args(settings, source, &theirs_path)).output().expect("run the reference cwebp");
+			assert!(run.status.success(), "reference cwebp failed for `{name}` from {source_name}: {}", String::from_utf8_lossy(&run.stderr));
+			let expected = fs::read(&theirs_path).expect("read the reference output");
+			let ours_path = dir.join(format!("ours-{index}.webp"));
+			skidbladnir_encode::source::encode_file(settings, source, &ours_path).expect("our pipeline encodes");
+			let actual = fs::read(&ours_path).expect("read our output");
+			if actual != expected {
+				mismatches.push(format!("{source_name} source, `{name}`: ours {} bytes, cwebp {} bytes", actual.len(), expected.len()));
+			}
+		}
+	}
+
+	let _ = fs::remove_dir_all(&dir);
+	let total = sources.len() * cases.len();
+	assert!(mismatches.is_empty(), "{} of {total} WebP-file conversions diverged from cwebp:\n  {}", mismatches.len(), mismatches.join("\n  "));
+	eprintln!("WEBP-SOURCE PARITY OK: {total} WebP-to-WebP conversions ({} sources x {} settings) matched the reference cwebp byte for byte.", sources.len(), cases.len());
+}

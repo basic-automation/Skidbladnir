@@ -676,7 +676,7 @@ pub fn encode_file_with_progress(settings: &EncodeJob, input: &Path, output: &Pa
 			(Some(source), _) if source.animation.frames.len() > 1 => return Err(SourceError::Animated { path: input.to_path_buf() }.into()),
 			_ => {
 				let image = decode(input, &bytes)?;
-				let encoded = encode_rgba_with_progress(settings, &image.as_rgba(), on_progress)?;
+				let encoded = encode_decoded(settings, &bytes, &image, on_progress)?;
 				let encoded = crate::metadata::keep(settings, &bytes, encoded).map_err(|detail| SourceError::Metadata { path: input.to_path_buf(), detail })?;
 				(encoded, (image.width, image.height))
 			}
@@ -700,6 +700,18 @@ pub fn encode_file_with_progress(settings: &EncodeJob, input: &Path, output: &Pa
 	}
 	.unwrap_or(fallback);
 	Ok(Conversion { source_bytes, output_bytes: encoded.len() as u64, width, height })
+}
+
+/// Encode a decoded still image whose file was `bytes`. A WebP source goes to WebP the way
+/// `cwebp` takes it — decoded straight to YUV for a plain lossy encode (see
+/// [`crate::encoder::encode_webp_source_with_progress`]); everything else is the ordinary
+/// RGBA encode.
+///
+/// # Errors
+///
+/// As [`encode_rgba_with_progress`].
+pub fn encode_decoded(settings: &EncodeJob, bytes: &[u8], image: &SourceImage, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
+	if image.format == SourceFormat::Webp { crate::encoder::encode_webp_source_with_progress(settings, bytes, &image.as_rgba(), on_progress) } else { encode_rgba_with_progress(settings, &image.as_rgba(), on_progress) }
 }
 
 /// The lossless JPEG XL recompression of `bytes`, when the job asks for it and it applies:
