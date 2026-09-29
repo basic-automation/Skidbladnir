@@ -776,6 +776,47 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       3. The preview already decodes AVIF in Rust and shows lossless WebP, so JXL gets a
          preview on every web engine the same way, whatever the browsers do.
 
+## Phase 8 — Reference-CLI parity
+
+**The claim this phase makes true:** for a still image, every result the reference
+command-line encoder can produce, Skidbladnir can produce — `cwebp` for WebP, `avifenc`
+for AVIF, `cjxl` for JPEG XL, `heif-enc -e kvazaar` for HEIC — proven by parity tests that
+run the real tool and compare bytes. The owner's scoping (2026-09-28): AVIF moves to
+libavif + libaom so `avifenc`'s surface is reachable; HEIC stays on Kvazaar (x265 is GPL)
+and its claim says "with Kvazaar"; multi-image features are queued below, not built now.
+
+- [ ] WebP: every `cwebp` option, one field per flag (backend done; window pending).
+- [ ] JPEG XL: every `cjxl` option for a still image.
+- [ ] AVIF: libavif + libaom replace `ravif`; every `avifenc` option for a still image.
+- [ ] HEIC: every `heif-enc` option Kvazaar can honour.
+- [ ] Each format's window exposes its whole surface, and a saved preset round-trips it.
+- [ ] Decode JPEG input the way each reference tool does: libjpeg-turbo with its default
+      settings, and `avifenc`'s and `heif-enc`'s direct YCbCr copy when the output
+      subsampling matches. Until then a JPEG source can differ from the tools' decode by
+      a rounding step, so JPEG-to-X parity is not claimed byte for byte.
+- [ ] More input formats the tools read: PNM/PAM/PFM (all four), GIF (`cjxl`), Y4M
+      (`avifenc`, `heif-enc`), PGX and EXR (`cjxl`), raw pixels (`heif-enc --raw`).
+
+**Multi-image features the tools have, deferred by the owner (2026-09-28):**
+
+- [ ] Animation and image sequences: `avifenc` from Y4M or several inputs (timescale,
+      keyframe interval, repetition count), `cjxl` from GIF/APNG, `heif-enc -S`/`-V`, and
+      re-encoding animated WebP (see Phase 7).
+- [ ] Several inputs into one file: `avifenc --grid` from separate cells, `avifenc
+      --layered`, `heif-enc` with several images and `-T` tiled input.
+- [ ] `heif-enc` metadata tracks, MIME items, and the other experimental item types.
+
+**Formats:**
+
+- [ ] **SVG input and output** (owner request, 2026-09-28). *Input* means rasterising:
+      `resvg` is the obvious renderer (pure Rust, no C toolchain); it needs a size — the
+      SVG's own, or the resize — and a background for the areas SVG leaves transparent.
+      *Output* is the open design question, because a raster has no vectors to write:
+      either trace it (`vtracer`, which suits logos and flat art and mangles photographs)
+      or wrap the encoded raster in an SVG `<image>` (lossless in content, and pointless
+      unless something requires an `.svg`). Decide which one users mean before building
+      either; they may want both. Check each crate's licence against ISC first.
+
 ## Cross-cutting
 
 - [ ] The saving percentage is computed **twice** — `Conversion::saving_percent()` in Rust
