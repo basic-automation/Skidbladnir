@@ -25,6 +25,14 @@ repository = "https://github.com/basic-automation/Skidbladnir"
 # none of the advanced controls, which is why libwebp-sys does the encoding. Default
 # features are off so the binary carries the four formats the app accepts and no more.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tiff"] }
+# Read directly (the same version `image` uses) for the PNG text chunks that carry EXIF
+# and XMP, which `image` does not expose; see `src/metadata.rs`.
+png = "0.18"
+# JPEG input is decoded by libjpeg-turbo's decoder (inside MozJPEG, built from source with
+# `cc`, no CMake), because that is what `cwebp` decodes JPEGs with: any other decoder rounds
+# its IDCT and upsampling differently, and JPEG-to-WebP output drifts off `cwebp`'s. CMYK
+# JPEGs, which `cwebp` refuses, stay with `image`. See `decode_jpeg` in `src/source.rs`.
+mozjpeg = "0.10"
 base64 = "0.23"
 # The AVIF encoder (ROADMAP.md Phase 7). Rust over rav1e: no C library on any platform.
 # Default features on: `asm` is rav1e's hand-written SIMD, assembled with `nasm`, which is
@@ -47,6 +55,9 @@ pkg-config = "0.3"
 # The JPEG XL decoder: our own output for the preview and the reported dimensions, and
 # JPEG XL input. Pure Rust, so no second copy of libjxl's decoder is needed.
 jxl-oxide = { version = "0.12", default-features = false }
+# GIF input (ROADMAP.md Phase 4), read as raw indexed frames so the compositing onto the
+# canvas can follow libwebp's own gif2webp exactly rather than image-rs's rules.
+gif = { version = "0.14", default-features = false, features = ["std"] }
 # The version is not redundant with the path: a path dependency without one resolves as a
 # wildcard `*`, which `cargo deny` rejects and which would publish as an unbounded range.
 skidbladnir-encode = { path = "crates/skidbladnir-encode", version = "0.1" }

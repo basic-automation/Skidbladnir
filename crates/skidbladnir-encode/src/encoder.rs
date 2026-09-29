@@ -52,7 +52,7 @@
 
 use std::ffi::c_int;
 
-use libwebp_sys::{WEBP_ENCODER_ABI_VERSION, WebPConfig, WebPConfigInitInternal, WebPEncode, WebPMemoryWrite, WebPMemoryWriter, WebPMemoryWriterClear, WebPMemoryWriterInit, WebPPicture, WebPPictureCopy, WebPPictureFree, WebPPictureImportRGBA, WebPPictureInitInternal, WebPPictureRescale, WebPPreset, WebPValidateConfig};
+use libwebp_sys::{VP8StatusCode, WEBP_CSP_MODE, WEBP_DECODER_ABI_VERSION, WEBP_ENCODER_ABI_VERSION, WebPConfig, WebPConfigInitInternal, WebPDecode, WebPDecoderConfig, WebPEncCSP, WebPEncode, WebPFreeDecBuffer, WebPGetFeaturesInternal, WebPInitDecoderConfigInternal, WebPMemoryWrite, WebPMemoryWriter, WebPMemoryWriterClear, WebPMemoryWriterInit, WebPPicture, WebPPictureAlloc, WebPPictureCopy, WebPPictureFree, WebPPictureImportRGBA, WebPPictureInitInternal, WebPPictureRescale, WebPPreset, WebPValidateConfig, WebPYUVABuffer};
 use thiserror::Error;
 
 use crate::settings::{AlphaFiltering, EncodeJob, FilterType, Mode, OutputFormat, Preset, Resize, TargetMetric, WebpSettings};
@@ -135,7 +135,7 @@ pub enum EncodeError {
 /// `WebPConfigPreset` resets the whole config to the preset's values, keeping only the
 /// quality. Applying it first, as the Electron app's command line does, means the
 /// explicit controls that follow win — which is the behaviour a user of the old app saw.
-fn build_config(settings: &WebpSettings) -> Result<WebPConfig, EncodeError> {
+pub(crate) fn build_config(settings: &WebpSettings) -> Result<WebPConfig, EncodeError> {
 	settings.validate()?;
 
 	// WebPConfigInit: the inline helper libwebp declares in its header is not exported,
@@ -266,7 +266,7 @@ const fn unpack_version(packed: c_int) -> (i32, i32, i32) {
 ///
 /// The `*Internal` functions take this so a binary built against one libwebp cannot
 /// silently pass a differently-shaped struct to another.
-const fn abi_version() -> c_int {
+pub(crate) const fn abi_version() -> c_int {
 	WEBP_ENCODER_ABI_VERSION.cast_signed()
 }
 
@@ -283,7 +283,7 @@ const fn webp_preset(preset: Preset) -> WebPPreset {
 }
 
 /// Owns a `WebPPicture` so its buffers are released even if an encode step fails.
-struct Picture(WebPPicture);
+pub(crate) struct Picture(pub(crate) WebPPicture);
 
 impl Drop for Picture {
 	fn drop(&mut self) {
@@ -383,7 +383,7 @@ fn checked_dimensions(image: &RgbaImage<'_>) -> Result<(c_int, c_int), EncodeErr
 }
 
 /// Import RGBA pixels into a fresh ARGB `WebPPicture`.
-fn argb_picture(image: &RgbaImage<'_>) -> Result<Picture, EncodeError> {
+pub(crate) fn argb_picture(image: &RgbaImage<'_>) -> Result<Picture, EncodeError> {
 	let (width, height) = checked_dimensions(image)?;
 	let mut picture = Picture(unsafe {
 		let mut picture = std::mem::zeroed::<WebPPicture>();
@@ -477,6 +477,87 @@ fn encode_webp(job: &EncodeJob, image: &RgbaImage<'_>, on_progress: &mut dyn FnM
 		resize_picture(&mut picture, job.resize, &config)?;
 	}
 
+	encode_picture(&config, picture, on_progress)
+}
+
+/// Encode a WebP file's image to WebP the way `cwebp` does — which, for a WebP source,
+/// is not always the RGBA path [`encode_rgba_with_progress`] takes.
+///
+/// When the encode will not be on the ARGB path (lossy, no resize, no sharp YUV —
+/// `cwebp.c`'s `use_argb` decision), `cwebp` has libwebp decode the source **straight into
+/// a YUV 4:2:0 picture** (`imageio/webpdec.c`), skipping RGB entirely, so the encoder
+/// never converts it. Decoding to RGBA and converting back lands a few bytes away. This
+/// takes `cwebp`'s route; every other case, and any other output format, is the ordinary
+/// encode of `image`, which must be `webp` decoded.
+///
+/// # Errors
+///
+/// As [`encode_rgba_with_progress`], plus [`EncodeError::Libwebp`] if `webp` does not
+/// decode.
+pub fn encode_webp_source_with_progress(job: &EncodeJob, webp: &[u8], image: &RgbaImage<'_>, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
+	if job.format != OutputFormat::Webp {
+		return encode_rgba_with_progress(job, image, on_progress);
+	}
+	let config = build_config(&job.webp)?;
+	let resizing = !job.resize.for_source(image.width, image.height).is_noop();
+	if config.lossless == 1 || config.use_sharp_yuv == 1 || config.preprocessing > 0 || resizing {
+		return encode_rgba_with_progress(job, image, on_progress);
+	}
+	encode_picture(&config, yuv_picture(webp)?, on_progress)
+}
+
+/// Decode a WebP file into a fresh YUV 4:2:0 `WebPPicture` (with an alpha plane if the
+/// file has alpha), exactly as `cwebp`'s `ReadWebP` does when `use_argb` is off.
+fn yuv_picture(webp: &[u8]) -> Result<Picture, EncodeError> {
+	let decode_failed = EncodeError::Libwebp("WebPDecode");
+	let mut decoder = unsafe {
+		let mut config = std::mem::zeroed::<WebPDecoderConfig>();
+		if WebPInitDecoderConfigInternal(&raw mut config, WEBP_DECODER_ABI_VERSION.cast_signed()) == 0 {
+			return Err(EncodeError::Libwebp("WebPInitDecoderConfig"));
+		}
+		config
+	};
+	// SAFETY: `webp` is a live slice of `webp.len()` bytes for the whole call.
+	if unsafe { WebPGetFeaturesInternal(webp.as_ptr(), webp.len(), &raw mut decoder.input, WEBP_DECODER_ABI_VERSION.cast_signed()) } != VP8StatusCode::VP8_STATUS_OK {
+		return Err(decode_failed);
+	}
+	let has_alpha = decoder.input.has_alpha != 0;
+
+	let mut picture = Picture(unsafe {
+		let mut picture = std::mem::zeroed::<WebPPicture>();
+		if WebPPictureInitInternal(&raw mut picture, abi_version()) == 0 {
+			return Err(EncodeError::Libwebp("WebPPictureInit"));
+		}
+		picture
+	});
+	picture.0.use_argb = 0;
+	picture.0.width = decoder.input.width;
+	picture.0.height = decoder.input.height;
+	picture.0.colorspace = if has_alpha { WebPEncCSP::WEBP_YUV420A } else { WebPEncCSP::WEBP_YUV420 };
+	if unsafe { WebPPictureAlloc(&raw mut picture.0) } == 0 {
+		return Err(EncodeError::ImageTooLarge { width: decoder.input.width.cast_unsigned(), height: decoder.input.height.cast_unsigned() });
+	}
+
+	// The decoder writes into the picture's own planes, laid out as WebPPictureAlloc made
+	// them, and sized as cwebp sizes them.
+	let (height, uv_rows) = (picture.0.height, (picture.0.height + 1) / 2);
+	let plane = |stride: c_int, rows: c_int| usize::try_from(stride).unwrap_or(0) * usize::try_from(rows).unwrap_or(0);
+	decoder.output.colorspace = if has_alpha { WEBP_CSP_MODE::MODE_YUVA } else { WEBP_CSP_MODE::MODE_YUV };
+	decoder.output.u.YUVA = WebPYUVABuffer { y: picture.0.y, u: picture.0.u, v: picture.0.v, a: if has_alpha { picture.0.a } else { std::ptr::null_mut() }, y_stride: picture.0.y_stride, u_stride: picture.0.uv_stride, v_stride: picture.0.uv_stride, a_stride: if has_alpha { picture.0.a_stride } else { 0 }, y_size: plane(picture.0.y_stride, height), u_size: plane(picture.0.uv_stride, uv_rows), v_size: plane(picture.0.uv_stride, uv_rows), a_size: plane(picture.0.a_stride, height) };
+	decoder.output.is_external_memory = 1;
+	// SAFETY: the output buffer points into the picture's allocation with the sizes just
+	// computed from its own strides, and the picture outlives the call.
+	let status = unsafe { WebPDecode(webp.as_ptr(), webp.len(), &raw mut decoder) };
+	unsafe { WebPFreeDecBuffer(&raw mut decoder.output) };
+	if status != VP8StatusCode::VP8_STATUS_OK {
+		return Err(decode_failed);
+	}
+	Ok(picture)
+}
+
+/// Run `WebPEncode` on a prepared picture, with progress and cancellation, and return the
+/// file it wrote.
+fn encode_picture(config: &WebPConfig, mut picture: Picture, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
 	let mut writer = Writer(unsafe {
 		let mut writer = std::mem::zeroed::<WebPMemoryWriter>();
 		WebPMemoryWriterInit(&raw mut writer);
@@ -491,7 +572,7 @@ fn encode_webp(job: &EncodeJob, image: &RgbaImage<'_>, on_progress: &mut dyn FnM
 	picture.0.user_data = (&raw mut state).cast();
 	picture.0.progress_hook = Some(progress_trampoline);
 
-	let encoded = unsafe { WebPEncode(&raw const config, &raw mut picture.0) };
+	let encoded = unsafe { WebPEncode(config, &raw mut picture.0) };
 	// Clear the borrow of `state` from the picture before it goes out of scope.
 	picture.0.progress_hook = None;
 	picture.0.user_data = std::ptr::null_mut();
@@ -520,7 +601,7 @@ fn encode_webp(job: &EncodeJob, image: &RgbaImage<'_>, on_progress: &mut dyn FnM
 /// rescaling an opaque copy for the colour channels and the real picture for alpha, then
 /// reassembling. Without this, a lossless resize diverges from `cwebp` in every
 /// transparent pixel.
-fn resize_picture(picture: &mut Picture, resize: Resize, config: &WebPConfig) -> Result<(), EncodeError> {
+pub(crate) fn resize_picture(picture: &mut Picture, resize: Resize, config: &WebPConfig) -> Result<(), EncodeError> {
 	let target_w = i32::try_from(resize.width).map_err(|_| EncodeError::ImageTooLarge { width: resize.width, height: resize.height })?;
 	let target_h = i32::try_from(resize.height).map_err(|_| EncodeError::ImageTooLarge { width: resize.width, height: resize.height })?;
 

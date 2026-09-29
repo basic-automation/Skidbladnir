@@ -21,7 +21,7 @@ use std::{
 };
 
 use crate::{
-	encoder::{EncodeError, RgbaImage, rescale_rgba}, settings::{HeicSettings, Resize}
+	encoder::{EncodeError, RgbaImage, rescale_rgba}, metadata::Metadata, settings::{HeicSettings, Resize}
 };
 
 #[repr(C)]
@@ -46,6 +46,7 @@ struct HeifWriter {
 const HEIF_ERROR_OK: c_int = 0;
 const HEIF_COMPRESSION_HEVC: c_int = 1;
 const HEIF_COLORSPACE_RGB: c_int = 1;
+const HEIF_CHROMA_INTERLEAVED_RGB: c_int = 10;
 const HEIF_CHROMA_INTERLEAVED_RGBA: c_int = 11;
 const HEIF_CHANNEL_INTERLEAVED: c_int = 10;
 
@@ -68,6 +69,9 @@ unsafe extern "C" {
 	fn heif_image_release(image: *const Opaque);
 	fn heif_context_encode_image(ctx: *mut Opaque, image: *const Opaque, encoder: *mut Opaque, options: *const c_void, out_handle: *mut *mut Opaque) -> HeifError;
 	fn heif_context_write(ctx: *mut Opaque, writer: *mut HeifWriter, userdata: *mut c_void) -> HeifError;
+	fn heif_image_set_raw_color_profile(image: *mut Opaque, profile_type_fourcc: *const c_char, profile_data: *const c_void, profile_size: usize) -> HeifError;
+	fn heif_context_add_exif_metadata(ctx: *mut Opaque, handle: *const Opaque, data: *const c_void, size: c_int) -> HeifError;
+	fn heif_context_add_XMP_metadata(ctx: *mut Opaque, handle: *const Opaque, data: *const c_void, size: c_int) -> HeifError;
 	fn heif_context_read_from_memory_without_copy(ctx: *mut Opaque, data: *const c_void, size: usize, options: *const c_void) -> HeifError;
 	fn heif_context_get_primary_image_handle(ctx: *mut Opaque, out: *mut *mut Opaque) -> HeifError;
 	fn heif_image_handle_get_width(handle: *const Opaque) -> c_int;
@@ -174,19 +178,30 @@ unsafe extern "C" fn write_to_vec(_ctx: *mut Opaque, data: *const c_void, size: 
 /// Returns [`EncodeError`] if the settings are out of range, the buffer does not match its
 /// dimensions, the resize fails, libheif fails, or `on_progress` asked to stop.
 pub fn encode(settings: &HeicSettings, resize: Resize, image: &RgbaImage<'_>, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
+	encode_with_metadata(settings, resize, image, &Metadata::default(), on_progress)
+}
+
+/// [`encode`], carrying `metadata` into the file: an ICC profile as the image's colour
+/// profile (a `colr` box of type `prof`, labelling the pixels, which are in that space),
+/// EXIF and XMP as metadata items of the primary image, the way `heif-enc` stores them.
+///
+/// # Errors
+///
+/// As [`encode`], and when libheif rejects the metadata.
+pub fn encode_with_metadata(settings: &HeicSettings, resize: Resize, image: &RgbaImage<'_>, metadata: &Metadata, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
 	settings.validate()?;
 	let (width, height, pixels) = rescale_rgba(image, resize)?;
 	if !on_progress(0) {
 		return Err(EncodeError::Cancelled);
 	}
-	let output = encode_pixels(settings, width, height, &pixels).map_err(EncodeError::Heic)?;
+	let output = encode_pixels(settings, width, height, &pixels, metadata).map_err(EncodeError::Heic)?;
 	if !on_progress(100) {
 		return Err(EncodeError::Cancelled);
 	}
 	Ok(output)
 }
 
-fn encode_pixels(settings: &HeicSettings, width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, String> {
+fn encode_pixels(settings: &HeicSettings, width: u32, height: u32, pixels: &[u8], metadata: &Metadata) -> Result<Vec<u8>, String> {
 	let (Ok(w), Ok(h)) = (c_int::try_from(width), c_int::try_from(height)) else { return Err(format!("{width}x{height} is too large for HEIC")) };
 	let ctx = Context::new()?;
 	let encoder = hevc_encoder(&ctx)?;
@@ -194,28 +209,57 @@ fn encode_pixels(settings: &HeicSettings, width: u32, height: u32, pixels: &[u8]
 		// SAFETY: `encoder` is live; quality is validated to 0..=100.
 		check("heif_encoder_set_lossy_quality", unsafe { heif_encoder_set_lossy_quality(encoder, c_int::from(settings.quality)) })?;
 
+		// An opaque image goes as RGB, so the file carries no alpha plane and does not tell
+		// viewers it has transparency (as jxl.rs does for JPEG XL).
+		let opaque = pixels.as_chunks::<4>().0.iter().all(|pixel| pixel[3] == u8::MAX);
+		let (chroma, channels) = if opaque { (HEIF_CHROMA_INTERLEAVED_RGB, 3) } else { (HEIF_CHROMA_INTERLEAVED_RGBA, 4) };
 		let mut image = Image(ptr::null_mut());
 		// SAFETY: plain creation into a live out-pointer, then a plane of the declared size.
-		check("heif_image_create", unsafe { heif_image_create(w, h, HEIF_COLORSPACE_RGB, HEIF_CHROMA_INTERLEAVED_RGBA, &raw mut image.0) })?;
+		check("heif_image_create", unsafe { heif_image_create(w, h, HEIF_COLORSPACE_RGB, chroma, &raw mut image.0) })?;
 		check("heif_image_add_plane", unsafe { heif_image_add_plane(image.0, HEIF_CHANNEL_INTERLEAVED, w, h, 8) })?;
 		let mut stride = 0_usize;
 		// SAFETY: the plane was just added; libheif reports its stride.
 		let plane = unsafe { heif_image_get_plane2(image.0, HEIF_CHANNEL_INTERLEAVED, &raw mut stride) };
-		let row = width as usize * 4;
+		let row = width as usize * channels;
 		if plane.is_null() || stride < row {
 			return Err("libheif gave no usable image plane".to_owned());
 		}
-		for (y, source) in pixels.chunks_exact(row).enumerate() {
+		let mut line = Vec::with_capacity(row);
+		for (y, source) in pixels.chunks_exact(width as usize * 4).enumerate() {
+			line.clear();
+			if opaque {
+				line.extend(source.as_chunks::<4>().0.iter().flat_map(|&[r, g, b, _]| [r, g, b]));
+			} else {
+				line.extend_from_slice(source);
+			}
 			// SAFETY: row `y` of the plane starts at `y * stride` and holds at least `row`
 			// bytes, since `stride >= row` and the plane is `height` rows tall.
-			unsafe { ptr::copy_nonoverlapping(source.as_ptr(), plane.add(y * stride), row) };
+			unsafe { ptr::copy_nonoverlapping(line.as_ptr(), plane.add(y * stride), row) };
+		}
+
+		if let Some(icc) = metadata.icc.as_deref() {
+			// SAFETY: `image` is live; libheif copies the profile before returning.
+			check("heif_image_set_raw_color_profile", unsafe { heif_image_set_raw_color_profile(image.0, c"prof".as_ptr(), icc.as_ptr().cast(), icc.len()) })?;
 		}
 
 		let mut handle: *mut Opaque = ptr::null_mut();
 		// SAFETY: all objects are live; null options select the defaults.
 		check("heif_context_encode_image", unsafe { heif_context_encode_image(ctx.0, image.0, encoder, ptr::null(), &raw mut handle) })?;
+		// EXIF (libheif finds its TIFF header and writes the offset) and XMP belong to the
+		// image just encoded.
+		let added = (|| {
+			for (call, payload, add) in [("heif_context_add_exif_metadata", metadata.exif.as_deref(), heif_context_add_exif_metadata as unsafe extern "C" fn(*mut Opaque, *const Opaque, *const c_void, c_int) -> HeifError), ("heif_context_add_XMP_metadata", metadata.xmp.as_deref(), heif_context_add_XMP_metadata)] {
+				if let Some(payload) = payload {
+					let size = c_int::try_from(payload.len()).map_err(|_| format!("{call}: {} bytes is too large", payload.len()))?;
+					// SAFETY: `ctx` and `handle` are live; libheif copies the payload.
+					check(call, unsafe { add(ctx.0, handle, payload.as_ptr().cast(), size) })?;
+				}
+			}
+			Ok::<(), String>(())
+		})();
 		// SAFETY: the handle was returned by the encode above.
 		unsafe { heif_image_handle_release(handle) };
+		added?;
 
 		let mut output = Vec::new();
 		let mut writer = HeifWriter { writer_api_version: 1, write: write_to_vec };
@@ -285,7 +329,9 @@ pub fn dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
 
 #[cfg(test)]
 mod tests {
-	use super::{decode, dimensions, encode, linked_version};
+	use std::{ffi::c_int, ptr};
+
+	use super::{Context, Opaque, check, decode, dimensions, encode, heif_context_get_primary_image_handle, heif_context_read_from_memory_without_copy, heif_image_handle_release, linked_version};
 	use crate::{
 		encoder::{EncodeError, RgbaImage}, settings::{HeicSettings, Resize}
 	};
@@ -339,6 +385,32 @@ mod tests {
 			} else {
 				assert!(decoded[3] > 239, "an opaque pixel decoded with alpha {}", decoded[3]);
 			}
+		}
+	}
+
+	/// An opaque image carries no alpha plane; one with transparency does.
+	#[test]
+	fn only_transparent_images_carry_alpha() {
+		unsafe extern "C" {
+			fn heif_image_handle_has_alpha_channel(handle: *const Opaque) -> c_int;
+		}
+		let has_alpha = |bytes: &[u8]| {
+			let ctx = Context::new().expect("a context");
+			// SAFETY: `bytes` outlives the context, which is dropped at the end of the closure.
+			check("read", unsafe { heif_context_read_from_memory_without_copy(ctx.0, bytes.as_ptr().cast(), bytes.len(), ptr::null()) }).expect("read our own file");
+			let mut handle: *mut Opaque = ptr::null_mut();
+			check("primary", unsafe { heif_context_get_primary_image_handle(ctx.0, &raw mut handle) }).expect("a primary image");
+			// SAFETY: `handle` is live until released just below.
+			let alpha = unsafe { heif_image_handle_has_alpha_channel(handle) } != 0;
+			unsafe { heif_image_handle_release(handle) };
+			alpha
+		};
+		for (alpha, expected) in [(false, false), (true, true)] {
+			let pixels = fixture(64, 48, alpha);
+			let bytes = encode(&HeicSettings::default(), Resize::default(), &RgbaImage { width: 64, height: 48, pixels: &pixels }, &mut |_| true).expect("encode");
+			assert_eq!(has_alpha(&bytes), expected, "fixture with alpha {alpha}");
+			let (_, _, rgba) = decode(&bytes).expect("decode");
+			assert!(psnr(&pixels, &rgba) > 30.0, "alpha {alpha}: decodes at only {:.1} dB", psnr(&pixels, &rgba));
 		}
 	}
 

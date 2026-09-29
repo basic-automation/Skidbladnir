@@ -191,6 +191,30 @@ impl Resize {
 	}
 }
 
+/// Which of the source's metadata to carry into the output (`cwebp -metadata`).
+///
+/// All off by default, as in `cwebp` and the Electron app, so a default job still
+/// matches `cwebp` exactly. Applies to still images in every output format (AVIF keeps
+/// EXIF only); see [`crate::metadata`] and `source::encode_decoded`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct KeepMetadata {
+	/// The ICC colour profile. Without it, a wide-gamut photo's colours are read as sRGB.
+	pub icc: bool,
+	/// EXIF: camera, exposure, date, orientation, and location if the camera recorded it.
+	pub exif: bool,
+	/// XMP: editing history, ratings, rights and captions.
+	pub xmp: bool,
+}
+
+impl KeepMetadata {
+	/// Whether anything is to be kept.
+	#[must_use]
+	pub const fn any(self) -> bool {
+		self.icc || self.exif || self.xmp
+	}
+}
+
 /// Every WebP control the GUI exposes: the `cwebp` surface less the resize, which
 /// belongs to the [`EncodeJob`] because every output format shares it.
 ///
@@ -482,6 +506,9 @@ pub struct EncodeJob {
 	pub jxl: JxlSettings,
 	/// The HEIC controls, likewise.
 	pub heic: HeicSettings,
+	/// Which of the source's metadata to keep. Shared by every format; AVIF output keeps
+	/// EXIF only.
+	pub metadata: KeepMetadata,
 }
 
 impl From<WebpSettings> for EncodeJob {
@@ -510,12 +537,14 @@ impl<'de> Deserialize<'de> for EncodeJob {
 			jxl: JxlSettings,
 			#[serde(default)]
 			heic: HeicSettings,
+			#[serde(default)]
+			metadata: KeepMetadata,
 			#[serde(flatten)]
 			flat: WebpSettings,
 		}
 
 		let wire = Wire::deserialize(deserializer)?;
-		Ok(Self { format: wire.format, resize: wire.resize, webp: wire.webp.unwrap_or(wire.flat), avif: wire.avif, jxl: wire.jxl, heic: wire.heic })
+		Ok(Self { format: wire.format, resize: wire.resize, webp: wire.webp.unwrap_or(wire.flat), avif: wire.avif, jxl: wire.jxl, heic: wire.heic, metadata: wire.metadata })
 	}
 }
 
@@ -756,7 +785,7 @@ mod tests {
 	fn the_flat_shape_from_before_the_split_still_loads() {
 		let legacy = r#"{"mode":"lossless","preset":null,"quality":92,"alphaQuality":80,"alphaFiltering":"fast","method":6,"segments":2,"partitionLimit":10,"sns":30,"passes":3,"filter":"strong","filterStrength":40,"filterSharpness":5,"target":{"kind":"size","value":5000},"sharpYuv":true,"lowMemory":true,"multiThreading":false,"resize":{"width":640,"height":0}}"#;
 		let job: EncodeJob = serde_json::from_str(legacy).expect("the legacy shape deserializes");
-		let expected = EncodeJob { format: OutputFormat::Webp, avif: AvifSettings::default(), jxl: JxlSettings::default(), heic: HeicSettings::default(), resize: Resize { width: 640, height: 0, no_enlarge: false }, webp: WebpSettings { mode: Mode::Lossless, preset: None, quality: 92, alpha_quality: 80, alpha_filtering: Some(AlphaFiltering::Fast), method: 6, segments: 2, partition_limit: 10, sns: 30, passes: 3, filter: FilterType::Strong, filter_strength: 40, filter_sharpness: 5, target: Some(TargetMetric::Size(5000)), sharp_yuv: true, low_memory: true, multi_threading: false } };
+		let expected = EncodeJob { format: OutputFormat::Webp, avif: AvifSettings::default(), jxl: JxlSettings::default(), heic: HeicSettings::default(), metadata: KeepMetadata::default(), resize: Resize { width: 640, height: 0, no_enlarge: false }, webp: WebpSettings { mode: Mode::Lossless, preset: None, quality: 92, alpha_quality: 80, alpha_filtering: Some(AlphaFiltering::Fast), method: 6, segments: 2, partition_limit: 10, sns: 30, passes: 3, filter: FilterType::Strong, filter_strength: 40, filter_sharpness: 5, target: Some(TargetMetric::Size(5000)), sharp_yuv: true, low_memory: true, multi_threading: false } };
 		assert_eq!(job, expected);
 
 		// And it is rewritten in the current shape, which reads back identically.

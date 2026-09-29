@@ -29,6 +29,7 @@ use crate::settings::{EncodeJob, Mode, TargetMetric};
 /// lossless, autofilter, multi-threading, filter strength, filter sharpness, sharp YUV,
 /// alpha filtering, quality, alpha quality, method, low memory, segments, partition
 /// limit, target size, target PSNR, passes, SNS, resize, then the input path and `-o`.
+/// (`-metadata`, which the Electron app never sent, goes just before the input path.)
 ///
 /// Which of those appear depends on the mode, because the Electron renderer only sends
 /// the values that mode uses — the advanced lossy controls reach the encoder in
@@ -148,6 +149,15 @@ pub fn cwebp_args(job: &EncodeJob, input: &Path, output: &Path) -> Vec<OsString>
 		push(&job.resize.height.to_string());
 	}
 
+	// Not something the Electron app could send; it comes after everything it could, so
+	// every command line it produced is unchanged.
+	let keep = job.metadata;
+	if keep.any() {
+		let kinds: Vec<&str> = [(keep.icc, "icc"), (keep.exif, "exif"), (keep.xmp, "xmp")].into_iter().filter_map(|(on, name)| on.then_some(name)).collect();
+		args.push(OsString::from("-metadata"));
+		args.push(OsString::from(kinds.join(",")));
+	}
+
 	args.push(input.as_os_str().to_os_string());
 	args.push(OsString::from("-o"));
 	args.push(output.as_os_str().to_os_string());
@@ -159,7 +169,7 @@ mod tests {
 	use std::path::Path;
 
 	use super::cwebp_args;
-	use crate::settings::{AlphaFiltering, EncodeJob, FilterType, Mode, Preset, Resize, TargetMetric, WebpSettings};
+	use crate::settings::{AlphaFiltering, EncodeJob, FilterType, KeepMetadata, Mode, Preset, Resize, TargetMetric, WebpSettings};
 
 	/// Render an argument list as a space-joined string, so a failing assertion reads like
 	/// the command line it is about rather than a vector of `OsString`.
@@ -224,6 +234,20 @@ mod tests {
 		assert_eq!(line(&strong), "-strong -mt -f 65 -sharpness 3 -alpha_filter best -q 75 -alpha_q 100 -m 4 -segments 4 -partition_limit 0 -pass 6 -sns 50 in.png -o out.webp");
 		let simple = EncodeJob::from(WebpSettings { filter: FilterType::Simple, filter_strength: 10, filter_sharpness: 7, ..Default::default() });
 		assert_eq!(line(&simple), "-nostrong -mt -f 10 -sharpness 7 -alpha_filter best -q 75 -alpha_q 100 -m 4 -segments 4 -partition_limit 0 -pass 6 -sns 50 in.png -o out.webp");
+	}
+
+	/// `-metadata` names what to keep, after every flag the Electron app could send, and is
+	/// absent when nothing is kept — so every command line that app produced is unchanged.
+	#[test]
+	fn metadata_is_last_and_absent_by_default() {
+		let tail = |metadata: KeepMetadata| {
+			let job = EncodeJob { metadata, ..EncodeJob::default() };
+			line(&job).trim_end_matches(" in.png -o out.webp").rsplit(" -sns 50").next().unwrap_or_default().to_owned()
+		};
+		assert_eq!(tail(KeepMetadata::default()), "");
+		assert_eq!(tail(KeepMetadata { icc: true, ..KeepMetadata::default() }), " -metadata icc");
+		assert_eq!(tail(KeepMetadata { icc: true, exif: true, xmp: true }), " -metadata icc,exif,xmp");
+		assert_eq!(tail(KeepMetadata { exif: true, xmp: true, ..KeepMetadata::default() }), " -metadata exif,xmp");
 	}
 
 	/// Under auto filtering the encoder picks the strength, so the user's slider values

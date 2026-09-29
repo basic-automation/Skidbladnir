@@ -86,13 +86,14 @@ jobs:
         # Needed from Phase 1 onward, when src-tauri/ joins the workspace: Tauri 2 links
         # against webkit2gtk-4.1, and patchelf is what bundles the AppImage. The image
         # libraries are for building the reference cwebp below, which needs a PNG reader.
-        # libavif-bin is libavif's `avifdec`, the reference decoder for the AVIF gate, and
-        # libjxl-tools is libjxl's `djxl`, the reference decoder for the JPEG XL gate,
-        # and libheif-examples is libheif's `heif-dec`, the reference decoder for HEIC's.
+        # libavif-bin is libavif's `avifdec` and `avifenc`, for the AVIF gates; libjxl-tools
+        # is libjxl's `djxl`, the reference decoder for the JPEG XL gate; libheif-examples is
+        # libheif's `heif-dec`, the reference decoder for HEIC's; libgif-dev is for building
+        # the reference gif2webp.
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev libpng-dev libjpeg-dev libtiff-dev libavif-bin libjxl-tools libheif-examples libheif-plugin-libde265
+          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev libpng-dev libjpeg-dev libtiff-dev libgif-dev libavif-bin libjxl-tools libheif-examples libheif-plugin-libde265
 
       - uses: actions/setup-node@v7
         with:
@@ -162,9 +163,9 @@ jobs:
           # so the Homebrew prefix is added without overriding the makefile's own
           # variables — passing EXTRA_FLAGS on the command line would replace them.
           if [ "$RUNNER_OS" = "macOS" ]; then
-            # libavif provides `avifdec` for the AVIF gate, jpeg-xl `djxl` for JPEG XL's and
-            # libheif `heif-dec` for HEIC's.
-            brew install jpeg-turbo libpng libtiff libavif jpeg-xl libheif
+            # libavif provides `avifdec` and `avifenc` for the AVIF gates, jpeg-xl `djxl` for
+            # JPEG XL's and libheif `heif-dec` for HEIC's; giflib is for the reference gif2webp.
+            brew install jpeg-turbo libpng libtiff giflib libavif jpeg-xl libheif
             prefix=$(brew --prefix)
             export CPATH="$prefix/include${CPATH:+:$CPATH}"
             export LIBRARY_PATH="$prefix/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
@@ -172,8 +173,12 @@ jobs:
           version=$(cargo run -q --example libwebp-version --package skidbladnir-encode)
           echo "linked libwebp: $version"
           git clone --depth 1 --branch "v$version" https://github.com/webmproject/libwebp.git "$RUNNER_TEMP/libwebp"
-          make -C "$RUNNER_TEMP/libwebp" -f makefile.unix -j4 examples/cwebp
+          # img2webp is the reference for animated WebP (tests/animation.rs), gif2webp for
+          # GIF input (tests/gif.rs); gif2webp needs giflib, installed above.
+          make -C "$RUNNER_TEMP/libwebp" -f makefile.unix -j4 examples/cwebp examples/img2webp examples/gif2webp
           echo "SKIDBLADNIR_REFERENCE_CWEBP=$RUNNER_TEMP/libwebp/examples/cwebp" >> "$GITHUB_ENV"
+          echo "SKIDBLADNIR_REFERENCE_IMG2WEBP=$RUNNER_TEMP/libwebp/examples/img2webp" >> "$GITHUB_ENV"
+          echo "SKIDBLADNIR_REFERENCE_GIF2WEBP=$RUNNER_TEMP/libwebp/examples/gif2webp" >> "$GITHUB_ENV"
           echo "SKIDBLADNIR_REQUIRE_PARITY=1" >> "$GITHUB_ENV"
 
       - name: encoder parity against the reference cwebp
@@ -190,7 +195,11 @@ jobs:
         # avif_reference is the AVIF gate: libavif's avifdec decodes what we write, and
         # jxl_reference is JPEG XL's: libjxl's djxl decodes it and rebuilds recompressed JPEGs.
         # heic_reference is HEIC's: the runner's own libheif (`heif-dec`) decodes it.
-        run: cargo test --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_reference --test jxl_reference --test heic_reference -- --nocapture
+        # animation is the animated-WebP gate, byte for byte against img2webp.
+        # gif is the GIF-input gate, byte for byte against gif2webp. avif_input is the wide
+        # AVIF-input gate: avifenc writes 17 colour encodings and our decoder must agree
+        # with avifdec's reading of them. metadata is `-metadata`, against cwebp itself.
+        run: cargo test --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_reference --test jxl_reference --test heic_reference --test animation --test gif --test avif_input --test metadata -- --nocapture
 
   # Drives the real window over WebDriver. Separate from the compile matrix because it
   # needs a display, a WebKit driver and a full release build, and because a flaky display
