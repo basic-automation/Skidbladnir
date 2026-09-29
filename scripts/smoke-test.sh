@@ -108,8 +108,10 @@ check "IPC returns the linked encoder version" \
 	'const I=window.__TAURI_INTERNALS__; return await I.invoke("encoder_version")' 'libwebp encoder'
 check "IPC returns the core defaults" \
 	'const I=window.__TAURI_INTERNALS__; const s=await I.invoke("default_settings"); return s.format+" "+String(s.webp.quality)+"/"+String(s.webp.method)' 'webp 75/4'
-check "the lossy controls are present" \
-	'return String(document.querySelectorAll("[role=slider]").length)' '9'
+# cwebp's sliders in the default (lossy) state: quality, method, alpha quality, and the
+# nine lossy tuning ones.
+check "the WebP controls are present" \
+	'return String(document.querySelectorAll("[role=slider]").length)' '12'
 check "every focusable control has a name" \
 	'const f=[...document.querySelectorAll("button,input,[role=slider],[role=radio],[role=checkbox]")];
 	 const n=e=>e.getAttribute("aria-label")||e.closest("label")?.textContent?.trim()||e.textContent?.trim()||null;
@@ -168,7 +170,7 @@ check "refuses to overwrite the source" \
 check "switches to AVIF" \
 	'[...document.querySelectorAll("[aria-label=\"Output format\"] [role=radio]")][1].click();
 	 await new Promise(r => setTimeout(r, 300));
-	 return String(document.querySelectorAll("[role=slider]").length) + " " + String(!!document.querySelector("[aria-label=\"Encoding mode\"]"))' '3 false'
+	 return String(document.querySelectorAll("[role=slider]").length) + " " + String(!!document.querySelector("[aria-label=\"libwebp preset\"]"))' '1 false'
 check "converts an image to AVIF end to end" \
 	"const I=window.__TAURI_INTERNALS__;
 	 const s=await I.invoke('default_settings'); s.format='avif'; s.avif.speed=10;

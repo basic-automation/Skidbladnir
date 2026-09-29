@@ -93,6 +93,7 @@ pub enum Tiling {
 	#[default]
 	Automatic,
 	/// `--tilerowslog2` / `--tilecolslog2`, each `0..=6`.
+	#[serde(rename_all = "camelCase")]
 	Manual {
 		/// log2 of the number of tile rows.
 		rows_log2: u8,

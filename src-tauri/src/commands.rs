@@ -12,7 +12,7 @@ use std::{
 
 use serde::Serialize;
 use skidbladnir_encode::{
-	encoder::{linked_decoder_version, linked_encoder_version}, settings::EncodeJob, source::{Conversion, FoundImage, PathInspection, encode_file_with_progress, inspect_paths, mirrored_output_path, output_path_in, scan_directory}
+	encoder::{linked_decoder_version, linked_encoder_version}, settings::{EncodeJob, WebpSettings}, source::{Conversion, FoundImage, PathInspection, encode_file_with_progress, inspect_paths, mirrored_output_path, output_path_in, scan_directory}
 };
 use tauri::{Emitter as _, Manager as _};
 
@@ -31,7 +31,7 @@ pub fn encoder_version() -> String {
 	let (emajor, eminor, erevision) = linked_encoder_version();
 	let (dmajor, dminor, drevision) = linked_decoder_version();
 	let (jmajor, jminor, jpatch) = skidbladnir_encode::jxl::linked_version();
-	format!("Skidbladnir {} · libwebp encoder {emajor}.{eminor}.{erevision} · decoder {dmajor}.{dminor}.{drevision} · libjxl {jmajor}.{jminor}.{jpatch} · libheif {}", env!("CARGO_PKG_VERSION"), skidbladnir_encode::heic::linked_version())
+	format!("Skidbladnir {} · libwebp encoder {emajor}.{eminor}.{erevision} · decoder {dmajor}.{dminor}.{drevision} · libavif {} ({}) · libjxl {jmajor}.{jminor}.{jpatch} · libheif {}", env!("CARGO_PKG_VERSION"), skidbladnir_encode::avif::linked_version(), skidbladnir_encode::avif::linked_codecs(), skidbladnir_encode::heic::linked_version())
 }
 
 /// The settings a freshly opened window starts from.
@@ -61,6 +61,26 @@ pub fn validate_settings(settings: EncodeJob) -> Result<EncodeJob, String> {
 		Ok(()) => Ok(settings),
 		Err(error) => Err(error.to_string()),
 	}
+}
+
+/// `cwebp -preset`: every encoder control reset to one of libwebp's presets, keeping the
+/// quality. The window's preset button, applied here so the values are libwebp's own.
+#[tauri::command]
+#[must_use]
+pub fn webp_apply_preset(mut webp: WebpSettings, preset: skidbladnir_encode::settings::Preset) -> WebpSettings {
+	webp.apply_preset(preset);
+	webp
+}
+
+/// `cwebp -z`: lossless, with the method and quality of one of libwebp's ten levels.
+///
+/// # Errors
+///
+/// Returns the validation failure for a level above 9.
+#[tauri::command]
+pub fn webp_apply_lossless_level(mut webp: WebpSettings, level: u8) -> Result<WebpSettings, String> {
+	webp.apply_lossless_preset(level).map_err(|error| error.to_string())?;
+	Ok(webp)
 }
 
 /// The result of a conversion, as the UI needs it: what was written, and the before and
@@ -333,7 +353,7 @@ mod tests {
 		settings::{EncodeJob, WebpSettings}, source::Conversion
 	};
 
-	use super::{ConversionReport, convert_one, default_settings, encoder_version, inspect_dropped_paths, validate_settings};
+	use super::{ConversionReport, convert_one, default_settings, encoder_version, inspect_dropped_paths, validate_settings, webp_apply_lossless_level, webp_apply_preset};
 
 	/// The version string is shown to users, so it must actually contain versions rather
 	/// than a placeholder.
@@ -348,6 +368,16 @@ mod tests {
 	#[test]
 	fn default_settings_are_the_cores_defaults() {
 		assert_eq!(default_settings(), EncodeJob::default());
+	}
+
+	#[test]
+	fn the_webp_shorthands_set_the_controls_as_cwebp_does() {
+		let photo = webp_apply_preset(WebpSettings { quality: 42.0, ..Default::default() }, skidbladnir_encode::settings::Preset::Photo);
+		assert_eq!((photo.sns, photo.filter_strength, photo.preprocessing), (80, 30, 2));
+		assert!((photo.quality - 42.0).abs() < f32::EPSILON);
+		let z9 = webp_apply_lossless_level(WebpSettings::default(), 9).expect("level 9");
+		assert!(z9.lossless && z9.method == 6);
+		assert!(webp_apply_lossless_level(WebpSettings::default(), 10).is_err());
 	}
 
 	#[test]
