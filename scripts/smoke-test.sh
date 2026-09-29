@@ -252,7 +252,7 @@ check "refuses to cut an animation down to an AVIF still" \
 	"const I=window.__TAURI_INTERNALS__;
 	 const s=await I.invoke('default_settings'); s.format='avif';
 	 try { await I.invoke('convert_image', { settings: s, input: '$anim_in', outputDirectory: '$out_dir' }); return 'NOT REFUSED'; }
-	 catch (e) { return String(e); }" 'AVIF output takes still images only'
+	 catch (e) { return String(e); }" 'AVIF, JPEG XL and HEIC output take still images only'
 # GIF input, with the ImageMagick-written fixture from tests/gif.rs.
 cp "$(dirname "$0")/../crates/skidbladnir-encode/tests/fixtures/animated.gif" "$scratch/clip.gif"
 gif_in=$(app_path "$scratch/clip.gif")
