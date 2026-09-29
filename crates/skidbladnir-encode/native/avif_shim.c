@@ -19,9 +19,56 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <stdarg.h>
+
+#include "jpeglib.h"
+
 #include "avif/avif.h"
 #include "avifexif.h"
 #include "iccmaker.h"
+
+// avifenc's JPEG reader, apps/shared/avifjpeg.c, is compiled into this file as it is, but
+// reading from memory: the FILE it is handed is really a Memory, and libjpeg's stdio source
+// becomes its memory source. It keeps a JPEG's YCbCr planes when the settings allow, which
+// no decode to RGB can reproduce. What it prints goes nowhere, except that its last error
+// is kept to report.
+#if defined(_MSC_VER)
+#define SKID_THREAD_LOCAL __declspec(thread)
+#else
+#define SKID_THREAD_LOCAL _Thread_local
+#endif
+typedef struct Memory {
+	const unsigned char * data;
+	size_t size;
+} Memory;
+static SKID_THREAD_LOCAL char jpegMessage[256];
+static int jpegReport(const char * format, ...)
+{
+	va_list args;
+	va_start(args, format);
+	vsnprintf(jpegMessage, sizeof(jpegMessage), format, args);
+	va_end(args);
+	return 0;
+}
+static int jpegSilent(const char * format, ...)
+{
+	(void)format;
+	return 0;
+}
+// avifutil.c's, which cannot come along: it reads every other format too.
+void avifImageFixXMP(avifImage * image)
+{
+	if (image->xmp.size >= 2 && image->xmp.data[image->xmp.size - 1] == '\0' && image->xmp.data[image->xmp.size - 2] != '\0') {
+		--image->xmp.size;
+	}
+}
+#define jpeg_stdio_src(cinfo, file) jpeg_mem_src((cinfo), ((const Memory *)(const void *)(file))->data, (unsigned long)((const Memory *)(const void *)(file))->size)
+#define fprintf(stream, ...) jpegReport(__VA_ARGS__)
+#define printf(...) jpegSilent(__VA_ARGS__)
+#include "avifjpeg.c"
+#undef jpeg_stdio_src
+#undef fprintf
+#undef printf
 
 #define INVALID_QUALITY (-1)
 #define DEFAULT_QUALITY 60
@@ -57,6 +104,13 @@ typedef struct SkidAvifInput {
 	const uint8_t * xmp;
 	size_t xmp_size;
 	int exif_sets_transforms; // A JPEG's Exif: its orientation becomes irot/imir (avifjpeg.c).
+	// A JPEG file to read with avifenc's reader instead of everything above, and which of
+	// its metadata --ignore-* (or an override) leaves out.
+	const uint8_t * jpeg;
+	size_t jpeg_size;
+	int ignore_icc;
+	int ignore_exif;
+	int ignore_xmp;
 } SkidAvifInput;
 
 // avifenc's options. -1 (or 0 for the flags) means "not given on the command line".
@@ -468,135 +522,149 @@ int skid_avif_encode(const SkidAvifInput * in, const SkidAvifSettings * s, uint8
 	// avifPNGReadImpl, from png_read_update_info on.
 	const avifColorPrimaries primariesBefore = image->colorPrimaries;
 	const avifTransferCharacteristics transferBefore = image->transferCharacteristics;
-	image->width = in->width;
-	image->height = in->height;
-	image->yuvFormat = (avifPixelFormat)requestedFormat;
-	if (image->matrixCoefficients == AVIF_MATRIX_COEFFICIENTS_YCGCO_RO) {
-		fail(error, error_size, "YCgCo-Ro cannot be used with this input, because it has an even bit depth");
-		goto cleanup;
-	}
-	if (image->yuvFormat == AVIF_PIXEL_FORMAT_NONE) {
-		if (in->raw_gray) {
-			image->yuvFormat = AVIF_PIXEL_FORMAT_YUV400;
-		} else {
-			image->yuvFormat = AVIF_PIXEL_FORMAT_YUV444; // Identity, YCgCo-Re and the default all pick 4:4:4.
-		}
-	}
-	const int requestedDepth = s->depth_extension == 0 ? s->depth : 16;
-	image->depth = requestedDepth;
-	if (image->depth == 0) {
-		image->depth = in->rgb_depth == 8 ? 8 : 12;
-	}
-	if (image->matrixCoefficients == AVIF_MATRIX_COEFFICIENTS_YCGCO_RE) {
-		if (in->rgb_depth != 8) {
-			fail(error, error_size, "YCgCo-Re cannot be used on 16-bit input, because it adds two bits");
+	if (in->jpeg) {
+		// avifReadImage for a JPEG: avifjpeg.c, with the size limit avifenc passes.
+		const Memory memory = { in->jpeg, in->jpeg_size };
+		const avifChromaDownsampling downsampling = s->sharpyuv ? AVIF_CHROMA_DOWNSAMPLING_SHARP_YUV : AVIF_CHROMA_DOWNSAMPLING_AUTOMATIC;
+		jpegMessage[0] = '\0';
+		if (!avifJPEGReadInternal((FILE *)(void *)&memory, "input", image, (avifPixelFormat)requestedFormat, (uint32_t)(s->depth_extension == 0 ? s->depth : 16), downsampling, in->ignore_icc ? AVIF_TRUE : AVIF_FALSE, in->ignore_exif ? AVIF_TRUE : AVIF_FALSE, in->ignore_xmp ? AVIF_TRUE : AVIF_FALSE, s->progressive ? AVIF_TRUE : AVIF_FALSE, UINT32_MAX)) {
+			snprintf(error, error_size, "avifenc cannot read this JPEG: %s", jpegMessage[0] ? jpegMessage : "unknown error");
+			// Trim the newline avifenc's messages end with.
+			const size_t length = strlen(error);
+			if (length && error[length - 1] == '\n') error[length - 1] = '\0';
 			goto cleanup;
 		}
-		if (requestedDepth && requestedDepth != 10) {
-			fail(error, error_size, "YCgCo-Re needs a depth of 10");
-			goto cleanup;
-		}
-		image->depth = 10;
-	}
-
-	if (in->has_cicp) {
-		image->colorPrimaries = (avifColorPrimaries)in->cicp_primaries;
-		image->transferCharacteristics = (avifTransferCharacteristics)in->cicp_transfer;
-	} else if (in->icc_size) {
-		if (!in->raw_gray && image->yuvFormat == AVIF_PIXEL_FORMAT_YUV400) {
-			fail(error, error_size, "the image has a colour ICC profile, which does not fit 4:0:0 (grayscale) output; ignore the profile to encode it anyway");
-			goto cleanup;
-		}
-		if (in->raw_gray && image->yuvFormat != AVIF_PIXEL_FORMAT_YUV400) {
-			fail(error, error_size, "the image has a gray ICC profile, which does not fit colour output; ignore the profile to encode it anyway");
-			goto cleanup;
-		}
-		if (avifImageSetProfileICC(image, in->icc, in->icc_size) != AVIF_RESULT_OK) {
-			fail(error, error_size, "out of memory");
-			goto cleanup;
-		}
-	} else if (in->has_srgb) {
-		image->colorPrimaries = AVIF_COLOR_PRIMARIES_SRGB;
-		image->transferCharacteristics = AVIF_TRANSFER_CHARACTERISTICS_SRGB;
 	} else {
-		avifBool needToGenerateICC = AVIF_FALSE;
-		double gamma = 2.2;
-		float primaries[8];
-		if (in->has_gama) {
-			gamma = 1.0 / in->gama;
-			image->transferCharacteristics = avifTransferCharacteristicsFindByGamma((float)gamma);
-			if (image->transferCharacteristics == AVIF_TRANSFER_CHARACTERISTICS_UNKNOWN) {
-				needToGenerateICC = AVIF_TRUE;
-			}
+		image->width = in->width;
+		image->height = in->height;
+		image->yuvFormat = (avifPixelFormat)requestedFormat;
+		if (image->matrixCoefficients == AVIF_MATRIX_COEFFICIENTS_YCGCO_RO) {
+			fail(error, error_size, "YCgCo-Ro cannot be used with this input, because it has an even bit depth");
+			goto cleanup;
 		}
-		if (in->has_chrm) {
-			primaries[0] = (float)in->chrm[2];
-			primaries[1] = (float)in->chrm[3];
-			primaries[2] = (float)in->chrm[4];
-			primaries[3] = (float)in->chrm[5];
-			primaries[4] = (float)in->chrm[6];
-			primaries[5] = (float)in->chrm[7];
-			primaries[6] = (float)in->chrm[0];
-			primaries[7] = (float)in->chrm[1];
-			image->colorPrimaries = avifColorPrimariesFind(primaries, NULL);
-			if (image->colorPrimaries == AVIF_COLOR_PRIMARIES_UNKNOWN) {
-				needToGenerateICC = AVIF_TRUE;
-			}
-		} else {
-			avifColorPrimariesGetValues(AVIF_COLOR_PRIMARIES_BT709, primaries);
-		}
-		if (needToGenerateICC) {
-			image->colorPrimaries = AVIF_COLOR_PRIMARIES_UNSPECIFIED;
-			image->transferCharacteristics = AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED;
-			// A generator failure is a warning in avifenc, leaving no profile.
-			if (image->yuvFormat == AVIF_PIXEL_FORMAT_YUV400) {
-				(void)avifGenerateGrayICC(&image->icc, (float)gamma, &primaries[6]);
+		if (image->yuvFormat == AVIF_PIXEL_FORMAT_NONE) {
+			if (in->raw_gray) {
+				image->yuvFormat = AVIF_PIXEL_FORMAT_YUV400;
 			} else {
-				(void)avifGenerateRGBICC(&image->icc, (float)gamma, primaries);
+				image->yuvFormat = AVIF_PIXEL_FORMAT_YUV444; // Identity, YCgCo-Re and the default all pick 4:4:4.
 			}
 		}
-	}
+		const int requestedDepth = s->depth_extension == 0 ? s->depth : 16;
+		image->depth = requestedDepth;
+		if (image->depth == 0) {
+			image->depth = in->rgb_depth == 8 ? 8 : 12;
+		}
+		if (image->matrixCoefficients == AVIF_MATRIX_COEFFICIENTS_YCGCO_RE) {
+			if (in->rgb_depth != 8) {
+				fail(error, error_size, "YCgCo-Re cannot be used on 16-bit input, because it adds two bits");
+				goto cleanup;
+			}
+			if (requestedDepth && requestedDepth != 10) {
+				fail(error, error_size, "YCgCo-Re needs a depth of 10");
+				goto cleanup;
+			}
+			image->depth = 10;
+		}
 
-	avifRGBImageSetDefaults(&rgb, image);
-	rgb.chromaDownsampling = s->sharpyuv ? AVIF_CHROMA_DOWNSAMPLING_SHARP_YUV : AVIF_CHROMA_DOWNSAMPLING_AUTOMATIC;
-	rgb.depth = in->rgb_depth;
-	rgb.format = in->channels == 1 ? AVIF_RGB_FORMAT_GRAY : in->channels == 2 ? AVIF_RGB_FORMAT_GRAYA : in->channels == 3 ? AVIF_RGB_FORMAT_RGB : AVIF_RGB_FORMAT_RGBA;
-	if (avifRGBImageAllocatePixels(&rgb) != AVIF_RESULT_OK) {
-		fail(error, error_size, "out of memory");
-		goto cleanup;
-	}
-	{
-		const size_t row = (size_t)in->width * in->channels * (in->rgb_depth > 8 ? 2 : 1);
-		for (uint32_t y = 0; y < in->height; ++y) {
-			memcpy(rgb.pixels + (size_t)y * rgb.rowBytes, (const uint8_t *)in->pixels + (size_t)y * row, row);
+		if (in->has_cicp) {
+			image->colorPrimaries = (avifColorPrimaries)in->cicp_primaries;
+			image->transferCharacteristics = (avifTransferCharacteristics)in->cicp_transfer;
+		} else if (in->icc_size) {
+			if (!in->raw_gray && image->yuvFormat == AVIF_PIXEL_FORMAT_YUV400) {
+				fail(error, error_size, "the image has a colour ICC profile, which does not fit 4:0:0 (grayscale) output; ignore the profile to encode it anyway");
+				goto cleanup;
+			}
+			if (in->raw_gray && image->yuvFormat != AVIF_PIXEL_FORMAT_YUV400) {
+				fail(error, error_size, "the image has a gray ICC profile, which does not fit colour output; ignore the profile to encode it anyway");
+				goto cleanup;
+			}
+			if (avifImageSetProfileICC(image, in->icc, in->icc_size) != AVIF_RESULT_OK) {
+				fail(error, error_size, "out of memory");
+				goto cleanup;
+			}
+		} else if (in->has_srgb) {
+			image->colorPrimaries = AVIF_COLOR_PRIMARIES_SRGB;
+			image->transferCharacteristics = AVIF_TRANSFER_CHARACTERISTICS_SRGB;
+		} else {
+			avifBool needToGenerateICC = AVIF_FALSE;
+			double gamma = 2.2;
+			float primaries[8];
+			if (in->has_gama) {
+				gamma = 1.0 / in->gama;
+				image->transferCharacteristics = avifTransferCharacteristicsFindByGamma((float)gamma);
+				if (image->transferCharacteristics == AVIF_TRANSFER_CHARACTERISTICS_UNKNOWN) {
+					needToGenerateICC = AVIF_TRUE;
+				}
+			}
+			if (in->has_chrm) {
+				primaries[0] = (float)in->chrm[2];
+				primaries[1] = (float)in->chrm[3];
+				primaries[2] = (float)in->chrm[4];
+				primaries[3] = (float)in->chrm[5];
+				primaries[4] = (float)in->chrm[6];
+				primaries[5] = (float)in->chrm[7];
+				primaries[6] = (float)in->chrm[0];
+				primaries[7] = (float)in->chrm[1];
+				image->colorPrimaries = avifColorPrimariesFind(primaries, NULL);
+				if (image->colorPrimaries == AVIF_COLOR_PRIMARIES_UNKNOWN) {
+					needToGenerateICC = AVIF_TRUE;
+				}
+			} else {
+				avifColorPrimariesGetValues(AVIF_COLOR_PRIMARIES_BT709, primaries);
+			}
+			if (needToGenerateICC) {
+				image->colorPrimaries = AVIF_COLOR_PRIMARIES_UNSPECIFIED;
+				image->transferCharacteristics = AVIF_TRANSFER_CHARACTERISTICS_UNSPECIFIED;
+				// A generator failure is a warning in avifenc, leaving no profile.
+				if (image->yuvFormat == AVIF_PIXEL_FORMAT_YUV400) {
+					(void)avifGenerateGrayICC(&image->icc, (float)gamma, &primaries[6]);
+				} else {
+					(void)avifGenerateRGBICC(&image->icc, (float)gamma, primaries);
+				}
+			}
 		}
-	}
-	{
-		const avifResult converted = avifImageRGBToYUV(image, &rgb);
-		if (converted != AVIF_RESULT_OK) {
-			snprintf(error, error_size, "conversion to YUV failed: %s", avifResultToString(converted));
-			goto cleanup;
-		}
-	}
-	if (in->exif_size) {
-		// A PNG's Exif is copied as it is (avifpng.c avoids avifImageSetMetadataExif); a
-		// JPEG's goes through it, so its orientation becomes irot/imir (avifjpeg.c).
-		const avifResult set = in->exif_sets_transforms ? avifImageSetMetadataExif(image, in->exif, in->exif_size) : avifRWDataSet(&image->exif, in->exif, in->exif_size);
-		if (set != AVIF_RESULT_OK) {
+
+		avifRGBImageSetDefaults(&rgb, image);
+		rgb.chromaDownsampling = s->sharpyuv ? AVIF_CHROMA_DOWNSAMPLING_SHARP_YUV : AVIF_CHROMA_DOWNSAMPLING_AUTOMATIC;
+		rgb.depth = in->rgb_depth;
+		rgb.format = in->channels == 1 ? AVIF_RGB_FORMAT_GRAY : in->channels == 2 ? AVIF_RGB_FORMAT_GRAYA : in->channels == 3 ? AVIF_RGB_FORMAT_RGB : AVIF_RGB_FORMAT_RGBA;
+		if (avifRGBImageAllocatePixels(&rgb) != AVIF_RESULT_OK) {
 			fail(error, error_size, "out of memory");
 			goto cleanup;
 		}
-		// Both readers then reset the Exif orientation to 1; errors are ignored.
-		(void)avifSetExifOrientation(&image->exif, 1);
-	}
-	if (in->xmp_size) {
-		if (avifImageSetMetadataXMP(image, in->xmp, in->xmp_size) != AVIF_RESULT_OK) {
-			fail(error, error_size, "out of memory");
-			goto cleanup;
+		{
+			const size_t row = (size_t)in->width * in->channels * (in->rgb_depth > 8 ? 2 : 1);
+			for (uint32_t y = 0; y < in->height; ++y) {
+				memcpy(rgb.pixels + (size_t)y * rgb.rowBytes, (const uint8_t *)in->pixels + (size_t)y * row, row);
+			}
 		}
-		// avifImageFixXMP.
-		if (image->xmp.size >= 2 && image->xmp.data[image->xmp.size - 1] == '\0' && image->xmp.data[image->xmp.size - 2] != '\0') {
-			--image->xmp.size;
+		{
+			const avifResult converted = avifImageRGBToYUV(image, &rgb);
+			if (converted != AVIF_RESULT_OK) {
+				snprintf(error, error_size, "conversion to YUV failed: %s", avifResultToString(converted));
+				goto cleanup;
+			}
+		}
+		if (in->exif_size) {
+			// A PNG's Exif is copied as it is (avifpng.c avoids avifImageSetMetadataExif); a
+			// JPEG's goes through it, so its orientation becomes irot/imir (avifjpeg.c).
+			const avifResult set = in->exif_sets_transforms ? avifImageSetMetadataExif(image, in->exif, in->exif_size) : avifRWDataSet(&image->exif, in->exif, in->exif_size);
+			if (set != AVIF_RESULT_OK) {
+				fail(error, error_size, "out of memory");
+				goto cleanup;
+			}
+			// Both readers then reset the Exif orientation to 1; errors are ignored.
+			(void)avifSetExifOrientation(&image->exif, 1);
+		}
+		if (in->xmp_size) {
+			if (avifImageSetMetadataXMP(image, in->xmp, in->xmp_size) != AVIF_RESULT_OK) {
+				fail(error, error_size, "out of memory");
+				goto cleanup;
+			}
+			// avifImageFixXMP.
+			if (image->xmp.size >= 2 && image->xmp.data[image->xmp.size - 1] == '\0' && image->xmp.data[image->xmp.size - 2] != '\0') {
+				--image->xmp.size;
+			}
 		}
 	}
 	// avifInputReadImage with --target-size caches the image it read and hands the encoder

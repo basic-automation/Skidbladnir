@@ -28,16 +28,96 @@
 //! encoder the system library has. `SKIDBLADNIR_LIBHEIF=vendored` refuses that fallback.
 //! `native/heic_shim.c`, `heif-enc`'s still-image path as a function, is compiled against
 //! whichever libheif's headers.
+//!
+//! libjpeg-turbo (IJG and BSD-3) decodes JPEG input, because every reference tool reads JPEG
+//! through it and another decoder rounds differently. It is built statically from
+//! `third_party/libjpeg-turbo` like libavif, with the libjpeg 8 API the distributions ship,
+//! or taken from the system with `SKIDBLADNIR_LIBJPEG=system` or without `CMake`. The
+//! AVIF and HEIC shims compile `avifenc`'s and `heif-enc`'s own JPEG readers against it, and
+//! `native/jpeg_shim.c` is the plain decode `cwebp` and `cjxl` do.
 
 use std::{env, path::PathBuf, process::Command};
 
 fn main() {
+	let jpeg = Libjpeg::build();
 	link_libjxl();
-	link_libavif();
-	link_libheif();
+	link_libavif(&jpeg);
+	link_libheif(&jpeg);
+	let mut shim = cc::Build::new();
+	shim.file("native/jpeg_shim.c").warnings(false);
+	jpeg.include(&mut shim);
+	shim.compile("skidjpeg");
+	println!("cargo:rerun-if-changed=native/jpeg_shim.c");
+	// After every shim that calls it, so a static libjpeg resolves their references.
+	jpeg.link();
 }
 
-fn link_libavif() {
+/// libjpeg-turbo: where its headers are, and how to link it once everything using it is
+/// compiled.
+struct Libjpeg {
+	includes: Vec<PathBuf>,
+	/// The directory of a static build, or `None` for the system library.
+	static_dir: Option<PathBuf>,
+	/// The system library's `pkg-config` result, linked last like the static one.
+	system: Option<pkg_config::Library>,
+}
+
+impl Libjpeg {
+	fn build() -> Self {
+		println!("cargo:rerun-if-env-changed=SKIDBLADNIR_LIBJPEG");
+		let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"));
+		let source = manifest.join("../../third_party/libjpeg-turbo");
+		let choice = env::var("SKIDBLADNIR_LIBJPEG").unwrap_or_default();
+		let have_cmake = Command::new("cmake").arg("--version").output().is_ok_and(|out| out.status.success());
+		let system = match choice.as_str() {
+			"system" => true,
+			"vendored" => false,
+			_ => !(have_cmake && source.join("CMakeLists.txt").exists()),
+		};
+		if system {
+			println!("cargo:warning=linking the SYSTEM libjpeg through pkg-config (no CMake, no third_party/libjpeg-turbo, or SKIDBLADNIR_LIBJPEG=system); release builds link a static libjpeg-turbo instead");
+			let library = pkg_config::Config::new().cargo_metadata(false).probe("libjpeg").unwrap_or_else(|error| panic!("JPEG input needs libjpeg: install CMake and check out third_party/libjpeg-turbo, or install the system libjpeg-turbo development files. {error}"));
+			return Self { includes: library.include_paths.clone(), static_dir: None, system: Some(library) };
+		}
+		// The static library alone; SIMD when NASM is there, which only changes the speed.
+		let built = cmake::Config::new(&source)
+			.profile("Release")
+			.define("ENABLE_SHARED", "OFF")
+			.define("ENABLE_STATIC", "ON")
+			.define("WITH_JPEG8", "ON")
+			.define("WITH_TURBOJPEG", "OFF")
+			.define("WITH_TOOLS", "OFF")
+			.define("WITH_TESTS", "OFF")
+			.define("CMAKE_POSITION_INDEPENDENT_CODE", "ON")
+			.define("CMAKE_INSTALL_LIBDIR", "lib")
+			.build();
+		Self { includes: vec![built.join("include")], static_dir: Some(built.join("lib")), system: None }
+	}
+
+	fn include(&self, build: &mut cc::Build) {
+		for include in &self.includes {
+			build.include(include);
+		}
+	}
+
+	fn link(&self) {
+		if let Some(dir) = &self.static_dir {
+			println!("cargo:rustc-link-search=native={}", dir.display());
+			let msvc = env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc");
+			println!("cargo:rustc-link-lib=static={}", if msvc { "jpeg-static" } else { "jpeg" });
+		}
+		if let Some(library) = &self.system {
+			for path in &library.link_paths {
+				println!("cargo:rustc-link-search=native={}", path.display());
+			}
+			for lib in &library.libs {
+				println!("cargo:rustc-link-lib={lib}");
+			}
+		}
+	}
+}
+
+fn link_libavif(jpeg: &Libjpeg) {
 	println!("cargo:rerun-if-env-changed=SKIDBLADNIR_LIBAVIF");
 	println!("cargo:rerun-if-changed=native/avif_shim.c");
 	let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"));
@@ -52,7 +132,10 @@ fn link_libavif() {
 	};
 
 	let mut shim = cc::Build::new();
-	shim.file(manifest.join("native/avif_shim.c")).include(third_party.join("libavif/apps/shared")).file(third_party.join("libavif/apps/shared/iccmaker.c")).file(third_party.join("libavif/apps/shared/avifexif.c")).warnings(false);
+	// avif_shim.c includes avifenc's JPEG reader (apps/shared/avifjpeg.c) itself; iccjpeg.c
+	// is that reader's ICC helper.
+	shim.file(manifest.join("native/avif_shim.c")).include(third_party.join("libavif/apps/shared")).include(third_party.join("libavif/third_party/iccjpeg")).file(third_party.join("libavif/apps/shared/iccmaker.c")).file(third_party.join("libavif/apps/shared/avifexif.c")).file(third_party.join("libavif/third_party/iccjpeg/iccjpeg.c")).warnings(false);
+	jpeg.include(&mut shim);
 
 	if system {
 		println!("cargo:warning=linking the SYSTEM libavif through pkg-config (no CMake, no third_party/libavif and third_party/aom, or SKIDBLADNIR_LIBAVIF=system); release builds link a static libavif and libaom instead");
@@ -113,7 +196,7 @@ fn link_libavif() {
 	println!("cargo:rustc-cfg=skidbladnir_vendored_libavif");
 }
 
-fn link_libheif() {
+fn link_libheif(jpeg: &Libjpeg) {
 	println!("cargo:rustc-check-cfg=cfg(skidbladnir_system_libheif)");
 	println!("cargo:rustc-check-cfg=cfg(skidbladnir_vendored_libavif)");
 	println!("cargo:rerun-if-env-changed=SKIDBLADNIR_LIBHEIF");
@@ -129,9 +212,17 @@ fn link_libheif() {
 	// It is compiled first so the linker sees its references before the library.
 	let mut shim = cc::Build::new();
 	shim.file(manifest.join("native/heic_shim.c")).warnings(false);
+	jpeg.include(&mut shim);
+	// heif-enc's JPEG reader (heifio/decoder_jpeg.cc), included by this C++ file.
+	let mut reader = cc::Build::new();
+	reader.cpp(true).std("c++17").file(manifest.join("native/heic_jpeg.cc")).include(manifest.join("../../third_party/libheif/heifio")).include(manifest.join("../../third_party/libheif/libheif")).warnings(false);
+	jpeg.include(&mut reader);
+	println!("cargo:rerun-if-changed=native/heic_jpeg.cc");
 	if built {
 		shim.include(prefix.join("include"));
+		reader.include(prefix.join("include"));
 		shim.compile("skidheic");
+		reader.compile("skidheicjpeg");
 		println!("cargo:rustc-link-search=native={}", lib.display());
 		println!("cargo:rustc-link-lib=dylib=heif");
 		// This package's own tests find the library where it was built. The app binary sets
@@ -146,8 +237,10 @@ fn link_libheif() {
 		let library = pkg_config::Config::new().atleast_version("1.23").cargo_metadata(false).probe("libheif").unwrap_or_else(|error| panic!("HEIC needs libheif 1.23: run scripts/build-libheif.sh, or install the system libheif development files. {error}"));
 		for include in &library.include_paths {
 			shim.include(include);
+			reader.include(include);
 		}
 		shim.compile("skidheic");
+		reader.compile("skidheicjpeg");
 		pkg_config::Config::new().atleast_version("1.23").probe("libheif").expect("probed above");
 		println!("cargo:rustc-cfg=skidbladnir_system_libheif");
 	}

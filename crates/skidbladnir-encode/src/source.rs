@@ -218,6 +218,9 @@ pub fn load(path: &Path) -> Result<SourceImage, SourceError> {
 		SourceFormat::Avif => Decoded::rgba(decode_avif(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?),
 		SourceFormat::Heic => Decoded::rgba(crate::heic::decode(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?),
 		SourceFormat::Jxl => Decoded::rgba(crate::jxl::decode(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?),
+		// libjpeg-turbo, as every reference tool decodes JPEG; a CMYK JPEG, which cwebp and
+		// cjxl refuse, falls through to the `image` crate.
+		SourceFormat::Jpeg if let Some(jpeg) = crate::jpeg::decode(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })? => Decoded::jpeg(&jpeg),
 		SourceFormat::Png | SourceFormat::Jpeg | SourceFormat::Tiff => {
 			let image = image::load_from_memory(&bytes).map_err(|error| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: error.to_string() })?;
 			Decoded::from_image(image, format == SourceFormat::Png && png_has_trns(&bytes))
@@ -243,6 +246,12 @@ impl Decoded {
 	fn rgba((width, height, pixels): (u32, u32, Vec<u8>)) -> Self {
 		let has_alpha = pixels.as_chunks::<4>().0.iter().any(|pixel| pixel[3] != 255);
 		Self { width, height, pixels, deep: None, gray: false, has_alpha }
+	}
+
+	/// A libjpeg-turbo decode: gray or RGB, opaque.
+	fn jpeg(jpeg: &crate::jpeg::Decoded) -> Self {
+		let pixels = if jpeg.gray { jpeg.samples.iter().flat_map(|&v| [v, v, v, 255]).collect() } else { jpeg.samples.as_chunks::<3>().0.iter().flat_map(|&[r, g, b]| [r, g, b, 255]).collect() };
+		Self { width: jpeg.width, height: jpeg.height, pixels, deep: None, gray: jpeg.gray, has_alpha: false }
 	}
 
 	/// An `image` decode, keeping what its colour type says about the source. A palette

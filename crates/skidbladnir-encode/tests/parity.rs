@@ -521,3 +521,56 @@ fn zlib(data: &[u8]) -> Vec<u8> {
 	encoder.write_all(data).expect("compress");
 	encoder.finish().expect("compress")
 }
+
+/// JPEG input: `cwebp` decodes through libjpeg-turbo, and so do we, so the whole file path
+/// must agree at every chroma sampling, and the metadata `cwebp -metadata` copies out of
+/// a JPEG with it. The fixtures are the ones the other formats' parity tests share (see
+/// `tests/common/mod.rs`); a CMYK JPEG is not here because `cwebp` refuses it (see
+/// `tests/cmyk_jpeg.rs`).
+#[test]
+fn matches_reference_cwebp_through_jpeg_files() {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let Some(cwebp) = reference_cwebp() else {
+		let message = "JPEG PARITY NOT RUN: no reference cwebp found.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+	if reference_version(&cwebp) != Some(skidbladnir_encode::encoder::linked_encoder_version()) {
+		let message = "JPEG PARITY NOT RUN: reference cwebp and the linked libwebp are different versions.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	}
+	let jpegs: [(&str, &[u8]); 9] = [("4:2:0", include_bytes!("fixtures/jpeg-420.jpg")), ("4:4:4", include_bytes!("fixtures/jpeg-444.jpg")), ("4:2:2", include_bytes!("fixtures/jpeg-422.jpg")), ("4:4:0", include_bytes!("fixtures/jpeg-440.jpg")), ("4:1:1", include_bytes!("fixtures/jpeg-411.jpg")), ("gray", include_bytes!("fixtures/jpeg-gray.jpg")), ("progressive", include_bytes!("fixtures/jpeg-progressive.jpg")), ("RGB-coded", include_bytes!("fixtures/jpeg-rgb.jpg")), ("4:2:0, odd size", include_bytes!("fixtures/jpeg-420-odd.jpg"))];
+	// Exif, XMP and a one-segment ICC profile, inserted after SOI.
+	let segment = |marker: u8, data: &[u8]| [&[0xff, marker][..], &u16::try_from(data.len() + 2).expect("small").to_be_bytes(), data].concat();
+	let icc = [b"ICC_PROFILE\0\x01\x01".as_slice(), &[0_u8; 132]].concat();
+	let exif = b"Exif\0\0MM\0*\0\0\0\x08\0\0\0\0\0\0";
+	let tagged = [&jpegs[0].1[..2], &segment(0xe1, exif), &segment(0xe1, b"http://ns.adobe.com/xap/1.0/\0<x:xmpmeta/>"), &segment(0xe2, &icc), &jpegs[0].1[2..]].concat();
+
+	let dir = env::temp_dir().join(format!("skidbladnir-parity-jpeg-{}", std::process::id()));
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+	let cases = [("default lossy", EncodeJob::default()), ("lossless", EncodeJob::from(WebpSettings { lossless: true, ..Default::default() })), ("sharp yuv", EncodeJob::from(WebpSettings { sharp_yuv: true, ..Default::default() })), ("resize 32x0", EncodeJob { resize: Resize::to(32, 0), ..Default::default() }), ("-metadata all", EncodeJob::from(WebpSettings { metadata: WebpMetadata { exif: true, icc: true, xmp: true }, ..Default::default() }))];
+	let mut mismatches: Vec<String> = Vec::new();
+	let mut total = 0;
+	for (name, bytes) in jpegs.iter().map(|(name, bytes)| (*name, *bytes)).chain([("4:2:0 with Exif, XMP and ICC", tagged.as_slice())]) {
+		let input = dir.join(format!("{}.jpg", name.replace([' ', ':', ','], "_")));
+		fs::write(&input, bytes).expect("write the fixture");
+		for (label, settings) in &cases {
+			total += 1;
+			let theirs = dir.join(format!("cwebp-{total}.webp"));
+			let run = Command::new(&cwebp).args(cwebp_args(settings, &input, &theirs)).output().expect("run the reference cwebp");
+			assert!(run.status.success(), "reference cwebp failed for `{name}, {label}`: {}", String::from_utf8_lossy(&run.stderr));
+			let ours = dir.join(format!("ours-{total}.webp"));
+			skidbladnir_encode::source::encode_file(settings, &input, &ours).expect("our pipeline encodes");
+			let (expected, actual) = (fs::read(&theirs).expect("read reference"), fs::read(&ours).expect("read ours"));
+			if actual != expected {
+				mismatches.push(format!("`{name}, {label}`: ours {} bytes, cwebp {} bytes", actual.len(), expected.len()));
+			}
+		}
+	}
+	let _ = fs::remove_dir_all(&dir);
+	assert!(mismatches.is_empty(), "{} of {total} JPEG conversions diverged from cwebp:\n  {}", mismatches.len(), mismatches.join("\n  "));
+	eprintln!("JPEG PARITY OK: {total} JPEG conversions matched the reference cwebp end to end.");
+}

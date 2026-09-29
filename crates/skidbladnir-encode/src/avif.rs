@@ -6,7 +6,8 @@
 //! module does what `avifenc`'s PNG reader does before that (`apps/shared/avifpng.c`):
 //! the samples at the PNG's own depth and channels, its colour chunks in `avifenc`'s order
 //! of precedence, and its Exif and XMP by `avifenc`'s rules. It then hands the shim two
-//! plain structs.
+//! plain structs. A JPEG is read by `avifenc`'s own JPEG reader, compiled into the shim,
+//! because it copies the JPEG's YCbCr planes in unconverted when the settings allow.
 //!
 //! `tests/avif_parity.rs` compares the result with a reference `avifenc` built from the
 //! same libavif and libaom, byte for byte.
@@ -15,7 +16,7 @@
 //! start and the end of a file, and a cancel mid-encode is honoured by discarding the result.
 
 use std::{
-	ffi::{CStr, CString, c_char, c_int}, ptr
+	borrow::Cow, ffi::{CStr, CString, c_char, c_int}, ptr
 };
 
 use crate::{
@@ -51,6 +52,11 @@ struct SkidAvifInput {
 	xmp: *const u8,
 	xmp_size: usize,
 	exif_sets_transforms: c_int,
+	jpeg: *const u8,
+	jpeg_size: usize,
+	ignore_icc: c_int,
+	ignore_exif: c_int,
+	ignore_xmp: c_int,
 }
 
 #[repr(C)]
@@ -258,9 +264,9 @@ impl Input {
 		input
 	}
 
-	/// A JPEG, converted through RGB. `avifenc` copies a JPEG's YCbCr planes straight in
-	/// when it can; decoding here goes through RGB instead, which is one of the two
-	/// differences ROADMAP.md Phase 8 lists for JPEG input.
+	/// A cropped or resized JPEG, whose pixels no longer are the file's: they go through
+	/// RGB, with the file's metadata read the way `avifjpeg.c` reads it. A JPEG as it is
+	/// goes to `avifenc`'s own reader in the shim instead.
 	fn jpeg(source: &SourceImage, settings: &AvifSettings) -> Self {
 		let markers = jpeg_markers(&source.bytes);
 		let channels = if source.gray { 1 } else { 3 };
@@ -328,20 +334,24 @@ pub fn encode(job: &EncodeJob, source: &SourceImage, on_progress: &mut dyn FnMut
 	if !on_progress(0) {
 		return Err(EncodeError::Cancelled);
 	}
+	// A JPEG as it is on disk goes to avifenc's own reader; cropped or resized, its pixels
+	// are all there is.
+	let jpeg = (source.format == SourceFormat::Jpeg && !source.bytes.is_empty() && matches!(source, Cow::Borrowed(_))).then_some(source.bytes.as_slice());
 	let input = match source.format {
+		_ if jpeg.is_some() => Input::default(),
 		_ if source.bytes.is_empty() => Input::other(&source, settings),
 		SourceFormat::Png => Input::png(&source, settings),
 		SourceFormat::Jpeg => Input::jpeg(&source, settings),
 		_ => Input::other(&source, settings),
 	};
-	let output = encode_input(settings, source.width, source.height, &input)?;
+	let output = encode_input(settings, source.width, source.height, &input, jpeg)?;
 	if !on_progress(100) {
 		return Err(EncodeError::Cancelled);
 	}
 	Ok(output)
 }
 
-fn encode_input(s: &AvifSettings, width: u32, height: u32, input: &Input) -> Result<Vec<u8>, EncodeError> {
+fn encode_input(s: &AvifSettings, width: u32, height: u32, input: &Input, jpeg: Option<&[u8]>) -> Result<Vec<u8>, EncodeError> {
 	let [icc_file, exif_file, xmp_file] = s.metadata_files().map(|path| path.map(|path| std::fs::read(path).map_err(|error| EncodeError::Avif(format!("could not read `{}`: {error}", path.display())))).transpose());
 	let (icc_file, exif_file, xmp_file) = (icc_file?, exif_file?, xmp_file?);
 	let options: Vec<(CString, CString)> = s.codec_options.iter().map(|option| Ok((CString::new(option.key.clone())?, CString::new(option.value.clone())?))).collect::<Result<_, std::ffi::NulError>>().map_err(|_| EncodeError::Avif("a codec option contains a NUL byte".to_owned()))?;
@@ -351,7 +361,7 @@ fn encode_input(s: &AvifSettings, width: u32, height: u32, input: &Input) -> Res
 	let (icc, icc_size) = bytes(input.icc.as_ref());
 	let (exif, exif_size) = bytes(input.exif.as_ref());
 	let (xmp, xmp_size) = bytes(input.xmp.as_ref());
-	let raw = SkidAvifInput { width, height, pixels: input.samples.as_ptr(), rgb_depth: input.rgb_depth, channels: input.channels, raw_gray: c_int::from(input.raw_gray), has_cicp: c_int::from(input.cicp.is_some()), cicp_primaries: input.cicp.map_or(0, |c| c.0), cicp_transfer: input.cicp.map_or(0, |c| c.1), icc, icc_size, has_srgb: c_int::from(input.srgb), has_gama: c_int::from(input.gama.is_some()), gama: input.gama.unwrap_or(0.0), has_chrm: c_int::from(input.chrm.is_some()), chrm: input.chrm.unwrap_or([0.0; 8]), exif, exif_size, xmp, xmp_size, exif_sets_transforms: c_int::from(input.exif_sets_transforms) };
+	let raw = SkidAvifInput { width, height, pixels: input.samples.as_ptr(), rgb_depth: input.rgb_depth, channels: input.channels, raw_gray: c_int::from(input.raw_gray), has_cicp: c_int::from(input.cicp.is_some()), cicp_primaries: input.cicp.map_or(0, |c| c.0), cicp_transfer: input.cicp.map_or(0, |c| c.1), icc, icc_size, has_srgb: c_int::from(input.srgb), has_gama: c_int::from(input.gama.is_some()), gama: input.gama.unwrap_or(0.0), has_chrm: c_int::from(input.chrm.is_some()), chrm: input.chrm.unwrap_or([0.0; 8]), exif, exif_size, xmp, xmp_size, exif_sets_transforms: c_int::from(input.exif_sets_transforms), jpeg: jpeg.map_or(ptr::null(), <[u8]>::as_ptr), jpeg_size: jpeg.map_or(0, <[u8]>::len), ignore_icc: c_int::from(s.icc != MetadataSource::Keep), ignore_exif: c_int::from(s.exif != MetadataSource::Keep), ignore_xmp: c_int::from(s.xmp != MetadataSource::Keep) };
 
 	let unset = |value: Option<u8>| value.map_or(-1, c_int::from);
 	let (tile_rows_log2, tile_cols_log2, autotiling) = match s.tiling {

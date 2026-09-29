@@ -5,8 +5,8 @@
 //! by chunk, because `cjxl`'s result depends on far more than the pixels: the bit depth and
 //! `sBIT`, gray or colour, alpha or `tRNS`, each colour chunk and their precedence, the Exif
 //! orientation, and the text chunks it reads metadata from. A JPEG is covered through the
-//! lossless recompression path; a JPEG decoded to pixels is not compared, because it would
-//! compare two JPEG decoders (see ROADMAP.md, Phase 8).
+//! lossless recompression path and, with `--lossless_jpeg=0`, decoded to pixels: `cjxl`
+//! decodes through libjpeg-turbo, and so do we.
 //!
 //! It needs a `cjxl` of the same libjxl version this crate links, found through
 //! `SKIDBLADNIR_REFERENCE_CJXL` or on `PATH`, and says so and returns when there is none.
@@ -18,7 +18,7 @@ use std::{
 	env, fs, path::{Path, PathBuf}, process::Command
 };
 
-use common::{H, W, chunk, exif, icc, png, raw_profile, rows, zlib};
+use common::{H, JPEGS, W, chunk, exif, icc, jpeg_metadata, jpeg_with, png, raw_profile, rows, zlib};
 use skidbladnir_encode::{
 	cjxl::cjxl_args, jxl, settings::{EncodeJob, JxlColorSpace, JxlSettings, JxlTarget, MetadataSource, OutputFormat, Primaries, RenderingIntent, TransferFunction, Tristate, WhitePoint}, source::encode_file
 };
@@ -268,4 +268,21 @@ fn matches_cjxl_recompressing_jpeg() {
 		}
 	}
 	finish(&run, "JPEG recompressions");
+}
+
+#[test]
+fn matches_cjxl_decoding_jpeg_to_pixels() {
+	let Some(mut run) = prepare() else { return };
+	let d = || JxlSettings { effort: 3, lossless_jpeg: false, ..JxlSettings::default() };
+	let cases = [("--lossless_jpeg=0", d()), ("--lossless_jpeg=0 -d 0", JxlSettings { target: JxlTarget::Distance(0.0), ..d() }), ("--lossless_jpeg=0 -q 60 -e 7", JxlSettings { target: JxlTarget::Quality(60.0), effort: 7, ..d() })];
+	let tagged = jpeg_with(JPEGS[0].1, &jpeg_metadata(false));
+	let gray_tagged = jpeg_with(JPEGS[5].1, &jpeg_metadata(true));
+	for (name, bytes) in JPEGS.iter().map(|(name, bytes)| (*name, *bytes)).chain([("4:2:0 with Exif, XMP and ICC", tagged.as_slice()), ("gray with metadata", gray_tagged.as_slice())]) {
+		let input = run.dir.join(format!("{}.jpg", name.replace([' ', ':', ','], "_")));
+		fs::write(&input, bytes).expect("write the JPEG");
+		for (label, settings) in &cases {
+			run.compare(&format!("{name}, {label}"), &input, settings);
+		}
+	}
+	finish(&run, "JPEGs decoded to pixels");
 }

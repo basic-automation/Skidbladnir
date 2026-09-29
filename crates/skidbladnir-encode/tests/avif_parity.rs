@@ -5,8 +5,10 @@
 //! `SKIDBLADNIR_REFERENCE_AVIFENC` at it. A distribution's `avifenc` links libyuv and is
 //! skipped rather than compared. As with JPEG XL, every fixture is a PNG built chunk by
 //! chunk, because `avifenc`'s result depends on the PNG's depth, channels, colour chunks
-//! and metadata as well as its pixels. JPEG input is not compared: `avifenc` copies a
-//! JPEG's YCbCr planes, which Skidbladnir does not yet (ROADMAP.md Phase 8).
+//! and metadata as well as its pixels. JPEG fixtures cover each chroma sampling, gray,
+//! progressive and RGB coding, with and without metadata, and the settings that decide
+//! whether `avifenc` copies a JPEG's YCbCr planes or converts through RGB: we read JPEGs
+//! with `avifenc`'s own reader.
 //!
 //! `SKIDBLADNIR_REQUIRE_PARITY=1` turns "could not run" into a failure.
 
@@ -16,7 +18,7 @@ use std::{
 	env, fs, path::{Path, PathBuf}, process::Command
 };
 
-use common::{H, W, chunk, exif, icc, png, raw_profile, rows, zlib};
+use common::{H, JPEGS, W, chunk, exif, icc, jpeg_metadata, jpeg_with, png, raw_profile, rows, zlib};
 use skidbladnir_encode::{
 	avif, avifenc::avifenc_args, settings::{AvifSettings, Cicp, CleanAperture, CodecOption, EncodeJob, Fraction, Grid, MetadataSource, OutputFormat, QuantizerRange, Tiling, YuvFormat}, source::encode_file
 };
@@ -195,4 +197,35 @@ fn matches_avifenc_across_the_option_surface() {
 		run.compare(&name, &input, &settings);
 	}
 	finish(&run, "option settings");
+}
+
+#[test]
+fn matches_avifenc_across_jpeg_inputs() {
+	let Some(mut run) = prepare() else { return };
+	let add = |run: &mut Run, name: &str, bytes: &[u8], cases: &[(&str, AvifSettings)]| {
+		let input = run.dir.join(format!("{}.jpg", name.replace([' ', ':', ',', '(', ')', '/'], "_")));
+		fs::write(&input, bytes).expect("write the fixture");
+		for (label, settings) in cases {
+			run.compare(&format!("{name}, {label}"), &input, settings);
+		}
+	};
+	// Each sampling under settings that copy the planes where the sampling allows, and under
+	// ones that force the conversion through RGB.
+	let cases = [("defaults", fast()), ("-y 420", AvifSettings { yuv: YuvFormat::Yuv420, ..fast() }), ("-y 444", AvifSettings { yuv: YuvFormat::Yuv444, ..fast() }), ("-y 400", AvifSettings { yuv: YuvFormat::Yuv400, ..fast() }), ("-d 10", AvifSettings { depth: Some(10), ..fast() }), ("--cicp 1/13/1", AvifSettings { cicp: Some(Cicp { primaries: 1, transfer: 13, matrix: 1 }), ..fast() }), ("-r limited", AvifSettings { limited_range: true, ..fast() }), ("-l", AvifSettings { lossless: true, ..fast() }), ("--sharpyuv -y 420", AvifSettings { sharp_yuv: true, yuv: YuvFormat::Yuv420, ..fast() })];
+	for (name, bytes) in JPEGS {
+		add(&mut run, name, bytes, &cases);
+	}
+	let tagged = jpeg_with(JPEGS[0].1, &jpeg_metadata(false));
+	add(&mut run, "4:2:0 with Exif (orientation 6), XMP and ICC", &tagged, &[("defaults", fast()), ("--ignore-exif", AvifSettings { exif: MetadataSource::Strip, ..fast() }), ("--ignore-xmp", AvifSettings { xmp: MetadataSource::Strip, ..fast() }), ("--ignore-icc", AvifSettings { icc: MetadataSource::Strip, ..fast() }), ("--irot 1", AvifSettings { irot: Some(1), ..fast() }), ("--target-size 2000", AvifSettings { target_size: Some(2000), ..fast() })]);
+	let gray_tagged = jpeg_with(JPEGS[5].1, &jpeg_metadata(true));
+	// Without -y 400 avifenc refuses a gray profile, as we do.
+	add(&mut run, "gray with a gray ICC", &gray_tagged, &[("-y 400", AvifSettings { yuv: YuvFormat::Yuv400, ..fast() }), ("--ignore-icc", AvifSettings { icc: MetadataSource::Strip, ..fast() })]);
+	// Extended XMP: the standard packet and one extension segment, which avifenc without
+	// libxml2 appends to it.
+	let guid = b"0123456789ABCDEF0123456789ABCDEF";
+	let extension = b"<x:xmpmeta xmlns:x='adobe:ns:meta/'><rdf:RDF/></x:xmpmeta>";
+	let standard = [b"http://ns.adobe.com/xap/1.0/\0".as_slice(), b"<x:xmpmeta><xmpNote:HasExtendedXMP=\"", guid, b"\"/></x:xmpmeta>"].concat();
+	let extended = [b"http://ns.adobe.com/xmp/extension/\0".as_slice(), guid, &u32::try_from(extension.len()).expect("small").to_be_bytes(), &0_u32.to_be_bytes(), extension].concat();
+	add(&mut run, "4:2:0 with extended XMP", &jpeg_with(JPEGS[0].1, &[(0xe1, standard), (0xe1, extended)]), &[("defaults", fast())]);
+	finish(&run, "JPEG inputs");
 }

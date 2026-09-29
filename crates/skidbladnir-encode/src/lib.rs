@@ -18,6 +18,7 @@ pub mod encoder;
 pub mod heic;
 pub mod heif_enc;
 pub mod inspect;
+mod jpeg;
 pub mod jxl;
 pub mod metadata;
 pub mod settings;

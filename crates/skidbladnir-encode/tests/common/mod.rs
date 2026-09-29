@@ -155,3 +155,35 @@ pub fn raw_profile(name: &str, bytes: &[u8]) -> Vec<u8> {
 	text.push(b'\n');
 	text
 }
+
+/// The JPEG fixtures in `tests/fixtures`: the test pattern of [`sample`], written by `cjpeg
+/// -quality 90` (libjpeg-turbo 3.2.0) at each chroma sampling libjpeg writes, as gray, as
+/// progressive, and with RGB coding, which some readers refuse. `jpeg-420-odd.jpg` is 61x45.
+pub const JPEGS: [(&str, &[u8]); 9] = [
+	("4:2:0", include_bytes!("../fixtures/jpeg-420.jpg")),
+	("4:4:4", include_bytes!("../fixtures/jpeg-444.jpg")),
+	("4:2:2", include_bytes!("../fixtures/jpeg-422.jpg")),
+	("4:4:0", include_bytes!("../fixtures/jpeg-440.jpg")),
+	("4:1:1", include_bytes!("../fixtures/jpeg-411.jpg")),
+	("gray", include_bytes!("../fixtures/jpeg-gray.jpg")),
+	("progressive", include_bytes!("../fixtures/jpeg-progressive.jpg")),
+	("RGB-coded", include_bytes!("../fixtures/jpeg-rgb.jpg")),
+	("4:2:0, odd size", include_bytes!("../fixtures/jpeg-420-odd.jpg")),
+];
+
+/// A JPEG with `segments` (marker, payload) inserted right after its SOI.
+pub fn jpeg_with(jpeg: &[u8], segments: &[(u8, Vec<u8>)]) -> Vec<u8> {
+	let mut out = jpeg[..2].to_vec();
+	for (marker, data) in segments {
+		out.extend_from_slice(&[0xff, *marker]);
+		out.extend_from_slice(&u16::try_from(data.len() + 2).expect("a segment under 64 KiB").to_be_bytes());
+		out.extend_from_slice(data);
+	}
+	out.extend_from_slice(&jpeg[2..]);
+	out
+}
+
+/// The APP1, APP1 and APP2 segments of a JPEG carrying [`exif`], an XMP packet and [`icc`].
+pub fn jpeg_metadata(gray: bool) -> Vec<(u8, Vec<u8>)> {
+	vec![(0xe1, [b"Exif\0\0".as_slice(), &exif()].concat()), (0xe1, [b"http://ns.adobe.com/xap/1.0/\0".as_slice(), b"<x:xmpmeta xmlns:x='adobe:ns:meta/'/>"].concat()), (0xe2, [b"ICC_PROFILE\0\x01\x01".as_slice(), &icc(gray)].concat())]
+}

@@ -8,9 +8,11 @@
 //! never pick up a GPL encoder such as x265 from the user's system.
 //!
 //! The encode is `native/heic_shim.c`: `heif-enc`'s still-image path, the libheif calls it
-//! makes after reading one image, as one C function. This module does what `heif-enc`'s
-//! readers (libheif's `heifio/`) do before that: the samples laid out as the image they
-//! build (gray, gray and alpha, RGB or RGBA), the ICC profile, Exif and XMP by their rules.
+//! makes after reading one image, as one C function. For a PNG, this module does what
+//! `heif-enc`'s reader (libheif's `heifio/`) does before that: the samples laid out as the
+//! image it builds (gray, gray and alpha, RGB or RGBA), the ICC profile, Exif and XMP by its
+//! rules. A JPEG goes to `heif-enc`'s own JPEG reader, compiled into the shim
+//! (`native/heic_jpeg.cc`), which keeps the JPEG's YCbCr planes.
 //! `tests/heic_parity.rs` compares the result with a reference `heif-enc` built from the
 //! same libheif, byte for byte.
 //!
@@ -26,7 +28,7 @@
 //! returned by value, and every enum is `c_int`.
 
 use std::{
-	ffi::{CStr, CString, c_char, c_int, c_void}, ptr, sync::Once
+	borrow::Cow, ffi::{CStr, CString, c_char, c_int, c_void}, ptr, sync::Once
 };
 
 use crate::{
@@ -74,9 +76,8 @@ struct SkidHeicInput {
 	height: u32,
 	layout: c_int,
 	has_alpha: c_int,
-	chroma: c_int,
-	planes: [*const u8; 3],
-	strides: [usize; 3],
+	planes: [*const u8; 2],
+	strides: [usize; 2],
 	icc: *const u8,
 	icc_size: usize,
 	exif: *const u8,
@@ -84,6 +85,8 @@ struct SkidHeicInput {
 	xmp: *const u8,
 	xmp_size: usize,
 	orientation: c_int,
+	jpeg: *const u8,
+	jpeg_size: usize,
 }
 
 #[repr(C)]
@@ -263,11 +266,12 @@ impl Input {
 		Self { layout, planes: Self::samples(source, layout), icc, exif, xmp, orientation: 1 }
 	}
 
-	/// `heifio/decoder_jpeg.cc`, `loadJPEG`, but through RGB: `heif-enc` copies a JPEG's
-	/// YCbCr planes straight in where it can, which is one of the differences ROADMAP.md
-	/// Phase 8 lists for JPEG input. The ICC profile is reassembled from its APP2
+	/// A cropped or resized JPEG (or one `heif-enc`'s reader refuses), whose pixels are no
+	/// longer the file's: they go through RGB, with the file's metadata read the way
+	/// `heifio/decoder_jpeg.cc` reads it. The ICC profile is reassembled from its APP2
 	/// segments; Exif and XMP are the first APP1 of each kind, the Exif kept whole and its
-	/// orientation applied to the file's `irot`/`imir`.
+	/// orientation applied to the file's `irot`/`imir`. A JPEG as it is goes to that reader
+	/// itself, in the shim.
 	fn jpeg(source: &SourceImage) -> Self {
 		let markers = jpeg_markers(&source.bytes);
 		let layout = if source.gray { Layout::Gray { alpha: false } } else { Layout::Rgb { alpha: false } };
@@ -366,19 +370,43 @@ pub fn encode(job: &EncodeJob, source: &SourceImage, on_progress: &mut dyn FnMut
 		SourceFormat::Jpeg => Input::jpeg(&source),
 		_ => Input::other(&source),
 	};
-	let output = encode_input(settings, source.width, source.height, &input).map_err(EncodeError::Heic)?;
+	// A JPEG as it is on disk goes to `heif-enc`'s own reader. Where that reader refuses
+	// it (an RGB-coded JPEG, say), `heif-enc` writes nothing, and the pixels are encoded
+	// instead.
+	let jpeg = (source.format == SourceFormat::Jpeg && !source.bytes.is_empty() && matches!(source, Cow::Borrowed(_))).then_some(source.bytes.as_slice());
+	let output = match encode_input(settings, source.width, source.height, &input, jpeg) {
+		Err(Refusal::Jpeg(_)) => encode_input(settings, source.width, source.height, &input, None),
+		other => other,
+	}
+	.map_err(|refusal| EncodeError::Heic(refusal.into_message()))?;
 	if !on_progress(100) {
 		return Err(EncodeError::Cancelled);
 	}
 	Ok(output)
 }
 
-fn encode_input(s: &HeicSettings, width: u32, height: u32, input: &Input) -> Result<Vec<u8>, String> {
+/// Why the shim wrote nothing.
+enum Refusal {
+	/// `heif-enc`'s JPEG reader could not read the JPEG.
+	Jpeg(String),
+	/// Anything else.
+	Other(String),
+}
+
+impl Refusal {
+	fn into_message(self) -> String {
+		match self {
+			Self::Jpeg(message) | Self::Other(message) => message,
+		}
+	}
+}
+
+fn encode_input(s: &HeicSettings, width: u32, height: u32, input: &Input, jpeg: Option<&[u8]>) -> Result<Vec<u8>, Refusal> {
 	if c_int::try_from(width).is_err() || c_int::try_from(height).is_err() {
-		return Err(format!("{width}x{height} is too large for HEIC"));
+		return Err(Refusal::Other(format!("{width}x{height} is too large for HEIC")));
 	}
 	init();
-	let description = CString::new(s.description.clone()).map_err(|_| "the description contains a NUL character".to_owned())?;
+	let description = CString::new(s.description.clone()).map_err(|_| Refusal::Other("the description contains a NUL character".to_owned()))?;
 	let brands: Vec<u8> = s.compatible_brands.iter().flat_map(|brand| brand.bytes()).collect();
 	let bytes = |data: Option<&Vec<u8>>| data.map_or((ptr::null(), 0), |data| (data.as_ptr(), data.len()));
 	let (icc, icc_size) = bytes(input.icc.as_ref());
@@ -389,7 +417,7 @@ fn encode_input(s: &HeicSettings, width: u32, height: u32, input: &Input) -> Res
 		Layout::Rgb { alpha } => (1, alpha, width as usize * if alpha { 4 } else { 3 }),
 	};
 	let plane = |i: usize| input.planes.get(i).map_or(ptr::null(), Vec::as_ptr);
-	let raw = SkidHeicInput { width, height, layout, has_alpha: c_int::from(has_alpha), chroma: 0, planes: [plane(0), plane(1), plane(2)], strides: [row, width as usize, 0], icc, icc_size, exif, exif_size, xmp, xmp_size, orientation: c_int::from(input.orientation) };
+	let raw = SkidHeicInput { width, height, layout, has_alpha: c_int::from(has_alpha), planes: [plane(0), plane(1)], strides: [row, width as usize], icc, icc_size, exif, exif_size, xmp, xmp_size, orientation: c_int::from(input.orientation), jpeg: jpeg.map_or(ptr::null(), <[u8]>::as_ptr), jpeg_size: jpeg.map_or(0, <[u8]>::len) };
 
 	let (color_profile, [matrix_coefficients, colour_primaries, transfer_characteristics], full_range) = match s.color_profile {
 		ColorProfile::Custom { matrix_coefficients, colour_primaries, transfer_characteristics, full_range } => (0, [matrix_coefficients, colour_primaries, transfer_characteristics].map(c_int::from), full_range),
@@ -436,9 +464,10 @@ fn encode_input(s: &HeicSettings, width: u32, height: u32, input: &Input) -> Res
 	// what it keeps. On success `out` is a `malloc`ed buffer of `out_size` bytes, released
 	// below with `skid_heic_free`.
 	let ok = unsafe { skid_heic_encode(&raw const raw, &raw const settings, &raw mut out, &raw mut out_size, error.as_mut_ptr(), error.len()) };
-	if ok == 0 {
+	if ok != 1 {
 		// SAFETY: the shim NUL-terminates the message within the buffer.
-		return Err(unsafe { CStr::from_ptr(error.as_ptr()) }.to_string_lossy().into_owned());
+		let message = unsafe { CStr::from_ptr(error.as_ptr()) }.to_string_lossy().into_owned();
+		return Err(if ok == 2 { Refusal::Jpeg(message) } else { Refusal::Other(message) });
 	}
 	// SAFETY: as above; copied before it is freed, exactly once.
 	let file = unsafe { std::slice::from_raw_parts(out, out_size) }.to_vec();

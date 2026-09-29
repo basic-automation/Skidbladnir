@@ -1,13 +1,16 @@
 /*
  * heif-enc's still-image path (libheif 1.23.5, examples/heif_enc.cc) as one function.
  *
- * Rust reads the input the way heif-enc's readers (heifio) do and hands over the samples
- * and metadata. This makes the same libheif calls heif-enc makes after loading one image,
+ * Rust reads a PNG the way heif-enc's reader (heifio) does and hands over the samples and
+ * metadata. This makes the same libheif calls heif-enc makes after loading one image,
  * with the same values and in the same order, since the order decides item IDs and box
  * order in the file: context and its unif/mini flags, the encoder by name, quality, then
  * the -p parameters, the encoding options, the NCLX profile of --color-profile, the
  * premultiplied flag, the encode (or the --cut-tiles grid), the properties set on the
  * handle, Exif, XMP, the thumbnail, the udes description, the brands, and the write.
+ *
+ * A JPEG is not read in Rust: heif-enc's own reader does it (native/heic_jpeg.cc), since
+ * it keeps the JPEG's YCbCr planes where it can.
  */
 
 #include <libheif/heif.h>
@@ -22,14 +25,12 @@
 typedef struct {
 	uint32_t width;
 	uint32_t height;
-	/* 0: monochrome, Y and optional alpha planes. 1: interleaved RGB or RGBA.
-	   2: planar YCbCr at `chroma`. */
+	/* 0: monochrome, Y and optional alpha planes. 1: interleaved RGB or RGBA. */
 	int layout;
 	int has_alpha;
-	int chroma;
-	/* layout 0: Y, alpha. layout 1: the interleaved plane. layout 2: Y, Cb, Cr. */
-	const uint8_t* planes[3];
-	size_t strides[3];
+	/* layout 0: Y, alpha. layout 1: the interleaved plane. */
+	const uint8_t* planes[2];
+	size_t strides[2];
 	const uint8_t* icc;
 	size_t icc_size;
 	const uint8_t* exif;
@@ -38,7 +39,39 @@ typedef struct {
 	size_t xmp_size;
 	/* The Exif orientation a JPEG carries, applied before the settings' own. */
 	int orientation;
+	/* A JPEG file to read with heif-enc's reader instead of the fields above (but the
+	   size, which must match). */
+	const uint8_t* jpeg;
+	size_t jpeg_size;
 } SkidHeicInput;
+
+int skid_heic_load_jpeg(const unsigned char* data, size_t size, void** holder, struct heif_image** out, unsigned char** exif, size_t* exif_size, unsigned char** xmp, size_t* xmp_size, int* orientation, char* error, size_t error_size);
+void skid_heic_jpeg_release(void* holder);
+void skid_heic_jpeg_free(unsigned char* data);
+
+/* An input image and what keeps it alive. */
+typedef struct {
+	struct heif_image* image;
+	void* holder;
+	unsigned char* exif;
+	size_t exif_size;
+	unsigned char* xmp;
+	size_t xmp_size;
+	int orientation;
+} Loaded;
+
+static void release(Loaded* loaded)
+{
+	if (loaded->holder) {
+		skid_heic_jpeg_release(loaded->holder);
+	}
+	else if (loaded->image) {
+		heif_image_release(loaded->image);
+	}
+	skid_heic_jpeg_free(loaded->exif);
+	skid_heic_jpeg_free(loaded->xmp);
+	memset(loaded, 0, sizeof(*loaded));
+}
 
 typedef struct {
 	/* The encoder's ID, or NULL for libheif's first HEVC encoder. */
@@ -116,7 +149,7 @@ static void copy_plane(uint8_t* to, size_t to_stride, const uint8_t* from, size_
 	}
 }
 
-/* The heif_image heifio's loadPNG or loadJPEG builds from these samples. */
+/* The heif_image heifio's loadPNG builds from these samples. */
 static struct heif_error make_image(const SkidHeicInput* in, struct heif_image** out)
 {
 	struct heif_image* image = NULL;
@@ -140,28 +173,13 @@ static struct heif_error make_image(const SkidHeicInput* in, struct heif_image**
 			copy_plane(plane, stride, in->planes[1], in->strides[1], in->width, in->height);
 		}
 	}
-	else if (in->layout == 1) {
+	else {
 		err = heif_image_create(w, h, heif_colorspace_RGB, in->has_alpha ? heif_chroma_interleaved_RGBA : heif_chroma_interleaved_RGB, &image);
 		if (err.code) return err;
 		err = heif_image_add_plane(image, heif_channel_interleaved, w, h, in->has_alpha ? 32 : 24);
 		if (err.code) goto fail;
 		plane = heif_image_get_plane2(image, heif_channel_interleaved, &stride);
 		copy_plane(plane, stride, in->planes[0], in->strides[0], (size_t) in->width * (in->has_alpha ? 4 : 3), in->height);
-	}
-	else {
-		int cw = in->chroma == heif_chroma_444 ? w : (w + 1) / 2;
-		int ch = in->chroma == heif_chroma_420 ? (h + 1) / 2 : h;
-		const heif_channel channels[3] = {heif_channel_Y, heif_channel_Cb, heif_channel_Cr};
-		err = heif_image_create(w, h, heif_colorspace_YCbCr, (enum heif_chroma) in->chroma, &image);
-		if (err.code) return err;
-		for (int i = 0; i < 3; i++) {
-			err = heif_image_add_plane(image, channels[i], i ? cw : w, i ? ch : h, 8);
-			if (err.code) goto fail;
-		}
-		for (int i = 0; i < 3; i++) {
-			plane = heif_image_get_plane2(image, channels[i], &stride);
-			copy_plane(plane, stride, in->planes[i], in->strides[i], (size_t) (i ? cw : w), (uint32_t) (i ? ch : h));
-		}
 	}
 
 	if (in->icc && in->icc_size > 0) {
@@ -173,6 +191,22 @@ static struct heif_error make_image(const SkidHeicInput* in, struct heif_image**
 fail:
 	heif_image_release(image);
 	return err;
+}
+
+/* heif-enc's load_image: the JPEG reader for a JPEG, otherwise the samples as given. */
+static struct heif_error load(const SkidHeicInput* in, Loaded* loaded, char* error, size_t error_size)
+{
+	struct heif_error ok = {heif_error_Ok, heif_suberror_Unspecified, "Success"};
+	struct heif_error bad = {heif_error_Invalid_input, heif_suberror_Unspecified, "the JPEG could not be read"};
+	memset(loaded, 0, sizeof(*loaded));
+	if (!in->jpeg) {
+		loaded->orientation = in->orientation;
+		return make_image(in, &loaded->image);
+	}
+	if (!skid_heic_load_jpeg(in->jpeg, in->jpeg_size, &loaded->holder, &loaded->image, &loaded->exif, &loaded->exif_size, &loaded->xmp, &loaded->xmp_size, &loaded->orientation, error, error_size)) {
+		return bad;
+	}
+	return ok;
 }
 
 /* create_output_nclx_profile_and_configure_encoder, without -L (see settings/heic.rs). */
@@ -242,18 +276,22 @@ static struct heif_error make_nclx(const SkidHeicSettings* s, const struct heif_
 
 /* encode_tiled with heif-enc's `grid` tiling method, the tiles cut from a second copy of
    the input as input_tiles_generator_cut_image does. */
-static struct heif_error encode_cut_tiles(struct heif_context* ctx, struct heif_encoder* encoder, const struct heif_encoding_options* options, const SkidHeicInput* in, int tile_size, struct heif_image_handle** out)
+static struct heif_error encode_cut_tiles(struct heif_context* ctx, struct heif_encoder* encoder, const struct heif_encoding_options* options, const SkidHeicInput* in, int tile_size, struct heif_image_handle** out, char* error, size_t error_size)
 {
-	struct heif_image* source = NULL;
+	Loaded loaded;
+	struct heif_image* source;
 	struct heif_image_handle* grid = NULL;
-	struct heif_error err = make_image(in, &source);
-	uint32_t columns, rows;
+	struct heif_error err = load(in, &loaded, error, error_size);
+	uint32_t width, height, columns, rows;
 	*out = NULL;
 	if (err.code) return err;
-	columns = (in->width + (uint32_t) tile_size - 1) / (uint32_t) tile_size;
-	rows = (in->height + (uint32_t) tile_size - 1) / (uint32_t) tile_size;
+	source = loaded.image;
+	width = (uint32_t) heif_image_get_primary_width(source);
+	height = (uint32_t) heif_image_get_primary_height(source);
+	columns = (width + (uint32_t) tile_size - 1) / (uint32_t) tile_size;
+	rows = (height + (uint32_t) tile_size - 1) / (uint32_t) tile_size;
 
-	err = heif_context_add_grid_image(ctx, in->width, in->height, columns, rows, options, &grid);
+	err = heif_context_add_grid_image(ctx, width, height, columns, rows, options, &grid);
 	if (err.code) goto done;
 	for (uint32_t ty = 0; ty < rows; ty++) {
 		for (uint32_t tx = 0; tx < columns; tx++) {
@@ -272,16 +310,21 @@ static struct heif_error encode_cut_tiles(struct heif_context* ctx, struct heif_
 
 done:
 	if (grid) heif_image_handle_release(grid);
-	heif_image_release(source);
+	release(&loaded);
 	return err;
 }
 
+/* 1 on success, 2 when heif-enc's JPEG reader refuses the JPEG, 0 on any other error. */
 int skid_heic_encode(const SkidHeicInput* in, const SkidHeicSettings* s, uint8_t** out, size_t* out_size, char* error, size_t error_size)
 {
 	struct heif_context* ctx = NULL;
 	struct heif_encoder* encoder = NULL;
 	struct heif_encoding_options* options = NULL;
+	Loaded loaded = {NULL, NULL, NULL, 0, NULL, 0, 1};
 	struct heif_image* image = NULL;
+	const uint8_t* exif;
+	const uint8_t* xmp;
+	size_t exif_size, xmp_size;
 	struct heif_image_handle* handle = NULL;
 	struct heif_color_profile_nclx* nclx = NULL;
 	struct heif_error err;
@@ -331,19 +374,35 @@ int skid_heic_encode(const SkidHeicInput* in, const SkidHeicSettings* s, uint8_t
 		options->color_conversion_options.only_use_preferred_chroma_algorithm = 1;
 	}
 
-	err = make_image(in, &image);
-	if (err.code) { fail(error, error_size, "reading the image", err); goto done; }
+	err = load(in, &loaded, error, error_size);
+	if (err.code) {
+		if (in->jpeg) {
+			ok = 2; /* heif-enc's JPEG reader refused it. */
+		}
+		else {
+			fail(error, error_size, "reading the image", err);
+		}
+		goto done;
+	}
+	image = loaded.image;
+	exif = in->jpeg ? loaded.exif : in->exif;
+	exif_size = in->jpeg ? loaded.exif_size : in->exif_size;
+	xmp = in->jpeg ? loaded.xmp : in->xmp;
+	xmp_size = in->jpeg ? loaded.xmp_size : in->xmp_size;
 
 	err = make_nclx(s, image, &nclx);
 	if (err.code) { fail(error, error_size, "the colour profile", err); goto done; }
 	options->save_alpha_channel = (uint8_t) s->alpha;
 	options->output_nclx_profile = nclx;
-	options->image_orientation = heif_orientation_concat((enum heif_orientation) in->orientation, (enum heif_orientation) s->orientation);
+	options->image_orientation = heif_orientation_concat((enum heif_orientation) loaded.orientation, (enum heif_orientation) s->orientation);
 	if (s->premultiplied) heif_image_set_premultiplied_alpha(image, 1);
 
 	if (s->cut_tiles > 0) {
-		err = encode_cut_tiles(ctx, encoder, options, in, s->cut_tiles, &handle);
-		if (err.code) { fail(error, error_size, "encoding the tiles", err); goto done; }
+		err = encode_cut_tiles(ctx, encoder, options, in, s->cut_tiles, &handle, error, error_size);
+		if (err.code) {
+			if (err.code != heif_error_Invalid_input || !in->jpeg) fail(error, error_size, "encoding the tiles", err);
+			goto done;
+		}
 	}
 	else {
 		err = heif_context_encode_image(ctx, image, encoder, options, &handle);
@@ -360,12 +419,12 @@ int skid_heic_encode(const SkidHeicInput* in, const SkidHeicSettings* s, uint8_t
 	if (s->omaf_projection >= 0) heif_image_handle_set_omaf_image_projection(handle, (enum heif_omaf_image_projection) s->omaf_projection);
 	heif_context_set_primary_image(ctx, handle);
 
-	if (in->exif && in->exif_size > 0) {
-		err = heif_context_add_exif_metadata(ctx, handle, in->exif, (int) in->exif_size);
+	if (exif && exif_size > 0) {
+		err = heif_context_add_exif_metadata(ctx, handle, exif, (int) exif_size);
 		if (err.code) { fail(error, error_size, "writing the Exif", err); goto done; }
 	}
-	if (in->xmp && in->xmp_size > 0) {
-		err = heif_context_add_XMP_metadata2(ctx, handle, in->xmp, (int) in->xmp_size, heif_metadata_compression_off);
+	if (xmp && xmp_size > 0) {
+		err = heif_context_add_XMP_metadata2(ctx, handle, xmp, (int) xmp_size, heif_metadata_compression_off);
 		if (err.code) { fail(error, error_size, "writing the XMP", err); goto done; }
 	}
 
@@ -411,7 +470,7 @@ int skid_heic_encode(const SkidHeicInput* in, const SkidHeicSettings* s, uint8_t
 done:
 	free(buffer.data);
 	if (handle) heif_image_handle_release(handle);
-	if (image) heif_image_release(image);
+	release(&loaded);
 	if (nclx) heif_nclx_color_profile_free(nclx);
 	if (options) heif_encoding_options_free(options);
 	if (encoder) heif_encoder_release(encoder);

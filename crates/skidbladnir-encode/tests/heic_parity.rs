@@ -7,11 +7,11 @@
 //! with `<dir>/lib` first on the library path, so it cannot pick up a system libheif. A
 //! distribution's `heif-enc` has no Kvazaar and is skipped rather than compared.
 //!
-//! Every fixture is a PNG built chunk by chunk, since `heif-enc`'s result depends on the
-//! PNG's channels and metadata as well as its pixels. JPEG input is not compared:
-//! `heif-enc` copies a JPEG's YCbCr planes, which Skidbladnir does not yet (ROADMAP.md
-//! Phase 8). Neither are 16-bit PNGs, which `heif-enc` hands Kvazaar at 10 bits and
-//! Kvazaar refuses.
+//! PNG fixtures are built chunk by chunk, since `heif-enc`'s result depends on the PNG's
+//! channels and metadata as well as its pixels. JPEG fixtures cover each chroma sampling,
+//! gray, progressive and CMYK, with and without metadata: `heif-enc` keeps a JPEG's YCbCr
+//! planes, and so do we, through its own reader. 16-bit PNGs are not compared: `heif-enc`
+//! hands Kvazaar 10 bits and Kvazaar refuses them.
 //!
 //! `SKIDBLADNIR_REQUIRE_PARITY=1` turns "could not run" into a failure.
 
@@ -21,7 +21,7 @@ use std::{
 	env, fs, path::{Path, PathBuf}, process::Command
 };
 
-use common::{H, W, chunk, exif, icc, png, raw_profile, rows, zlib};
+use common::{H, JPEGS, W, chunk, exif, icc, jpeg_metadata, jpeg_with, png, raw_profile, rows, zlib};
 use skidbladnir_encode::{
 	heic, heif_enc::heif_enc_args, settings::{ChromaDownsampling, ColorProfile, EncodeJob, HeicSettings, OmafProjection, Orientation, OutputFormat}, source::encode_file
 };
@@ -216,4 +216,39 @@ fn matches_heif_enc_across_the_option_surface() {
 		run.compare(&name, &input, &settings);
 	}
 	finish(&run, "option settings");
+}
+
+#[test]
+fn matches_heif_enc_across_jpeg_inputs() {
+	let Some(mut run) = prepare() else { return };
+	let add = |run: &mut Run, name: &str, bytes: &[u8], cases: &[(&str, HeicSettings)]| {
+		let input = run.dir.join(format!("{}.jpg", name.replace([' ', ':', ',', '(', ')'], "_")));
+		fs::write(&input, bytes).expect("write the fixture");
+		for (label, settings) in cases {
+			run.compare(&format!("{name}, {label}"), &input, settings);
+		}
+	};
+	let common_cases = [("defaults", d()), ("--color-profile auto (converted)", HeicSettings { color_profile: ColorProfile::Auto, ..d() }), ("-C sharp-yuv --color-profile 709", HeicSettings { chroma_downsampling: Some(ChromaDownsampling::SharpYuv), color_profile: ColorProfile::Bt709, ..d() }), ("-q 85 -t 24", HeicSettings { quality: 85, thumbnail: Some(24), ..d() })];
+	for (name, bytes) in JPEGS {
+		// heif-enc refuses an RGB-coded JPEG; see below.
+		if name != "RGB-coded" {
+			add(&mut run, name, bytes, &common_cases);
+		}
+	}
+	let tagged = jpeg_with(JPEGS[0].1, &jpeg_metadata(false));
+	add(&mut run, "4:2:0 with Exif (orientation 6), XMP and ICC", &tagged, &[("defaults", d()), ("--rotate-cw 90 after the Exif's", HeicSettings { orientation: Orientation::Rotate90Cw, ..d() }), ("--enable-two-colr-boxes", HeicSettings { two_colr_boxes: true, ..d() }), ("--cut-tiles 32 -t 16", HeicSettings { cut_tiles: Some(32), thumbnail: Some(16), ..d() }), ("--mini", HeicSettings { mini: true, ..d() })]);
+	let gray_tagged = jpeg_with(JPEGS[5].1, &jpeg_metadata(true));
+	add(&mut run, "gray with metadata", &gray_tagged, &[("defaults", d()), ("--color-profile 2020", HeicSettings { color_profile: ColorProfile::Bt2020, ..d() })]);
+	add(&mut run, "Adobe CMYK", include_bytes!("fixtures/cmyk-adobe.jpg"), &[("defaults", d()), ("--color-profile auto", HeicSettings { color_profile: ColorProfile::Auto, ..d() })]);
+
+	// An RGB-coded JPEG: heif-enc's reader refuses it, so heif-enc writes nothing; we encode
+	// its pixels rather than refuse too.
+	let rgb = run.dir.join("rgb-coded.jpg");
+	fs::write(&rgb, JPEGS[7].1).expect("write the fixture");
+	let job = EncodeJob { format: OutputFormat::Heic, ..Default::default() };
+	let theirs = run.dir.join("rgb-heif-enc.heic");
+	let refused = !Command::new(&run.heif_enc).args(heif_enc_args(&job, &rgb, &theirs)).env("LD_LIBRARY_PATH", &run.lib).env("DYLD_LIBRARY_PATH", &run.lib).output().expect("run heif-enc").status.success();
+	assert!(refused, "heif-enc now reads RGB-coded JPEGs: compare them above instead");
+	encode_file(&job, &rgb, &run.dir.join("rgb-ours.heic")).expect("an RGB-coded JPEG still encodes");
+	finish(&run, "JPEG inputs");
 }
