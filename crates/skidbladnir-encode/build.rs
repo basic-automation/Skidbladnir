@@ -80,17 +80,7 @@ impl Libjpeg {
 			return Self { includes: library.include_paths.clone(), static_dir: None, system: Some(library) };
 		}
 		// The static library alone; SIMD when NASM is there, which only changes the speed.
-		let built = cmake::Config::new(&source)
-			.profile("Release")
-			.define("ENABLE_SHARED", "OFF")
-			.define("ENABLE_STATIC", "ON")
-			.define("WITH_JPEG8", "ON")
-			.define("WITH_TURBOJPEG", "OFF")
-			.define("WITH_TOOLS", "OFF")
-			.define("WITH_TESTS", "OFF")
-			.define("CMAKE_POSITION_INDEPENDENT_CODE", "ON")
-			.define("CMAKE_INSTALL_LIBDIR", "lib")
-			.build();
+		let built = cmake::Config::new(&source).profile("Release").define("ENABLE_SHARED", "OFF").define("ENABLE_STATIC", "ON").define("WITH_JPEG8", "ON").define("WITH_TURBOJPEG", "OFF").define("WITH_TOOLS", "OFF").define("WITH_TESTS", "OFF").define("CMAKE_POSITION_INDEPENDENT_CODE", "ON").define("CMAKE_INSTALL_LIBDIR", "lib").build();
 		Self { includes: vec![built.join("include")], static_dir: Some(built.join("lib")), system: None }
 	}
 

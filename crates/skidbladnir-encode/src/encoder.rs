@@ -482,7 +482,9 @@ pub fn rescale_rgba(image: &RgbaImage<'_>, resize: Resize) -> Result<(u32, u32, 
 fn encode_webp(job: &EncodeJob, source: &SourceImage, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
 	let settings = &job.webp;
 	let config = build_config(settings)?;
-	let image = source.as_rgba();
+	// cwebp's PNG reader has libpng correct a PNG's gamma to a 2.2 display.
+	let corrected = crate::png_gamma::like_cwebp(source);
+	let image = corrected.as_deref().map_or_else(|| source.as_rgba(), |pixels| RgbaImage { width: source.width, height: source.height, pixels });
 	let (width, height) = checked_dimensions(&image)?;
 
 	let mut picture = Picture(unsafe {

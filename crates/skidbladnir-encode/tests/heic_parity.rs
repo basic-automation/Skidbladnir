@@ -121,31 +121,7 @@ fn matches_heif_enc_across_png_inputs() {
 	exif_pointer.extend_from_slice(b"tail");
 	let (odd_w, odd_h) = (61_u32, 45_u32);
 	let odd_rows: Vec<u8> = (0..odd_h).flat_map(|y| (0..odd_w).flat_map(move |x| [u8::try_from((x * 3 + y) % 256).expect("byte"), u8::try_from(x * 4 % 256).expect("byte"), u8::try_from(y * 5 % 256).expect("byte"), u8::try_from((x + y) * 2 % 256).expect("byte")])).collect();
-	let fixtures: Vec<(&str, Vec<u8>)> = vec![
-		("rgb8", png(W, H, 8, 2, &rgb8, &[], &[])),
-		("rgba8", png(W, H, 8, 6, &rows(4, 8), &[], &[])),
-		("gray8", png(W, H, 8, 0, &rows(1, 8), &[], &[])),
-		("graya8", png(W, H, 8, 4, &rows(2, 8), &[], &[])),
-		("gray4", png(W, H, 4, 0, &rows(1, 4), &[], &[])),
-		("gray1", png(W, H, 1, 0, &rows(1, 1), &[], &[])),
-		("palette", png(W, H, 8, 3, &palette_rows, &[chunk(*b"PLTE", &palette)], &[])),
-		("palette+tRNS", png(W, H, 8, 3, &palette_rows, &[chunk(*b"PLTE", &palette), chunk(*b"tRNS", &trns)], &[])),
-		("palette+opaque tRNS", png(W, H, 8, 3, &palette_rows, &[chunk(*b"PLTE", &palette), chunk(*b"tRNS", &[255; 4])], &[])),
-		("rgb+tRNS (ignored)", png(W, H, 8, 2, &rgb8, &[chunk(*b"tRNS", &[0, 0, 0, 0, 0, 0])], &[])),
-		("gray+tRNS (ignored)", png(W, H, 8, 0, &rows(1, 8), &[chunk(*b"tRNS", &[0, 0])], &[])),
-		("odd size rgba", png(odd_w, odd_h, 8, 6, &odd_rows, &[], &[])),
-		("iCCP", png(W, H, 8, 2, &rgb8, &[chunk(*b"iCCP", &[b"test\0\0".as_slice(), &zlib(&icc(false))].concat())], &[])),
-		("gray iCCP", png(W, H, 8, 0, &rows(1, 8), &[chunk(*b"iCCP", &[b"test\0\0".as_slice(), &zlib(&icc(true))].concat())], &[])),
-		("gray image, RGB iCCP (libpng drops it)", png(W, H, 8, 0, &rows(1, 8), &[chunk(*b"iCCP", &[b"test\0\0".as_slice(), &zlib(&icc(false))].concat())], &[])),
-		("eXIf, orientation reset", png(W, H, 8, 2, &rgb8, &[chunk(*b"eXIf", &exif())], &[])),
-		("little-endian eXIf", png(W, H, 8, 2, &rgb8, &[chunk(*b"eXIf", &exif_le)], &[])),
-		("eXIf after the image", png(W, H, 8, 2, &rgb8, &[], &[chunk(*b"eXIf", &exif_pointer)])),
-		("invalid eXIf, then a valid one", png(W, H, 8, 2, &rgb8, &[chunk(*b"eXIf", b"XXXXjunk")], &[chunk(*b"eXIf", &exif())])),
-		("XMP in iTXt", png(W, H, 8, 2, &rgb8, &[itxt("XML:com.adobe.xmp", b"<x:xmpmeta xmlns:x='adobe:ns:meta/'/>")], &[])),
-		("XMP in tEXt and zTXt, the last wins", png(W, H, 8, 2, &rgb8, &[text(*b"tEXt", "XML:com.adobe.xmp", b"<first/>")], &[ztxt("XML:com.adobe.xmp", b"<last/>")])),
-		("raw profile Exif and XMP (heif-enc reads neither)", png(W, H, 8, 2, &rgb8, &[text(*b"tEXt", "Raw profile type exif", &raw_profile("exif", &[b"Exif\0\0".as_slice(), &exif()].concat())), text(*b"tEXt", "Raw profile type xmp", &raw_profile("xmp", b"<x:xmpmeta/>"))], &[])),
-		("every kind of metadata", png(W, H, 8, 6, &rows(4, 8), &[chunk(*b"iCCP", &[b"test\0\0".as_slice(), &zlib(&icc(false))].concat()), chunk(*b"eXIf", &exif()), itxt("XML:com.adobe.xmp", b"<x:xmpmeta/>")], &[])),
-	];
+	let fixtures: Vec<(&str, Vec<u8>)> = vec![("rgb8", png(W, H, 8, 2, &rgb8, &[], &[])), ("rgba8", png(W, H, 8, 6, &rows(4, 8), &[], &[])), ("gray8", png(W, H, 8, 0, &rows(1, 8), &[], &[])), ("graya8", png(W, H, 8, 4, &rows(2, 8), &[], &[])), ("gray4", png(W, H, 4, 0, &rows(1, 4), &[], &[])), ("gray1", png(W, H, 1, 0, &rows(1, 1), &[], &[])), ("palette", png(W, H, 8, 3, &palette_rows, &[chunk(*b"PLTE", &palette)], &[])), ("palette+tRNS", png(W, H, 8, 3, &palette_rows, &[chunk(*b"PLTE", &palette), chunk(*b"tRNS", &trns)], &[])), ("palette+opaque tRNS", png(W, H, 8, 3, &palette_rows, &[chunk(*b"PLTE", &palette), chunk(*b"tRNS", &[255; 4])], &[])), ("rgb+tRNS (ignored)", png(W, H, 8, 2, &rgb8, &[chunk(*b"tRNS", &[0, 0, 0, 0, 0, 0])], &[])), ("gray+tRNS (ignored)", png(W, H, 8, 0, &rows(1, 8), &[chunk(*b"tRNS", &[0, 0])], &[])), ("odd size rgba", png(odd_w, odd_h, 8, 6, &odd_rows, &[], &[])), ("iCCP", png(W, H, 8, 2, &rgb8, &[chunk(*b"iCCP", &[b"test\0\0".as_slice(), &zlib(&icc(false))].concat())], &[])), ("gray iCCP", png(W, H, 8, 0, &rows(1, 8), &[chunk(*b"iCCP", &[b"test\0\0".as_slice(), &zlib(&icc(true))].concat())], &[])), ("gray image, RGB iCCP (libpng drops it)", png(W, H, 8, 0, &rows(1, 8), &[chunk(*b"iCCP", &[b"test\0\0".as_slice(), &zlib(&icc(false))].concat())], &[])), ("eXIf, orientation reset", png(W, H, 8, 2, &rgb8, &[chunk(*b"eXIf", &exif())], &[])), ("little-endian eXIf", png(W, H, 8, 2, &rgb8, &[chunk(*b"eXIf", &exif_le)], &[])), ("eXIf after the image", png(W, H, 8, 2, &rgb8, &[], &[chunk(*b"eXIf", &exif_pointer)])), ("invalid eXIf, then a valid one", png(W, H, 8, 2, &rgb8, &[chunk(*b"eXIf", b"XXXXjunk")], &[chunk(*b"eXIf", &exif())])), ("XMP in iTXt", png(W, H, 8, 2, &rgb8, &[itxt("XML:com.adobe.xmp", b"<x:xmpmeta xmlns:x='adobe:ns:meta/'/>")], &[])), ("XMP in tEXt and zTXt, the last wins", png(W, H, 8, 2, &rgb8, &[text(*b"tEXt", "XML:com.adobe.xmp", b"<first/>")], &[ztxt("XML:com.adobe.xmp", b"<last/>")])), ("raw profile Exif and XMP (heif-enc reads neither)", png(W, H, 8, 2, &rgb8, &[text(*b"tEXt", "Raw profile type exif", &raw_profile("exif", &[b"Exif\0\0".as_slice(), &exif()].concat())), text(*b"tEXt", "Raw profile type xmp", &raw_profile("xmp", b"<x:xmpmeta/>"))], &[])), ("every kind of metadata", png(W, H, 8, 6, &rows(4, 8), &[chunk(*b"iCCP", &[b"test\0\0".as_slice(), &zlib(&icc(false))].concat()), chunk(*b"eXIf", &exif()), itxt("XML:com.adobe.xmp", b"<x:xmpmeta/>")], &[]))];
 	for (name, bytes) in fixtures {
 		let input = run.dir.join(format!("{}.png", name.replace([' ', '+', '(', ')', ','], "_")));
 		fs::write(&input, &bytes).expect("write the fixture");

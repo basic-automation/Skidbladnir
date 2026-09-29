@@ -574,3 +574,93 @@ fn matches_reference_cwebp_through_jpeg_files() {
 	assert!(mismatches.is_empty(), "{} of {total} JPEG conversions diverged from cwebp:\n  {}", mismatches.len(), mismatches.join("\n  "));
 	eprintln!("JPEG PARITY OK: {total} JPEG conversions matched the reference cwebp end to end.");
 }
+
+/// `cwebp` has libpng correct a PNG's gamma to a 2.2 display (`png_set_gamma`), so a PNG
+/// whose `gAMA` is not close to 1/2.2 reaches the encoder with different samples. Each
+/// case is a PNG built chunk by chunk around a `gAMA`: 8-bit colour types, palette, low
+/// bit depth gray, 16-bit (whose correction and reduction to 8 bits are one table, sized
+/// by `sBIT`), and the chunks that cancel it (`sRGB`, a `gAMA` after `PLTE`).
+#[test]
+fn matches_reference_cwebp_correcting_png_gamma() {
+	use std::io::Write as _;
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let Some(cwebp) = reference_cwebp() else {
+		let message = "GAMMA PARITY NOT RUN: no reference cwebp found.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+	if reference_version(&cwebp) != Some(skidbladnir_encode::encoder::linked_encoder_version()) {
+		let message = "GAMMA PARITY NOT RUN: reference cwebp and the linked libwebp are different versions.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	}
+	let chunk = |kind: &[u8; 4], data: &[u8]| {
+		let mut crc = flate2::Crc::new();
+		crc.update(kind);
+		crc.update(data);
+		[&u32::try_from(data.len()).expect("small").to_be_bytes()[..], kind, data, &crc.sum().to_be_bytes()].concat()
+	};
+	let (width, height) = (40_u32, 30_u32);
+	// A PNG of `channels` samples per pixel at `depth` bits, `before` chunks ahead of IDAT.
+	let png = |depth: u8, colour_type: u8, channels: u32, before: &[Vec<u8>]| {
+		let mut raw = Vec::new();
+		for y in 0..height {
+			raw.push(0);
+			let mut bits = 0_u32;
+			let mut filled = 0;
+			for x in 0..width {
+				for c in 0..channels {
+					let max = (1_u32 << depth) - 1;
+					let value = if c == 3 || (channels == 2 && c == 1) { if x % 5 == 0 { max / 3 } else { max } } else { ((x * 7 + y * 5 + c * 40) % 64) * max / 63 };
+					match depth {
+						16 => raw.extend_from_slice(&u16::try_from(value).expect("16-bit").to_be_bytes()),
+						8 => raw.push(u8::try_from(value).expect("8-bit")),
+						_ => {
+							bits = (bits << depth) | value;
+							filled += u32::from(depth);
+							if filled == 8 {
+								raw.push(u8::try_from(bits).expect("byte"));
+								(bits, filled) = (0, 0);
+							}
+						}
+					}
+				}
+			}
+			if filled > 0 {
+				raw.push(u8::try_from(bits << (8 - filled)).expect("byte"));
+			}
+		}
+		let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+		z.write_all(&raw).expect("compress");
+		let ihdr = [&width.to_be_bytes()[..], &height.to_be_bytes(), &[depth, colour_type, 0, 0, 0]].concat();
+		[b"\x89PNG\r\n\x1a\n".to_vec(), chunk(b"IHDR", &ihdr), before.concat(), chunk(b"IDAT", &z.finish().expect("compress")), chunk(b"IEND", &[])].concat()
+	};
+	let gama = |value: u32| chunk(b"gAMA", &value.to_be_bytes());
+	let palette: Vec<u8> = (0..=255_u8).flat_map(|i| [i, 255 - i, i / 2]).collect();
+	let fixtures: Vec<(&str, Vec<u8>)> = vec![("RGB, gAMA 1/1.8", png(8, 2, 3, &[gama(55_556)])), ("RGB, linear gAMA", png(8, 2, 3, &[gama(100_000)])), ("RGB, gAMA 1/2.2 (no correction)", png(8, 2, 3, &[gama(45_455)])), ("RGB, gAMA 1/2.3 (under the threshold)", png(8, 2, 3, &[gama(43_478)])), ("RGB, sRGB and gAMA 1/1.8 (sRGB wins)", png(8, 2, 3, &[chunk(b"sRGB", &[0]), gama(55_556)])), ("RGBA, gAMA 1/1.8", png(8, 6, 4, &[gama(55_556)])), ("gray, gAMA 1/1.8", png(8, 0, 1, &[gama(55_556)])), ("gray+alpha, linear gAMA", png(8, 4, 2, &[gama(100_000)])), ("gray 4-bit, gAMA 1/1.8", png(4, 0, 1, &[gama(55_556)])), ("palette, gAMA 1/1.8", png(8, 3, 1, &[gama(55_556), chunk(b"PLTE", &palette)])), ("palette, gAMA after PLTE (ignored)", png(8, 3, 1, &[chunk(b"PLTE", &palette), gama(55_556)])), ("RGB 16-bit, gAMA 1/1.8", png(16, 2, 3, &[gama(55_556)])), ("RGB 16-bit, sBIT 10, gAMA 1/1.8", png(16, 2, 3, &[chunk(b"sBIT", &[10, 10, 10]), gama(55_556)])), ("RGB 16-bit, sBIT 16, linear gAMA", png(16, 2, 3, &[chunk(b"sBIT", &[16, 12, 16]), gama(100_000)])), ("RGBA 16-bit, gAMA 1/1.8", png(16, 6, 4, &[gama(55_556)])), ("gray 16-bit, sBIT 12, gAMA 1/1.8", png(16, 0, 1, &[chunk(b"sBIT", &[12]), gama(55_556)]))];
+	let dir = env::temp_dir().join(format!("skidbladnir-parity-gamma-{}", std::process::id()));
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+	let cases = [("default lossy", EncodeJob::default()), ("lossless", EncodeJob::from(WebpSettings { lossless: true, ..Default::default() }))];
+	let mut mismatches: Vec<String> = Vec::new();
+	let mut total = 0;
+	for (name, bytes) in &fixtures {
+		let input = dir.join(format!("{total}.png"));
+		fs::write(&input, bytes).expect("write the fixture");
+		for (label, settings) in &cases {
+			total += 1;
+			let theirs = dir.join(format!("cwebp-{total}.webp"));
+			let run = Command::new(&cwebp).args(cwebp_args(settings, &input, &theirs)).output().expect("run the reference cwebp");
+			assert!(run.status.success(), "reference cwebp failed for `{name}, {label}`: {}", String::from_utf8_lossy(&run.stderr));
+			let ours = dir.join(format!("ours-{total}.webp"));
+			skidbladnir_encode::source::encode_file(settings, &input, &ours).expect("our pipeline encodes");
+			if fs::read(&theirs).expect("read reference") != fs::read(&ours).expect("read ours") {
+				mismatches.push(format!("`{name}, {label}`"));
+			}
+		}
+	}
+	let _ = fs::remove_dir_all(&dir);
+	assert!(mismatches.is_empty(), "{} of {total} gamma cases diverged from cwebp:\n  {}", mismatches.len(), mismatches.join("\n  "));
+	eprintln!("GAMMA PARITY OK: {total} PNG gamma cases matched the reference cwebp.");
+}

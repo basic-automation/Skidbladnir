@@ -427,34 +427,7 @@ fn encode_input(s: &HeicSettings, width: u32, height: u32, input: &Input, jpeg: 
 		ColorProfile::Bt2020 => (4, [0; 3], true),
 	};
 	let size = |value: Option<u32>| value.map_or(0, |value| c_int::try_from(value).unwrap_or(c_int::MAX));
-	let settings = SkidHeicSettings {
-		encoder: if SYSTEM_LIBHEIF { ptr::null() } else { ENCODER.as_ptr() },
-		quality: c_int::from(s.quality),
-		lossless: c_int::from(s.lossless),
-		alpha: c_int::from(s.alpha),
-		premultiplied: c_int::from(s.premultiplied_alpha),
-		thumbnail: size(s.thumbnail),
-		thumbnail_alpha: c_int::from(s.thumbnail_alpha),
-		chroma_downsampling: s.chroma_downsampling.map_or(0, ChromaDownsampling::as_libheif),
-		color_profile,
-		matrix_coefficients,
-		colour_primaries,
-		transfer_characteristics,
-		full_range: c_int::from(full_range),
-		two_colr_boxes: c_int::from(s.two_colr_boxes),
-		clli_set: c_int::from(s.clli.is_some()),
-		clli: s.clli.unwrap_or([0; 2]),
-		pasp_set: c_int::from(s.pasp.is_some()),
-		pasp: s.pasp.unwrap_or([0; 2]),
-		orientation: s.orientation.as_libheif(),
-		cut_tiles: size(s.cut_tiles),
-		omaf_projection: s.omaf_projection.map_or(-1, OmafProjection::as_libheif),
-		description: description.as_ptr(),
-		brands: brands.as_ptr().cast(),
-		brand_count: s.compatible_brands.len(),
-		unif: c_int::from(s.unif),
-		mini: c_int::from(s.mini),
-	};
+	let settings = SkidHeicSettings { encoder: if SYSTEM_LIBHEIF { ptr::null() } else { ENCODER.as_ptr() }, quality: c_int::from(s.quality), lossless: c_int::from(s.lossless), alpha: c_int::from(s.alpha), premultiplied: c_int::from(s.premultiplied_alpha), thumbnail: size(s.thumbnail), thumbnail_alpha: c_int::from(s.thumbnail_alpha), chroma_downsampling: s.chroma_downsampling.map_or(0, ChromaDownsampling::as_libheif), color_profile, matrix_coefficients, colour_primaries, transfer_characteristics, full_range: c_int::from(full_range), two_colr_boxes: c_int::from(s.two_colr_boxes), clli_set: c_int::from(s.clli.is_some()), clli: s.clli.unwrap_or([0; 2]), pasp_set: c_int::from(s.pasp.is_some()), pasp: s.pasp.unwrap_or([0; 2]), orientation: s.orientation.as_libheif(), cut_tiles: size(s.cut_tiles), omaf_projection: s.omaf_projection.map_or(-1, OmafProjection::as_libheif), description: description.as_ptr(), brands: brands.as_ptr().cast(), brand_count: s.compatible_brands.len(), unif: c_int::from(s.unif), mini: c_int::from(s.mini) };
 
 	let mut out: *mut u8 = ptr::null_mut();
 	let mut out_size = 0_usize;

@@ -244,26 +244,7 @@ pub struct HeicSettings {
 
 impl Default for HeicSettings {
 	fn default() -> Self {
-		Self {
-			quality: 50,
-			lossless: false,
-			alpha: true,
-			premultiplied_alpha: false,
-			thumbnail: None,
-			thumbnail_alpha: true,
-			chroma_downsampling: None,
-			color_profile: ColorProfile::default(),
-			two_colr_boxes: false,
-			clli: None,
-			pasp: None,
-			orientation: Orientation::Normal,
-			cut_tiles: None,
-			omaf_projection: None,
-			description: String::new(),
-			compatible_brands: Vec::new(),
-			unif: false,
-			mini: false,
-		}
+		Self { quality: 50, lossless: false, alpha: true, premultiplied_alpha: false, thumbnail: None, thumbnail_alpha: true, chroma_downsampling: None, color_profile: ColorProfile::default(), two_colr_boxes: false, clli: None, pasp: None, orientation: Orientation::Normal, cut_tiles: None, omaf_projection: None, description: String::new(), compatible_brands: Vec::new(), unif: false, mini: false }
 	}
 }
 
@@ -280,11 +261,7 @@ impl HeicSettings {
 		}
 		if let ColorProfile::Custom { matrix_coefficients, colour_primaries, transfer_characteristics, .. } = self.color_profile {
 			// heif_nclx_color_profile_set_*: the code points libheif knows.
-			for (field, value, known) in [
-				("heic.color_profile.matrix_coefficients", matrix_coefficients, matches!(matrix_coefficients, 0..=2 | 4..=14)),
-				("heic.color_profile.colour_primaries", colour_primaries, matches!(colour_primaries, 1 | 2 | 4..=12 | 22)),
-				("heic.color_profile.transfer_characteristics", transfer_characteristics, matches!(transfer_characteristics, 1 | 2 | 4..=18)),
-			] {
+			for (field, value, known) in [("heic.color_profile.matrix_coefficients", matrix_coefficients, matches!(matrix_coefficients, 0..=2 | 4..=14)), ("heic.color_profile.colour_primaries", colour_primaries, matches!(colour_primaries, 1 | 2 | 4..=12 | 22)), ("heic.color_profile.transfer_characteristics", transfer_characteristics, matches!(transfer_characteristics, 1 | 2 | 4..=18))] {
 				if !known {
 					return Err(ValidationError::NotAllowed { field, value: i64::from(value) });
 				}

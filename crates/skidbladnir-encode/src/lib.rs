@@ -21,6 +21,7 @@ pub mod inspect;
 mod jpeg;
 pub mod jxl;
 pub mod metadata;
+mod png_gamma;
 pub mod settings;
 pub mod source;
 
