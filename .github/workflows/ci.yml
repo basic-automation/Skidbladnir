@@ -65,12 +65,17 @@ jobs:
           tool: cargo-deny
       - run: cargo deny check
       - name: Third-party notices are current
-        # THIRD-PARTY-NOTICES.md is generated from the licence files of the exact native
-        # sources that are built; bumping one without regenerating it fails here.
+        # THIRD-PARTY-NOTICES.md and THIRD-PARTY-NOTICES-GPL.md are generated from the
+        # licence files of the exact native sources that are built; bumping one without
+        # regenerating them fails here.
         run: python3 scripts/third-party-notices.py --check
 
+  # Both editions on every platform. They differ only in HEIC's encoder — Kvazaar in the
+  # standard edition, x265 in the GPL one (the `gpl` feature, here through `full`) — but
+  # each links its own libheif, so each is built and tested on its own. The standard legs
+  # keep their old names.
   rust:
-    name: rust / ${{ matrix.os }}
+    name: rust / ${{ matrix.os }}${{ matrix.edition == 'gpl' && ' / gpl' || '' }}
     runs-on: ${{ matrix.os }}
     strategy:
       # Every platform's result is wanted on every run: a Windows-only or macOS-only
@@ -78,17 +83,20 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+        edition: [standard, gpl]
+    env:
+      FEATURES: ${{ matrix.edition == 'gpl' && 'skidbladnir/custom-protocol,skidbladnir/full' || 'skidbladnir/custom-protocol' }}
 
     steps:
       - uses: actions/checkout@v7
         with:
-          # libheif, Kvazaar and libde265 are pinned submodules under third_party/.
+          # libheif, Kvazaar, x265 and libde265 are pinned submodules under third_party/.
           submodules: true
 
       - name: Install the Linux system dependencies Tauri needs
         # Needed from Phase 1 onward, when src-tauri/ joins the workspace: Tauri 2 links
         # against webkit2gtk-4.1, and patchelf is what bundles the AppImage.
-        # libavif-bin is libavif's `avifdec`, the reference decoder for the AVIF gate, and
+        # libavif-bin is libavif's `avifdec` and `avifenc`, for the AVIF gates, and
         # libjxl-tools is libjxl's `djxl`, the reference decoder for the JPEG XL gate,
         # and libheif-examples is libheif's `heif-dec`, the reference decoder for HEIC's.
         if: matrix.os == 'ubuntu-latest'
@@ -125,43 +133,68 @@ jobs:
 
       - name: Install nasm
         # libaom, libjpeg-turbo and the AV1 decoder (rav1d) assemble their SIMD with nasm;
-        # rav1d's and libaom's builds fail outright without it.
+        # rav1d's and libaom's builds fail outright without it. So does x265's, in the GPL
+        # edition.
         uses: ilammy/setup-nasm@v1
 
-      - name: Build libheif (Kvazaar + libde265)
+      - name: Build libheif (${{ matrix.edition }} edition)
         uses: ./.github/actions/libheif
+        with:
+          edition: ${{ matrix.edition }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.edition }}
 
+      # Not --all-features: that would build the standard legs with x265, against a
+      # libheif that has none (build.rs refuses the mismatch).
       - name: cargo clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --features "${{ env.FEATURES }}" -- -D warnings
 
       - name: cargo build
-        run: cargo build --workspace --all-targets
+        run: cargo build --workspace --all-targets --features "${{ env.FEATURES }}"
 
       - name: cargo test
-        run: cargo test --workspace --all-features
+        run: cargo test --workspace --features "${{ env.FEATURES }}"
+
+      - name: HEIC reference decoder for the GPL edition
+        # The standard legs get heif-dec with the parity step below; this leg skips that
+        # step (parity is libwebp's, the same in both editions) but still checks what x265
+        # writes against the runner's own libheif. Ubuntu's comes with the system
+        # dependencies above; Windows has none, so it is reported there, not required.
+        if: matrix.edition == 'gpl' && matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then brew install libheif; fi
+          echo "SKIDBLADNIR_REQUIRE_PARITY=1" >> "$GITHUB_ENV"
+
+      - name: x265 output against heif-dec
+        if: matrix.edition == 'gpl'
+        run: cargo test --package skidbladnir-encode --features x265 --test heic_reference -- --nocapture
 
       - name: Install the reference decoders (macOS)
-        # avifdec, djxl and heif-dec; Linux has them from apt above.
-        if: matrix.os == 'macos-latest'
+        # avifdec and avifenc, djxl and heif-dec; Linux has them from apt above.
+        if: matrix.os == 'macos-latest' && matrix.edition == 'standard'
         run: brew install libavif jpeg-xl libheif
 
       - name: reference decoders read what we write
         # Required on Linux and macOS, where the decoders are installed; reported only on
-        # Windows, which has none.
+        # Windows, which has none. The GPL legs check their own HEIC above.
+        if: matrix.edition == 'standard'
         env:
           SKIDBLADNIR_REQUIRE_PARITY: ${{ matrix.os != 'windows-latest' && '1' || '' }}
         # The encoders' byte parity is the `parity` job's. These are the gates a reference
         # DECODER keeps, run on every platform: libavif's avifdec decodes what we write
         # (avif_reference), libjxl's djxl decodes it and rebuilds recompressed JPEGs
         # (jxl_reference), and the runner's own libheif (heif-dec) decodes our HEIC
-        # (heic_reference). Each prints its verdict or a loud "NOT RUN".
-        run: cargo test --package skidbladnir-encode --test avif_reference --test jxl_reference --test heic_reference -- --nocapture
+        # (heic_reference). avif_input is the wide AVIF-input gate: avifenc writes 17 colour
+        # encodings and our decoder must agree with avifdec's reading of them. Each prints
+        # its verdict or a loud "NOT RUN".
+        run: cargo test --package skidbladnir-encode --test avif_reference --test jxl_reference --test heic_reference --test avif_input -- --nocapture
 
   # Byte parity with the four reference encoders — the claim that every result of cwebp,
   # avifenc, cjxl and heif-enc (with Kvazaar) for a still image is one Skidbladnir can
@@ -177,10 +210,11 @@ jobs:
         with:
           submodules: true
 
-      - name: Install the reference tools' PNG and zlib development files
+      - name: Install the reference tools' PNG, TIFF, GIF and zlib development files
+        # libtiff is cwebp's TIFF reader; giflib is for gif2webp, the reference for GIF input.
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libpng-dev zlib1g-dev
+          sudo apt-get install --no-install-recommends -y libpng-dev libtiff-dev libgif-dev zlib1g-dev
 
       - name: Install nasm
         uses: ilammy/setup-nasm@v1
@@ -203,28 +237,38 @@ jobs:
       - name: Build the reference encoders
         run: |
           if [ -x build/reference/bin/cjxl ]; then
-            printf '%s\n' "SKIDBLADNIR_REFERENCE_CWEBP=$PWD/build/reference/bin/cwebp" "SKIDBLADNIR_REFERENCE_AVIFENC=$PWD/build/reference/bin/avifenc" "SKIDBLADNIR_REFERENCE_CJXL=$PWD/build/reference/bin/cjxl" "SKIDBLADNIR_REFERENCE_HEIF_ENC=$PWD/build/reference/heif/bin/heif-enc" >> "$GITHUB_ENV"
+            printf '%s\n' "SKIDBLADNIR_REFERENCE_CWEBP=$PWD/build/reference/bin/cwebp" "SKIDBLADNIR_REFERENCE_IMG2WEBP=$PWD/build/reference/bin/img2webp" "SKIDBLADNIR_REFERENCE_GIF2WEBP=$PWD/build/reference/bin/gif2webp" "SKIDBLADNIR_REFERENCE_AVIFENC=$PWD/build/reference/bin/avifenc" "SKIDBLADNIR_REFERENCE_CJXL=$PWD/build/reference/bin/cjxl" "SKIDBLADNIR_REFERENCE_HEIF_ENC=$PWD/build/reference/heif/bin/heif-enc" >> "$GITHUB_ENV"
           else
             scripts/build-reference-tools.sh >> "$GITHUB_ENV"
           fi
           echo "SKIDBLADNIR_REQUIRE_PARITY=1" >> "$GITHUB_ENV"
 
-      - name: byte parity with cwebp, avifenc, cjxl and heif-enc
+      - name: byte parity with cwebp, img2webp, gif2webp, avifenc, cjxl and heif-enc
         # Released builds are what the claim is about, so the comparison is too.
         # cmyk_jpeg rides along because it checks that cwebp still REFUSES a CMYK JPEG, the
-        # one input Skidbladnir converts to WebP and cwebp does not.
-        run: cargo test --release --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_parity --test jxl_parity --test heic_parity -- --nocapture
+        # one input Skidbladnir converts to WebP and cwebp does not. animation is animated
+        # WebP against img2webp, gif is GIF input against gif2webp, and metadata is
+        # `-metadata` against cwebp.
+        run: cargo test --release --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_parity --test jxl_parity --test heic_parity --test animation --test gif --test metadata -- --nocapture
 
   # Drives the real window over WebDriver. Separate from the compile matrix because it
   # needs a display, a WebKit driver and a full release build, and because a flaky display
   # must not be able to mask a genuine compile failure on another platform.
+  #
+  # Both editions: the GPL one is the same window with x265 behind it, and its own HEIC
+  # checks. Both are audited, since the HEIC panel differs; the screenshots are the
+  # standard edition's.
   window:
-    name: window smoke + accessibility
+    name: window smoke + accessibility${{ matrix.edition == 'gpl' && ' (gpl)' || '' }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        edition: [standard, gpl]
     steps:
       - uses: actions/checkout@v7
         with:
-          # libheif, Kvazaar and libde265 are pinned submodules under third_party/.
+          # libheif, Kvazaar, x265 and libde265 are pinned submodules under third_party/.
           submodules: true
 
       - name: Install the system dependencies
@@ -245,12 +289,16 @@ jobs:
         # rav1d's and libaom's builds fail outright without it.
         uses: ilammy/setup-nasm@v1
 
-      - name: Build libheif (Kvazaar + libde265)
+      - name: Build libheif (${{ matrix.edition }} edition)
         uses: ./.github/actions/libheif
+        with:
+          edition: ${{ matrix.edition }}
 
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.edition }}
 
       - name: Install the WebDriver shim
         run: cargo install tauri-driver --locked
@@ -268,23 +316,27 @@ jobs:
         # directory.
         run: |
           npm --prefix frontend ci
-          cd src-tauri && ../frontend/node_modules/.bin/tauri build --no-bundle
+          args=()
+          if [ "${{ matrix.edition }}" = gpl ]; then args+=(--features gpl --config tauri.gpl.conf.json); fi
+          cd src-tauri && ../frontend/node_modules/.bin/tauri build --no-bundle "${args[@]}"
 
       - name: Smoke test the window
         # xvfb-run because there is no display on the runner. The harness forces the X11
         # backend, which is what WebKitWebDriver needs.
-        run: xvfb-run -a scripts/smoke-test.sh
+        run: xvfb-run -a scripts/smoke-test.sh --edition ${{ matrix.edition }}
 
       - name: Accessibility audit
         run: xvfb-run -a scripts/a11y-audit.sh
 
       - name: Capture the README screenshots
+        if: matrix.edition == 'standard'
         # The dev host cannot take these (WebKitWebDriver's screenshot hangs under
         # XWayland), so CI does, on a virtual screen tall enough for every panel. They are
         # uploaded for a person to review and commit, never committed by CI itself.
         run: xvfb-run -a -s "-screen 0 1400x3200x24" scripts/screenshot.sh --app target/release/skidbladnir --out screenshots
 
       - uses: actions/upload-artifact@v7
+        if: matrix.edition == 'standard'
         with:
           name: screenshots
           path: screenshots/*.png
@@ -318,7 +370,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # libheif, Kvazaar and libde265 are pinned submodules under third_party/.
+          # libheif, Kvazaar, x265 and libde265 are pinned submodules under third_party/.
           submodules: true
 
       - uses: actions/setup-node@v7
@@ -332,7 +384,7 @@ jobs:
         # rav1d's and libaom's builds fail outright without it.
         uses: ilammy/setup-nasm@v1
 
-      - name: Build libheif (Kvazaar + libde265)
+      - name: Build libheif (standard edition)
         uses: ./.github/actions/libheif
 
       - uses: dtolnay/rust-toolchain@stable

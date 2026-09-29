@@ -21,8 +21,13 @@
 //! `SKIDBLADNIR_LIBAVIF=vendored` insists on the static build.
 //!
 //! libheif is different: it is LGPL, so it is linked **dynamically** and shipped beside the
-//! app. `scripts/build-libheif.sh` builds it (with the Kvazaar encoder and the libde265
-//! decoder inside) into `build/libheif`, or wherever `SKIDBLADNIR_LIBHEIF_DIR` points.
+//! app. `scripts/build-libheif.sh` builds it, with the decoder and one HEVC encoder inside,
+//! into `build/libheif` for the standard edition (Kvazaar) or `build/libheif-gpl` for the
+//! GPL edition (x265, the `x265` feature), or wherever `SKIDBLADNIR_LIBHEIF_DIR` points.
+//! The build records its edition in an `EDITION` file beside the library, and this refuses
+//! a library of the other edition: a standard build that linked the GPL libheif would ship
+//! x265 in an app that says it is ISC.
+//!
 //! Without that build the system libheif is linked instead, through `pkg-config`, with a
 //! warning, and `cfg(skidbladnir_system_libheif)` lets the code fall back to whatever HEVC
 //! encoder the system library has. `SKIDBLADNIR_LIBHEIF=vendored` refuses that fallback.
@@ -36,7 +41,7 @@
 //! AVIF and HEIC shims compile `avifenc`'s and `heif-enc`'s own JPEG readers against it, and
 //! `native/jpeg_shim.c` is the plain decode `cwebp` and `cjxl` do.
 
-use std::{env, path::PathBuf, process::Command};
+use std::{env, fs, path::PathBuf, process::Command};
 
 fn main() {
 	let jpeg = Libjpeg::build();
@@ -216,10 +221,14 @@ fn link_libheif(jpeg: &Libjpeg) {
 	println!("cargo:rerun-if-env-changed=SKIDBLADNIR_LIBHEIF_DIR");
 	println!("cargo:rerun-if-changed=native/heic_shim.c");
 	let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"));
-	let prefix = env::var_os("SKIDBLADNIR_LIBHEIF_DIR").map_or_else(|| manifest.join("../../build/libheif"), PathBuf::from);
+	let (edition, build_flag) = if env::var_os("CARGO_FEATURE_X265").is_some() { ("gpl", " --edition gpl") } else { ("standard", "") };
+	let default = if edition == "gpl" { "../../build/libheif-gpl" } else { "../../build/libheif" };
+	let prefix = env::var_os("SKIDBLADNIR_LIBHEIF_DIR").map_or_else(|| manifest.join(default), PathBuf::from);
 	let lib = prefix.join("lib");
+	let marker = prefix.join("EDITION");
 	let built = ["libheif.so", "libheif.dylib", "heif.lib"].iter().any(|name| lib.join(name).exists());
 	println!("cargo:rerun-if-changed={}", lib.display());
+	println!("cargo:rerun-if-changed={}", marker.display());
 
 	// `native/heic_shim.c` is `heif-enc`'s still-image path over this libheif (see src/heic.rs).
 	// It is compiled first so the linker sees its references before the library.
@@ -232,6 +241,9 @@ fn link_libheif(jpeg: &Libjpeg) {
 	jpeg.include(&mut reader);
 	println!("cargo:rerun-if-changed=native/heic_jpeg.cc");
 	if built {
+		let found = fs::read_to_string(&marker).map_or_else(|_| String::new(), |text| text.trim().to_owned());
+		assert!(!found.is_empty(), "{} has a libheif but no EDITION file: it is from an older or unfinished build. Run scripts/build-libheif.sh{build_flag} again", prefix.display());
+		assert!(found == edition, "{} holds the {found} edition's libheif, but this is the {edition} edition's build. Run scripts/build-libheif.sh{build_flag}, or point SKIDBLADNIR_LIBHEIF_DIR at that edition's build", prefix.display());
 		shim.include(prefix.join("include"));
 		reader.include(prefix.join("include"));
 		shim.compile("skidheic");
@@ -244,10 +256,10 @@ fn link_libheif(jpeg: &Libjpeg) {
 			println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib.display());
 		}
 	} else if env::var("SKIDBLADNIR_LIBHEIF").as_deref() == Ok("vendored") {
-		panic!("SKIDBLADNIR_LIBHEIF=vendored, but there is no libheif in {}: run scripts/build-libheif.sh first", lib.display());
+		panic!("SKIDBLADNIR_LIBHEIF=vendored, but there is no libheif in {}: run scripts/build-libheif.sh{build_flag} first", lib.display());
 	} else {
-		println!("cargo:warning=linking the SYSTEM libheif through pkg-config (no build/libheif); release builds ship their own, with the Kvazaar encoder");
-		let library = pkg_config::Config::new().atleast_version("1.23").cargo_metadata(false).probe("libheif").unwrap_or_else(|error| panic!("HEIC needs libheif 1.23: run scripts/build-libheif.sh, or install the system libheif development files. {error}"));
+		println!("cargo:warning=linking the SYSTEM libheif through pkg-config (no {}); release builds ship their own, with the {edition} edition's encoder", prefix.display());
+		let library = pkg_config::Config::new().atleast_version("1.23").cargo_metadata(false).probe("libheif").unwrap_or_else(|error| panic!("HEIC needs libheif 1.23: run scripts/build-libheif.sh{build_flag}, or install the system libheif development files. {error}"));
 		for include in &library.include_paths {
 			shim.include(include);
 			reader.include(include);

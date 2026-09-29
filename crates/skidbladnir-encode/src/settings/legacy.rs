@@ -1,4 +1,4 @@
-//! Reading settings saved before 0.12, when the WebP controls were grouped into modes.
+//! Reading settings saved before 0.14, when the WebP controls were grouped into modes.
 //!
 //! Presets and the preferences file outlive the version that wrote them, so a file from
 //! any earlier version must load, and must encode to **the same bytes it encoded to
@@ -8,7 +8,7 @@
 //! the preset mode never sent `-alpha_q`, auto filtering never sent the strength slider).
 //!
 //! So the old shape is converted by replaying what the old encoder did with it:
-//! [`LegacyWebpSettings::into_current`] is the pre-0.12 `build_config`, writing into the
+//! [`LegacyWebpSettings::into_current`] is the pre-0.14 `build_config`, writing into the
 //! new fields instead of a `WebPConfig`. The old shape is recognised by its `mode` key,
 //! which it always wrote and the current shape never has.
 
@@ -16,7 +16,7 @@ use serde::{Deserialize, Deserializer};
 
 use super::webp::{AlphaFiltering, FilterType, ImageHint, Preset, TargetMetric, WebpMetadata, WebpSettings};
 
-/// The encoding mode, one of the five the pre-0.12 window offered.
+/// The encoding mode, one of the five the pre-0.14 window offered.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Mode {
@@ -33,7 +33,7 @@ pub enum Mode {
 	Preset,
 }
 
-/// The pre-0.12 filter choice: automatic, or one of the two types by hand.
+/// The pre-0.14 filter choice: automatic, or one of the two types by hand.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum LegacyFilter {
@@ -46,7 +46,7 @@ pub enum LegacyFilter {
 	Strong,
 }
 
-/// The pre-0.12 WebP settings, with the defaults they had.
+/// The pre-0.14 WebP settings, with the defaults they had.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LegacyWebpSettings {
 	pub mode: Mode,
@@ -75,11 +75,11 @@ impl Default for LegacyWebpSettings {
 }
 
 impl LegacyWebpSettings {
-	/// What the pre-0.12 encoder made of these settings, as current settings.
+	/// What the pre-0.14 encoder made of these settings, as current settings.
 	///
 	/// A line-for-line replay of the old `build_config`: start from libwebp's defaults and
 	/// apply only what that mode sent. A preset mode with no preset chosen was refused
-	/// before 0.12; here it simply encodes without one.
+	/// before 0.14; here it simply encodes without one.
 	#[must_use]
 	pub fn into_current(self) -> WebpSettings {
 		let lossy = self.mode == Mode::Lossy;
@@ -164,7 +164,7 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for Explicit<T> {
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
 #[serde(untagged)]
 enum Quality {
-	/// A whole number, as `-q` took before 0.12.
+	/// A whole number, as `-q` took before 0.14.
 	Whole(u8),
 	/// A fraction.
 	Fraction(f32),
@@ -231,7 +231,7 @@ pub struct WebpWire {
 }
 
 impl WebpWire {
-	/// Whether this is the pre-0.12 shape.
+	/// Whether this is the pre-0.14 shape.
 	#[must_use]
 	pub const fn is_legacy(&self) -> bool {
 		self.mode.is_some()
@@ -318,5 +318,31 @@ mod tests {
 	fn old_targets_still_load() {
 		assert_eq!(read(r#"{"mode":"lossy","target":{"kind":"psnr","value":42}}"#).target, Some(TargetMetric::Psnr(42.0)));
 		assert_eq!(read(r#"{"mode":"lossless","target":{"kind":"size","value":5000}}"#).target, None, "lossless never sent a target");
+	}
+}
+
+/// The job-wide metadata choice 0.12 and 0.13 stored (`metadata: { icc, exif, xmp }`), off
+/// by default, applied to every format.
+///
+/// Each format now has its own, in its reference tool's terms, and most tools keep metadata
+/// unless told not to. A file that carries this choice gets each format's controls set to
+/// what the choice did: kept where it was on, left out where it was off. The one exception
+/// is JPEG XL's ICC profile, which `cjxl` cannot leave out because it is the colour of the
+/// pixels; 0.12 tagged such pixels sRGB, which was wrong.
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct KeepMetadata {
+	icc: bool,
+	exif: bool,
+	xmp: bool,
+}
+
+impl KeepMetadata {
+	pub(crate) fn apply(self, job: &mut super::EncodeJob) {
+		let source = |keep: bool| if keep { super::MetadataSource::Keep } else { super::MetadataSource::Strip };
+		job.webp.metadata = WebpMetadata { exif: self.exif, icc: self.icc, xmp: self.xmp };
+		(job.avif.icc, job.avif.exif, job.avif.xmp) = (source(self.icc), source(self.exif), source(self.xmp));
+		(job.jxl.exif, job.jxl.xmp) = (source(self.exif), source(self.xmp));
+		job.heic.metadata = super::HeicMetadata { icc: self.icc, exif: self.exif, xmp: self.xmp };
 	}
 }

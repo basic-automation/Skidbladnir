@@ -22,8 +22,8 @@ pub struct Metadata {
 
 impl Metadata {
 	/// Read metadata the way `cwebp` does for this input format. Malformed metadata is
-	/// skipped rather than failing the read: `cwebp` would refuse the file, but a converter
-	/// that refused a photo over a damaged Exif block would be the wrong kind of strict.
+	/// skipped rather than failing the read; where `cwebp -metadata` would refuse the file
+	/// instead, [`Self::cwebp_refusal`] says so, and the WebP path refuses too.
 	#[must_use]
 	pub fn read_like_cwebp(bytes: &[u8], format: SourceFormat) -> Self {
 		match format {
@@ -31,8 +31,27 @@ impl Metadata {
 			SourceFormat::Jpeg => jpeg_like_cwebp(bytes),
 			SourceFormat::Tiff => tiff_like_cwebp(bytes),
 			SourceFormat::Webp => webp_chunks(bytes),
-			// `cwebp` cannot read these at all. Their decoders' own metadata is used.
-			SourceFormat::Avif | SourceFormat::Jxl | SourceFormat::Heic => Self::default(),
+			// `cwebp` cannot read these at all. Their decoders' own metadata is used. (A GIF
+			// goes to WebP through the animation encoder, as `gif2webp`, never through here.)
+			SourceFormat::Avif | SourceFormat::Jxl | SourceFormat::Heic | SourceFormat::Gif => Self::default(),
+		}
+	}
+
+	/// Why `cwebp -metadata` would refuse this file, if it would: its readers extract every
+	/// kind of metadata whenever any is asked for, and fail the whole read on an ICC profile
+	/// split inconsistently across JPEG segments (`StoreICCP`) or a PNG "raw profile" text
+	/// chunk that is not valid hex (`ProcessRawProfile`). Converting anyway would silently
+	/// drop what was asked for, so the WebP path refuses too, by name.
+	#[must_use]
+	pub fn cwebp_refusal(bytes: &[u8], format: SourceFormat) -> Option<&'static str> {
+		match format {
+			SourceFormat::Jpeg => {
+				let markers = jpeg_markers(bytes);
+				let segments = markers.iter().any(|(marker, data)| *marker == 0xe2 && data.len() > JPEG_ICC_SIGNATURE.len() + 2 && data.starts_with(JPEG_ICC_SIGNATURE));
+				(segments && jpeg_icc(&markers).is_none()).then_some("its ICC profile is split across JPEG segments inconsistently, which cwebp refuses too")
+			}
+			SourceFormat::Png => png_read(bytes).1.then_some("a PNG raw-profile text chunk is not valid hex, which cwebp refuses too"),
+			_ => None,
 		}
 	}
 }
@@ -41,8 +60,15 @@ impl Metadata {
 /// then those after it. Within each: `eXIf`; then the text chunks `cwebp` recognises, the
 /// first of a kind winning; then `iCCP`.
 fn png_like_cwebp(bytes: &[u8]) -> Metadata {
+	png_read(bytes).0
+}
+
+/// [`png_like_cwebp`], and whether a raw profile it tried to read was malformed, which
+/// fails `cwebp`'s read.
+fn png_read(bytes: &[u8]) -> (Metadata, bool) {
 	let mut metadata = Metadata::default();
-	let Some(chunks) = png_chunks(bytes) else { return metadata };
+	let mut malformed = false;
+	let Some(chunks) = png_chunks(bytes) else { return (metadata, malformed) };
 	let (head, tail): (Vec<_>, Vec<_>) = {
 		let split = chunks.iter().position(|(kind, _)| kind == b"IDAT").unwrap_or(chunks.len());
 		(chunks[..split].to_vec(), chunks[split..].to_vec())
@@ -62,6 +88,7 @@ fn png_like_cwebp(bytes: &[u8]) -> Metadata {
 				continue;
 			}
 			*slot = if raw_profile { raw_profile_bytes(&text) } else { Some(text) };
+			malformed |= slot.is_none();
 		}
 		if let Some((_, iccp)) = part.iter().find(|(kind, _)| kind == b"iCCP")
 			&& let Some(profile) = libpng_iccp(iccp, png_is_colour(&chunks))
@@ -69,7 +96,7 @@ fn png_like_cwebp(bytes: &[u8]) -> Metadata {
 			metadata.icc = Some(profile);
 		}
 	}
-	metadata
+	(metadata, malformed)
 }
 
 /// Whether a PNG's colour type is a colour one (RGB, palette or RGBA) rather than gray.
@@ -247,10 +274,13 @@ fn jpeg_like_cwebp(bytes: &[u8]) -> Metadata {
 	metadata
 }
 
+/// What starts an ICC profile's `APP2` segment.
+const JPEG_ICC_SIGNATURE: &[u8] = b"ICC_PROFILE\0";
+
 /// An ICC profile split across `ICC_PROFILE` APP2 segments, put back together in sequence
 /// order. `None` if there is none, or the segments are inconsistent (`StoreICCP`'s checks).
 pub(crate) fn jpeg_icc(markers: &[(u8, &[u8])]) -> Option<Vec<u8>> {
-	const SIGNATURE: &[u8] = b"ICC_PROFILE\0";
+	const SIGNATURE: &[u8] = JPEG_ICC_SIGNATURE;
 	let mut segments: Vec<(u8, &[u8])> = Vec::new();
 	let mut expected_count = 0;
 	for (marker, data) in markers {
@@ -304,7 +334,7 @@ pub(crate) fn webp_chunks(bytes: &[u8]) -> Metadata {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
 	use super::*;
 
 	fn chunk(kind: [u8; 4], data: &[u8]) -> Vec<u8> {

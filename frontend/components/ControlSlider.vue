@@ -16,6 +16,8 @@ const props = withDefaults(defineProps<{
 	decimals?: number
 	help?: string
 	disabled?: boolean
+	/** Show the value divided by this, to one decimal: a setting held in tenths reads as 1.0, not 10. */
+	divisor?: number
 }>(), { step: 1 })
 
 const typed = computed({
@@ -54,7 +56,7 @@ const format = computed(() => ({ useGrouping: false, maximumFractionDigits: prop
 				class="w-16"
 				:ui="{ base: 'p-0 text-right text-xs font-semibold tabular-nums text-paleday-accent-text' }"
 			/>
-			<output v-else class="tabular-nums" :class="disabled ? 'text-paleday-dim' : 'text-paleday-accent-text'" aria-live="off">{{ model }}</output>
+			<output v-else class="tabular-nums" :class="disabled ? 'text-paleday-dim' : 'text-paleday-accent-text'" aria-live="off">{{ divisor ? (model / divisor).toFixed(1) : model }}</output>
 		</div>
 		<USlider
 			v-model="model"

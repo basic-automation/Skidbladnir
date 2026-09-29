@@ -74,6 +74,9 @@ pub fn load_from(directory: &Path) -> LoadedPreferences {
 	let Ok(preferences) = serde_json::from_str::<Preferences>(&text) else {
 		return LoadedPreferences { preferences: defaults(), fell_back: Some(PreferencesFallback::Unparseable) };
 	};
+	// Settings saved by the GPL edition can ask for HEIC only x265 writes; the standard
+	// edition keeps everything else rather than discarding the file over it.
+	let preferences = Preferences { settings: preferences.settings.for_this_edition(), ..preferences };
 
 	// A hand-edited or future-version file can parse and still hold values the encoder
 	// will refuse. Catching that here means the UI opens on something usable instead of
@@ -113,7 +116,7 @@ pub fn save_to(directory: &Path, preferences: &Preferences) -> io::Result<()> {
 mod tests {
 	use std::{fs, path::PathBuf};
 
-	use skidbladnir_encode::settings::{EncodeJob, WebpSettings};
+	use skidbladnir_encode::settings::{EncodeJob, HEIC_X265, HeicBitDepth, WebpSettings};
 
 	use super::{Preferences, PreferencesFallback, load_from, save_to};
 
@@ -175,6 +178,19 @@ mod tests {
 		let loaded = load_from(&scratch.0);
 		assert_eq!(loaded.fell_back, Some(PreferencesFallback::InvalidSettings));
 		assert_eq!(loaded.preferences.settings.webp.method, EncodeJob::default().webp.method);
+	}
+
+	/// Preferences saved by the GPL edition with HEIC only x265 writes open in the standard
+	/// edition with everything else intact, rather than falling back to the defaults.
+	#[test]
+	fn gpl_edition_heic_settings_do_not_cost_the_rest() {
+		let scratch = Scratch::new("gplheic");
+		fs::write(scratch.0.join("preferences.json"), br#"{"settings":{"format":"heic","webp":{"quality":61},"heic":{"quality":70,"bitDepth":"ten"}}}"#).expect("write");
+		let loaded = load_from(&scratch.0);
+		assert_eq!(loaded.fell_back, None);
+		assert!((loaded.preferences.settings.webp.quality - 61.0).abs() < f32::EPSILON);
+		assert_eq!(loaded.preferences.settings.heic.quality, 70);
+		assert_eq!(loaded.preferences.settings.heic.bit_depth, if HEIC_X265 { HeicBitDepth::Ten } else { HeicBitDepth::Eight });
 	}
 
 	/// A partial file is a normal thing for a version upgrade to produce; missing fields

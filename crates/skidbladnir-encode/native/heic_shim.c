@@ -43,6 +43,8 @@ typedef struct {
 	   size, which must match). */
 	const uint8_t* jpeg;
 	size_t jpeg_size;
+	/* The GPL edition's 10-bit input: each 8-bit sample widened to 10 bits (no JPEG). */
+	int ten_bit;
 } SkidHeicInput;
 
 int skid_heic_load_jpeg(const unsigned char* data, size_t size, void** holder, struct heif_image** out, unsigned char** exif, size_t* exif_size, unsigned char** xmp, size_t* xmp_size, int* orientation, char* error, size_t error_size);
@@ -73,11 +75,21 @@ static void release(Loaded* loaded)
 	memset(loaded, 0, sizeof(*loaded));
 }
 
+/* One -p NAME=VALUE. */
+typedef struct {
+	const char* name;
+	const char* value;
+} SkidHeicParameter;
+
 typedef struct {
 	/* The encoder's ID, or NULL for libheif's first HEVC encoder. */
 	const char* encoder;
 	int quality;
+	/* heif-enc's -L: libheif's lossless mode and the NCLX it implies (x265 only). */
 	int lossless;
+	/* -p NAME=VALUE, in order. */
+	const SkidHeicParameter* parameters;
+	size_t parameter_count;
 	int alpha;
 	int premultiplied;
 	int thumbnail;
@@ -149,6 +161,63 @@ static void copy_plane(uint8_t* to, size_t to_stride, const uint8_t* from, size_
 	}
 }
 
+/* An 8-bit sample widened to 10 bits by repeating its top bits. */
+static uint16_t widen(uint8_t value)
+{
+	return (uint16_t) ((value << 2) | (value >> 6));
+}
+
+/* The GPL edition's 10-bit input, which heif-enc cannot make from an 8-bit file: the
+   samples widened, gray as a 10-bit Y plane (and alpha), colour as big-endian RRGGBB(AA),
+   so libheif's colour conversion runs at 10 bits. */
+static struct heif_error make_ten_bit_image(const SkidHeicInput* in, struct heif_image** out)
+{
+	struct heif_image* image = NULL;
+	struct heif_error err;
+	int w = (int) in->width, h = (int) in->height;
+	size_t stride;
+	uint8_t* plane;
+	*out = NULL;
+	if (in->layout == 0) {
+		const heif_channel channels[2] = {heif_channel_Y, heif_channel_Alpha};
+		err = heif_image_create(w, h, heif_colorspace_monochrome, heif_chroma_monochrome, &image);
+		if (err.code) return err;
+		for (int c = 0; c < (in->has_alpha ? 2 : 1); c++) {
+			err = heif_image_add_plane(image, channels[c], w, h, 10);
+			if (err.code) goto fail;
+			plane = heif_image_get_plane2(image, channels[c], &stride);
+			for (uint32_t y = 0; y < in->height; y++) {
+				uint16_t* row = (uint16_t*) (plane + y * stride);
+				const uint8_t* from = in->planes[c] + y * in->strides[c];
+				for (uint32_t x = 0; x < in->width; x++) row[x] = widen(from[x]);
+			}
+		}
+	}
+	else {
+		const int channels = in->has_alpha ? 4 : 3;
+		err = heif_image_create(w, h, heif_colorspace_RGB, in->has_alpha ? heif_chroma_interleaved_RRGGBBAA_BE : heif_chroma_interleaved_RRGGBB_BE, &image);
+		if (err.code) return err;
+		err = heif_image_add_plane(image, heif_channel_interleaved, w, h, 10);
+		if (err.code) goto fail;
+		plane = heif_image_get_plane2(image, heif_channel_interleaved, &stride);
+		for (uint32_t y = 0; y < in->height; y++) {
+			uint8_t* row = plane + y * stride;
+			const uint8_t* from = in->planes[0] + y * in->strides[0];
+			for (uint32_t i = 0; i < in->width * (uint32_t) channels; i++) {
+				const uint16_t value = widen(from[i]);
+				row[2 * i] = (uint8_t) (value >> 8);
+				row[2 * i + 1] = (uint8_t) (value & 0xff);
+			}
+		}
+	}
+	*out = image;
+	return err;
+
+fail:
+	heif_image_release(image);
+	return err;
+}
+
 /* The heif_image heifio's loadPNG builds from these samples. */
 static struct heif_error make_image(const SkidHeicInput* in, struct heif_image** out)
 {
@@ -159,7 +228,11 @@ static struct heif_error make_image(const SkidHeicInput* in, struct heif_image**
 	uint8_t* plane;
 	*out = NULL;
 
-	if (in->layout == 0) {
+	if (in->ten_bit) {
+		err = make_ten_bit_image(in, &image);
+		if (err.code) return err;
+	}
+	else if (in->layout == 0) {
 		err = heif_image_create(w, h, heif_colorspace_monochrome, heif_chroma_monochrome, &image);
 		if (err.code) return err;
 		err = heif_image_add_plane(image, heif_channel_Y, w, h, 8);
@@ -210,7 +283,7 @@ static struct heif_error load(const SkidHeicInput* in, Loaded* loaded, char* err
 }
 
 /* create_output_nclx_profile_and_configure_encoder, without -L (see settings/heic.rs). */
-static struct heif_error make_nclx(const SkidHeicSettings* s, const struct heif_image* image, struct heif_color_profile_nclx** out)
+static struct heif_error make_nclx(const SkidHeicSettings* s, struct heif_encoder* encoder, const struct heif_image* image, struct heif_color_profile_nclx** out)
 {
 	struct heif_error ok = {heif_error_Ok, heif_suberror_Unspecified, "Success"};
 	struct heif_color_profile_nclx* nclx = heif_nclx_color_profile_alloc();
@@ -270,6 +343,27 @@ static struct heif_error make_nclx(const SkidHeicSettings* s, const struct heif_
 				nclx->transfer_characteristics = heif_transfer_characteristic_ITU_R_BT_2020_2_12bit;
 			}
 			break;
+	}
+
+	/* -L: lossless, with RGB kept as RGB at 4:4:4, or the input's own chroma. */
+	if (s->lossless) {
+		const char* chroma;
+		err = heif_encoder_set_lossless(encoder, 1);
+		if (err.code) return err;
+		if (heif_image_get_colorspace(image) == heif_colorspace_RGB) {
+			nclx->matrix_coefficients = heif_matrix_coefficients_RGB_GBR;
+			nclx->full_range_flag = 1;
+			chroma = "444";
+		}
+		else {
+			switch (heif_image_get_chroma_format(image)) {
+				case heif_chroma_422: chroma = "422"; break;
+				case heif_chroma_444: chroma = "444"; break;
+				default: chroma = "420"; break;
+			}
+		}
+		err = heif_encoder_set_parameter(encoder, "chroma", chroma);
+		if (err.code) return err;
 	}
 	return ok;
 }
@@ -360,11 +454,16 @@ int skid_heic_encode(const SkidHeicInput* in, const SkidHeicSettings* s, uint8_t
 		if (err.code) { fail(error, error_size, "heif_context_get_encoder", err); goto done; }
 	}
 
-	err = heif_encoder_set_lossy_quality(encoder, s->quality);
-	if (err.code) { fail(error, error_size, "heif_encoder_set_lossy_quality", err); goto done; }
-	if (s->lossless) {
-		err = heif_encoder_set_parameter(encoder, "lossless", "true");
-		if (err.code) { fail(error, error_size, "heif_encoder_set_parameter lossless", err); goto done; }
+	if (!s->lossless) {
+		err = heif_encoder_set_lossy_quality(encoder, s->quality);
+		if (err.code) { fail(error, error_size, "heif_encoder_set_lossy_quality", err); goto done; }
+	}
+	for (size_t i = 0; i < s->parameter_count; i++) {
+		err = heif_encoder_set_parameter(encoder, s->parameters[i].name, s->parameters[i].value);
+		if (err.code) {
+			snprintf(error, error_size, "heif_encoder_set_parameter %s=%s: %s", s->parameters[i].name, s->parameters[i].value, err.message ? err.message : "unknown error");
+			goto done;
+		}
 	}
 
 	options = heif_encoding_options_alloc();
@@ -390,7 +489,7 @@ int skid_heic_encode(const SkidHeicInput* in, const SkidHeicSettings* s, uint8_t
 	xmp = in->jpeg ? loaded.xmp : in->xmp;
 	xmp_size = in->jpeg ? loaded.xmp_size : in->xmp_size;
 
-	err = make_nclx(s, image, &nclx);
+	err = make_nclx(s, encoder, image, &nclx);
 	if (err.code) { fail(error, error_size, "the colour profile", err); goto done; }
 	options->save_alpha_channel = (uint8_t) s->alpha;
 	options->output_nclx_profile = nclx;

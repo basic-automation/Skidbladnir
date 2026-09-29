@@ -1,11 +1,15 @@
 //! HEIC output and input, through libheif — for output, the way `heif-enc -e kvazaar`
 //! drives it.
 //!
-//! The HEVC encoder is **Kvazaar** (BSD-3-Clause) and the decoder **libde265**, both built
-//! *into* one shared libheif (LGPL-3.0) by `scripts/build-libheif.sh`, with libheif's
-//! plugin loading switched off. The app links that libheif dynamically and ships it beside
-//! itself, which is how an ISC app uses an LGPL library, and with no plugin loading it can
-//! never pick up a GPL encoder such as x265 from the user's system.
+//! The HEVC encoder depends on the edition. The standard edition's is **Kvazaar**
+//! (BSD-3-Clause); the GPL edition's, with the `x265` feature, is **x265**
+//! (GPL-2.0-or-later). Either is built *into* one shared libheif (LGPL-3.0) by
+//! `scripts/build-libheif.sh`, with the **libde265** decoder and with libheif's plugin
+//! loading switched off. The app links that libheif dynamically and ships it beside itself,
+//! which is how an ISC app uses an LGPL library, and with no plugin loading the standard
+//! edition can never pick up x265 from the user's system. `build.rs` refuses a libheif
+//! built for the other edition. x265's controls are what `heif-enc -e x265 -p` sets; its
+//! lossless is `heif-enc -L`.
 //!
 //! The encode is `native/heic_shim.c`: `heif-enc`'s still-image path, the libheif calls it
 //! makes after reading one image, as one C function. For a PNG, this module does what
@@ -32,7 +36,7 @@ use std::{
 };
 
 use crate::{
-	encoder::{EncodeError, transformed}, metadata::{jpeg_icc, jpeg_markers, libpng_iccp, png_chunks, png_text}, settings::{ChromaDownsampling, ColorProfile, EncodeJob, HeicSettings, OmafProjection}, source::{SourceFormat, SourceImage}
+	encoder::{EncodeError, transformed}, metadata::{jpeg_icc, jpeg_markers, libpng_iccp, png_chunks, png_text}, settings::{ChromaDownsampling, ColorProfile, EncodeJob, HEIC_X265, HeicBitDepth, HeicPreset, HeicSettings, OmafProjection}, source::{SourceFormat, SourceImage}
 };
 
 #[repr(C)]
@@ -68,7 +72,11 @@ unsafe extern "C" {
 	fn heif_image_handle_get_height(handle: *const Opaque) -> c_int;
 	fn heif_image_handle_release(handle: *const Opaque);
 	fn heif_decode_image(handle: *const Opaque, out: *mut *mut Opaque, colorspace: c_int, chroma: c_int, options: *const c_void) -> HeifError;
+	fn heif_context_get_encoder_descriptors(ctx: *mut Opaque, format: c_int, name_filter: *const c_char, out: *mut *const Opaque, count: c_int) -> c_int;
+	fn heif_encoder_descriptor_get_name(descriptor: *const Opaque) -> *const c_char;
 }
+
+const HEIF_COMPRESSION_HEVC: c_int = 1;
 
 #[repr(C)]
 struct SkidHeicInput {
@@ -87,6 +95,13 @@ struct SkidHeicInput {
 	orientation: c_int,
 	jpeg: *const u8,
 	jpeg_size: usize,
+	ten_bit: c_int,
+}
+
+#[repr(C)]
+struct SkidHeicParameter {
+	name: *const c_char,
+	value: *const c_char,
 }
 
 #[repr(C)]
@@ -94,6 +109,8 @@ struct SkidHeicSettings {
 	encoder: *const c_char,
 	quality: c_int,
 	lossless: c_int,
+	parameters: *const SkidHeicParameter,
+	parameter_count: usize,
 	alpha: c_int,
 	premultiplied: c_int,
 	thumbnail: c_int,
@@ -183,8 +200,36 @@ impl Drop for Image {
 	}
 }
 
-/// The name of the HEVC encoder a release build uses, and asks for by name.
-const ENCODER: &CStr = c"kvazaar";
+/// The name of the HEVC encoder this edition uses, and asks libheif for by name.
+const ENCODER: &CStr = if HEIC_X265 { c"x265" } else { c"kvazaar" };
+
+/// The descriptor of the HEVC encoder called `name`, or `None` if the linked libheif lacks it.
+fn descriptor(ctx: &Context, name: &CStr) -> Option<*const Opaque> {
+	let mut descriptor: *const Opaque = ptr::null();
+	// SAFETY: `ctx` is live, the filter is a NUL-terminated string, and one slot is offered.
+	let found = unsafe { heif_context_get_encoder_descriptors(ctx.0, HEIF_COMPRESSION_HEVC, name.as_ptr(), &raw mut descriptor, 1) };
+	(found > 0 && !descriptor.is_null()).then_some(descriptor)
+}
+
+/// The HEVC encoder this build writes HEIC with, as libheif names it, with its version
+/// where it gives one ("x265 HEVC encoder (4.2+…)").
+#[must_use]
+pub fn encoder_name() -> String {
+	let Ok(ctx) = Context::new() else { return "no HEVC encoder".to_owned() };
+	match descriptor(&ctx, ENCODER) {
+		// SAFETY: the descriptor's name is a static, NUL-terminated string.
+		Some(descriptor) => unsafe { CStr::from_ptr(heif_encoder_descriptor_get_name(descriptor)) }.to_string_lossy().into_owned(),
+		None => format!("no {} HEVC encoder", ENCODER.to_string_lossy()),
+	}
+}
+
+/// Whether the linked libheif has an HEVC encoder called `name` ("x265", "kvazaar"): how
+/// the tests prove each edition ships its own encoder and not the other's.
+#[must_use]
+pub fn has_encoder(name: &str) -> bool {
+	let (Ok(ctx), Ok(name)) = (Context::new(), CString::new(name)) else { return false };
+	descriptor(&ctx, &name).is_some()
+}
 
 /// How the samples are laid out, as the `heif_image` `heif-enc`'s readers build.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -209,6 +254,11 @@ struct Input {
 }
 
 impl Input {
+	/// Whether the image built from this input has an alpha channel.
+	const fn has_alpha(&self) -> bool {
+		matches!(self.layout, Layout::Gray { alpha: true } | Layout::Rgb { alpha: true })
+	}
+
 	/// The source's samples in this layout.
 	fn samples(source: &SourceImage, layout: Layout) -> Vec<Vec<u8>> {
 		let pixels = source.pixels.as_chunks::<4>().0;
@@ -364,18 +414,32 @@ pub fn encode(job: &EncodeJob, source: &SourceImage, on_progress: &mut dyn FnMut
 	if !on_progress(0) {
 		return Err(EncodeError::Cancelled);
 	}
-	let input = match source.format {
+	let mut input = match source.format {
 		_ if source.bytes.is_empty() => Input::other(&source),
 		SourceFormat::Png => Input::png(&source),
 		SourceFormat::Jpeg => Input::jpeg(&source),
 		_ => Input::other(&source),
 	};
-	// A JPEG as it is on disk goes to `heif-enc`'s own reader. Where that reader refuses
-	// it (an RGB-coded JPEG, say), `heif-enc` writes nothing, and the pixels are encoded
-	// instead.
-	let jpeg = (source.format == SourceFormat::Jpeg && !source.bytes.is_empty() && matches!(source, Cow::Borrowed(_))).then_some(source.bytes.as_slice());
-	let output = match encode_input(settings, source.width, source.height, &input, jpeg) {
-		Err(Refusal::Jpeg(_)) => encode_input(settings, source.width, source.height, &input, None),
+	// Metadata left out is metadata the input never had.
+	let keep = settings.metadata;
+	for (kept, slot) in [(keep.icc, &mut input.icc), (keep.exif, &mut input.exif), (keep.xmp, &mut input.xmp)] {
+		if !kept {
+			*slot = None;
+		}
+	}
+	let ten_bit = HEIC_X265 && settings.bit_depth == HeicBitDepth::Ten && !settings.lossless;
+	// libheif encodes transparency with a second x265 that does not get the TU inter depth
+	// fixed for a small image (see `x265_parameters`), and placebo's is one x265 refuses.
+	if HEIC_X265 && input.has_alpha() && settings.preset == HeicPreset::Placebo && source.width.min(source.height) < 32 {
+		return Err(EncodeError::Heic("x265's placebo preset cannot encode the transparency of an image under 32 pixels on a side; use veryslow".to_owned()));
+	}
+	// A JPEG as it is on disk goes to `heif-enc`'s own reader, with any metadata left out
+	// removed from it first. Where that reader refuses it (an RGB-coded JPEG, say),
+	// `heif-enc` writes nothing, and the pixels are encoded instead. 10-bit input is made
+	// from pixels, which `heif-enc` cannot do.
+	let jpeg = (source.format == SourceFormat::Jpeg && !source.bytes.is_empty() && matches!(source, Cow::Borrowed(_)) && !ten_bit).then(|| without_jpeg_metadata(&source.bytes, keep));
+	let output = match encode_input(settings, source.width, source.height, &input, jpeg.as_deref(), ten_bit) {
+		Err(Refusal::Jpeg(_)) => encode_input(settings, source.width, source.height, &input, None, ten_bit),
 		other => other,
 	}
 	.map_err(|refusal| EncodeError::Heic(refusal.into_message()))?;
@@ -401,7 +465,60 @@ impl Refusal {
 	}
 }
 
-fn encode_input(s: &HeicSettings, width: u32, height: u32, input: &Input, jpeg: Option<&[u8]>) -> Result<Vec<u8>, Refusal> {
+/// A JPEG with the metadata segments left out removed: ICC `APP2`, Exif and XMP `APP1`.
+fn without_jpeg_metadata(jpeg: &[u8], keep: crate::settings::HeicMetadata) -> Cow<'_, [u8]> {
+	if keep.icc && keep.exif && keep.xmp {
+		return Cow::Borrowed(jpeg);
+	}
+	let drop = |marker: u8, data: &[u8]| (!keep.icc && marker == 0xe2 && data.starts_with(b"ICC_PROFILE\0")) || (!keep.exif && marker == 0xe1 && data.starts_with(b"Exif\0\0")) || (!keep.xmp && marker == 0xe1 && data.starts_with(b"http://ns.adobe.com/xap/1.0/"));
+	let mut out = jpeg[..2].to_vec();
+	let mut at = 2;
+	while at + 4 <= jpeg.len() && jpeg[at] == 0xff {
+		let marker = jpeg[at + 1];
+		if marker == 0xda || marker == 0xd9 || marker == 0x01 || (0xd0..=0xd7).contains(&marker) {
+			break;
+		}
+		let end = at + 2 + usize::from(u16::from_be_bytes([jpeg[at + 2], jpeg[at + 3]]));
+		let Some(segment) = jpeg.get(at..end) else { break };
+		if !drop(marker, &segment[4..]) {
+			out.extend_from_slice(segment);
+		}
+		at = end;
+	}
+	out.extend_from_slice(&jpeg[at..]);
+	Cow::Owned(out)
+}
+
+/// x265's controls as `heif-enc -p` parameters, for an image this size.
+pub(crate) fn x265_parameters(s: &HeicSettings, (width, height): (u32, u32)) -> Vec<(String, String)> {
+	let tenths = |value: u16| format!("{}.{}", value / 10, value % 10);
+	let mut parameters = Vec::new();
+	// -L sets the chroma itself.
+	if !s.lossless {
+		parameters.push(("chroma".to_owned(), s.chroma.parameter().to_owned()));
+	}
+	parameters.push(("preset".to_owned(), s.preset.parameter().to_owned()));
+	parameters.push(("tune".to_owned(), s.tune.parameter().to_owned()));
+	// libheif codes an image under 32 pixels on a side in 16-pixel CTUs, where x265 allows
+	// transform units at most 3 levels deep, for inter prediction too. The preset's inter
+	// depth (4 for placebo) goes unused in a still image, but x265 still checks it.
+	let small = width.min(height) < 32;
+	parameters.push(("tu-intra-depth".to_owned(), (if small { s.tu_intra_depth.min(3) } else { s.tu_intra_depth }).to_string()));
+	if small {
+		parameters.push(("x265:tu-inter-depth".to_owned(), "3".to_owned()));
+	}
+	// Straight to x265. libheif applies these after its own settings and the preset and
+	// tune, so they override all of them.
+	parameters.push(("x265:aq-mode".to_owned(), s.aq_mode.parameter().to_owned()));
+	parameters.push(("x265:aq-strength".to_owned(), tenths(u16::from(s.aq_strength))));
+	parameters.push(("x265:psy-rd".to_owned(), tenths(u16::from(s.psy_rd))));
+	parameters.push(("x265:psy-rdoq".to_owned(), tenths(s.psy_rdoq)));
+	parameters.push(("x265:deblock".to_owned(), if s.deblock { format!("{}:{}", s.deblock_strength, s.deblock_threshold) } else { "false".to_owned() }));
+	parameters.push(("x265:sao".to_owned(), (if s.sao { "true" } else { "false" }).to_owned()));
+	parameters
+}
+
+fn encode_input(s: &HeicSettings, width: u32, height: u32, input: &Input, jpeg: Option<&[u8]>, ten_bit: bool) -> Result<Vec<u8>, Refusal> {
 	if c_int::try_from(width).is_err() || c_int::try_from(height).is_err() {
 		return Err(Refusal::Other(format!("{width}x{height} is too large for HEIC")));
 	}
@@ -417,7 +534,18 @@ fn encode_input(s: &HeicSettings, width: u32, height: u32, input: &Input, jpeg: 
 		Layout::Rgb { alpha } => (1, alpha, width as usize * if alpha { 4 } else { 3 }),
 	};
 	let plane = |i: usize| input.planes.get(i).map_or(ptr::null(), Vec::as_ptr);
-	let raw = SkidHeicInput { width, height, layout, has_alpha: c_int::from(has_alpha), planes: [plane(0), plane(1)], strides: [row, width as usize], icc, icc_size, exif, exif_size, xmp, xmp_size, orientation: c_int::from(input.orientation), jpeg: jpeg.map_or(ptr::null(), <[u8]>::as_ptr), jpeg_size: jpeg.map_or(0, <[u8]>::len) };
+	let raw = SkidHeicInput { width, height, layout, has_alpha: c_int::from(has_alpha), planes: [plane(0), plane(1)], strides: [row, width as usize], icc, icc_size, exif, exif_size, xmp, xmp_size, orientation: c_int::from(input.orientation), jpeg: jpeg.map_or(ptr::null(), <[u8]>::as_ptr), jpeg_size: jpeg.map_or(0, <[u8]>::len), ten_bit: c_int::from(ten_bit) };
+
+	// Kvazaar's lossless is its `-p lossless=true`; x265's is `-L`.
+	let parameters: Vec<(String, String)> = if HEIC_X265 {
+		x265_parameters(s, (width, height))
+	} else if s.lossless {
+		vec![("lossless".to_owned(), "true".to_owned())]
+	} else {
+		Vec::new()
+	};
+	let parameters: Vec<(CString, CString)> = parameters.into_iter().map(|(name, value)| Ok((CString::new(name)?, CString::new(value)?))).collect::<Result<_, std::ffi::NulError>>().map_err(|_| Refusal::Other("an encoder parameter contains a NUL character".to_owned()))?;
+	let parameter_pointers: Vec<SkidHeicParameter> = parameters.iter().map(|(name, value)| SkidHeicParameter { name: name.as_ptr(), value: value.as_ptr() }).collect();
 
 	let (color_profile, [matrix_coefficients, colour_primaries, transfer_characteristics], full_range) = match s.color_profile {
 		ColorProfile::Custom { matrix_coefficients, colour_primaries, transfer_characteristics, full_range } => (0, [matrix_coefficients, colour_primaries, transfer_characteristics].map(c_int::from), full_range),
@@ -427,7 +555,7 @@ fn encode_input(s: &HeicSettings, width: u32, height: u32, input: &Input, jpeg: 
 		ColorProfile::Bt2020 => (4, [0; 3], true),
 	};
 	let size = |value: Option<u32>| value.map_or(0, |value| c_int::try_from(value).unwrap_or(c_int::MAX));
-	let settings = SkidHeicSettings { encoder: if SYSTEM_LIBHEIF { ptr::null() } else { ENCODER.as_ptr() }, quality: c_int::from(s.quality), lossless: c_int::from(s.lossless), alpha: c_int::from(s.alpha), premultiplied: c_int::from(s.premultiplied_alpha), thumbnail: size(s.thumbnail), thumbnail_alpha: c_int::from(s.thumbnail_alpha), chroma_downsampling: s.chroma_downsampling.map_or(0, ChromaDownsampling::as_libheif), color_profile, matrix_coefficients, colour_primaries, transfer_characteristics, full_range: c_int::from(full_range), two_colr_boxes: c_int::from(s.two_colr_boxes), clli_set: c_int::from(s.clli.is_some()), clli: s.clli.unwrap_or([0; 2]), pasp_set: c_int::from(s.pasp.is_some()), pasp: s.pasp.unwrap_or([0; 2]), orientation: s.orientation.as_libheif(), cut_tiles: size(s.cut_tiles), omaf_projection: s.omaf_projection.map_or(-1, OmafProjection::as_libheif), description: description.as_ptr(), brands: brands.as_ptr().cast(), brand_count: s.compatible_brands.len(), unif: c_int::from(s.unif), mini: c_int::from(s.mini) };
+	let settings = SkidHeicSettings { encoder: if SYSTEM_LIBHEIF { ptr::null() } else { ENCODER.as_ptr() }, quality: c_int::from(s.quality), lossless: c_int::from(HEIC_X265 && s.lossless), parameters: parameter_pointers.as_ptr(), parameter_count: parameter_pointers.len(), alpha: c_int::from(s.alpha), premultiplied: c_int::from(s.premultiplied_alpha), thumbnail: size(s.thumbnail), thumbnail_alpha: c_int::from(s.thumbnail_alpha), chroma_downsampling: s.chroma_downsampling.map_or(0, ChromaDownsampling::as_libheif), color_profile, matrix_coefficients, colour_primaries, transfer_characteristics, full_range: c_int::from(full_range), two_colr_boxes: c_int::from(s.two_colr_boxes), clli_set: c_int::from(s.clli.is_some()), clli: s.clli.unwrap_or([0; 2]), pasp_set: c_int::from(s.pasp.is_some()), pasp: s.pasp.unwrap_or([0; 2]), orientation: s.orientation.as_libheif(), cut_tiles: size(s.cut_tiles), omaf_projection: s.omaf_projection.map_or(-1, OmafProjection::as_libheif), description: description.as_ptr(), brands: brands.as_ptr().cast(), brand_count: s.compatible_brands.len(), unif: c_int::from(s.unif), mini: c_int::from(s.mini) };
 
 	let mut out: *mut u8 = ptr::null_mut();
 	let mut out_size = 0_usize;
@@ -504,9 +632,9 @@ pub fn dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
 
 #[cfg(test)]
 mod tests {
-	use super::{decode, dimensions, encode, exif_orientation, linked_version, set_exif_orientation};
+	use super::{SYSTEM_LIBHEIF, decode, dimensions, encode, encoder_name, exif_orientation, has_encoder, linked_version, set_exif_orientation};
 	use crate::{
-		encoder::{EncodeError, RgbaImage}, settings::{EncodeJob, HeicSettings, OutputFormat, Resize}, source::SourceImage
+		encoder::{EncodeError, RgbaImage}, settings::{EncodeJob, HEIC_X265, HeicSettings, OutputFormat, Resize}, source::SourceImage
 	};
 
 	/// Smooth ramps (HEVC's natural material) with a transparent left quarter.
@@ -594,6 +722,33 @@ mod tests {
 		assert!(run(HeicSettings { quality: 101, ..HeicSettings::default() }, Resize::default(), 8, 8, &pixels, &mut |_| true).is_err());
 	}
 
+	/// The licence rests on this: the standard edition ships Kvazaar and not x265, and the
+	/// GPL edition x265 and not Kvazaar.
+	#[test]
+	fn the_linked_libheif_has_this_editions_encoder_and_not_the_other() {
+		if SYSTEM_LIBHEIF {
+			eprintln!("EDITION CHECK NOT RUN: this build links the system libheif, which has whatever encoders it has");
+			return;
+		}
+		assert_eq!(has_encoder("x265"), HEIC_X265, "x265 in the linked libheif: {}", has_encoder("x265"));
+		assert_eq!(has_encoder("kvazaar"), !HEIC_X265, "Kvazaar in the linked libheif: {}", has_encoder("kvazaar"));
+		let name = encoder_name().to_lowercase();
+		assert!(name.contains(if HEIC_X265 { "x265" } else { "kvazaar" }), "encodes with {name}");
+	}
+
+	/// Kvazaar's lossless coding (`-p lossless=true`) keeps the 4:2:0 image exactly: what
+	/// decodes differs from the source only by the conversion to 4:2:0 and back, which the
+	/// lossy encode adds to.
+	#[test]
+	#[cfg(not(feature = "x265"))]
+	fn kvazaars_lossless_coding_is_closer_than_its_best_lossy() {
+		let pixels = fixture(64, 48, false);
+		let closeness = |settings: HeicSettings| psnr(&pixels, &decode(&run(settings, Resize::default(), 64, 48, &pixels, &mut |_| true).expect("encode")).expect("decode").2);
+		let lossless = closeness(HeicSettings { lossless: true, ..HeicSettings::default() });
+		let best = closeness(HeicSettings { quality: 100, ..HeicSettings::default() });
+		assert!(lossless >= best, "lossless at {lossless:.1} dB, quality 100 at {best:.1} dB");
+	}
+
 	#[test]
 	fn a_file_that_is_not_heif_is_refused() {
 		assert!(decode(b"not a heif file").is_err());
@@ -617,5 +772,136 @@ mod tests {
 		set_exif_orientation(&mut exif, 1);
 		assert_eq!(exif_orientation(&exif), 1);
 		assert_eq!(exif_orientation(b"not exif"), 1, "no TIFF header reads as the default");
+	}
+
+	/// x265's controls, only in the GPL edition.
+	#[cfg(feature = "x265")]
+	mod x265 {
+		use std::{
+			ffi::{c_int, c_void}, ptr
+		};
+
+		use super::{fixture, psnr, run};
+		use crate::{
+			heic::{Context, HeifError, Opaque, check, decode}, settings::{EncodeJob, HeicAqMode, HeicBitDepth, HeicChroma, HeicPreset, HeicSettings, HeicTune, OutputFormat, Resize}, source::{SourceFormat, SourceImage}
+		};
+
+		unsafe extern "C" {
+			fn heif_context_read_from_memory_without_copy(ctx: *mut Opaque, data: *const c_void, size: usize, options: *const c_void) -> HeifError;
+			fn heif_context_get_primary_image_handle(ctx: *mut Opaque, out: *mut *mut Opaque) -> HeifError;
+			fn heif_image_handle_get_luma_bits_per_pixel(handle: *const Opaque) -> c_int;
+			fn heif_image_handle_get_preferred_decoding_colorspace(handle: *const Opaque, colorspace: *mut c_int, chroma: *mut c_int) -> HeifError;
+			fn heif_image_handle_release(handle: *const Opaque);
+		}
+
+		/// The coded bit depth and libheif's chroma enum (1 = 4:2:0, 2 = 4:2:2, 3 = 4:4:4)
+		/// of a HEIC's primary image.
+		fn coded(bytes: &[u8]) -> (c_int, c_int) {
+			let ctx = Context::new().expect("context");
+			// SAFETY: `bytes` outlives `ctx`; the handle is released once.
+			unsafe {
+				check("read", heif_context_read_from_memory_without_copy(ctx.0, bytes.as_ptr().cast(), bytes.len(), ptr::null())).expect("read");
+				let mut handle: *mut Opaque = ptr::null_mut();
+				check("handle", heif_context_get_primary_image_handle(ctx.0, &raw mut handle)).expect("handle");
+				let (mut colorspace, mut chroma) = (0, 0);
+				check("colorspace", heif_image_handle_get_preferred_decoding_colorspace(handle, &raw mut colorspace, &raw mut chroma)).expect("colorspace");
+				let bits = heif_image_handle_get_luma_bits_per_pixel(handle);
+				heif_image_handle_release(handle);
+				(bits, chroma)
+			}
+		}
+
+		fn heic(settings: &HeicSettings, width: u32, height: u32, pixels: &[u8]) -> Vec<u8> {
+			run(settings.clone(), Resize::default(), width, height, pixels, &mut |_| true).expect("encode")
+		}
+
+		#[test]
+		fn lossless_keeps_every_pixel_and_its_alpha() {
+			let pixels = fixture(64, 48, true);
+			let bytes = heic(&HeicSettings { lossless: true, ..HeicSettings::default() }, 64, 48, &pixels);
+			let (_, _, rgba) = decode(&bytes).expect("decode");
+			let opaque = |image: &[u8]| image.as_chunks::<4>().0.iter().filter(|pixel| pixel[3] == 255).copied().collect::<Vec<_>>();
+			assert_eq!(opaque(&rgba), opaque(&pixels), "an opaque pixel changed");
+			assert_eq!(rgba.as_chunks::<4>().0.iter().map(|pixel| pixel[3]).collect::<Vec<_>>(), pixels.as_chunks::<4>().0.iter().map(|pixel| pixel[3]).collect::<Vec<_>>(), "alpha changed");
+		}
+
+		/// An ICC profile labels the pixels; it must not cost lossless its identity matrix.
+		#[test]
+		fn lossless_with_an_icc_profile_is_still_exact() {
+			let pixels = fixture(64, 48, false);
+			let mut png = Vec::new();
+			{
+				let mut info = png::Info::with_size(64, 48);
+				info.color_type = png::ColorType::Rgba;
+				info.bit_depth = png::BitDepth::Eight;
+				info.icc_profile = Some(std::borrow::Cow::Owned(crate::metadata::tests::test_icc(*b"RGB ")));
+				png::Encoder::with_info(&mut png, info).expect("a valid header").write_header().expect("header").write_image_data(&pixels).expect("pixels");
+			}
+			let source = SourceImage { format: SourceFormat::Png, bytes: png, ..SourceImage::from_rgba(&crate::encoder::RgbaImage { width: 64, height: 48, pixels: &pixels }) };
+			let job = EncodeJob { format: OutputFormat::Heic, heic: HeicSettings { lossless: true, ..HeicSettings::default() }, ..EncodeJob::default() };
+			let bytes = crate::heic::encode(&job, &source, &mut |_| true).expect("encode");
+			let (_, _, rgba) = decode(&bytes).expect("decode");
+			assert_eq!(rgba, pixels, "lossless with an ICC profile changed pixels");
+		}
+
+		#[test]
+		fn each_chroma_is_written_as_asked_and_444_keeps_colour_detail() {
+			// One-pixel stripes of red and blue: all of the detail is in the colour.
+			let pixels: Vec<u8> = (0..32 * 32).flat_map(|i| if i % 2 == 0 { [255, 0, 0, 255] } else { [0, 0, 255, 255] }).collect();
+			let at = |chroma| {
+				let bytes = heic(&HeicSettings { quality: 90, chroma, ..HeicSettings::default() }, 32, 32, &pixels);
+				(coded(&bytes).1, psnr(&pixels, &decode(&bytes).expect("decode").2))
+			};
+			let (c420, p420) = at(HeicChroma::Yuv420);
+			let (c422, _) = at(HeicChroma::Yuv422);
+			let (c444, p444) = at(HeicChroma::Yuv444);
+			assert_eq!((c420, c422, c444), (1, 2, 3), "coded chroma formats");
+			assert!(p444 > p420 + 6.0, "4:4:4 decodes at {p444:.1} dB, 4:2:0 at {p420:.1} dB");
+		}
+
+		#[test]
+		fn ten_bit_is_written_as_main_10_and_reads_back() {
+			let pixels = fixture(64, 48, true);
+			let bytes = heic(&HeicSettings { bit_depth: HeicBitDepth::Ten, ..HeicSettings::default() }, 64, 48, &pixels);
+			assert_eq!(coded(&bytes).0, 10);
+			let (width, height, rgba) = decode(&bytes).expect("decode");
+			assert_eq!((width, height), (64, 48));
+			assert!(psnr(&pixels, &rgba) > 30.0, "decodes at only {:.1} dB", psnr(&pixels, &rgba));
+			assert_eq!(coded(&heic(&HeicSettings::default(), 64, 48, &pixels)).0, 8);
+		}
+
+		/// At every CTU size libheif picks: 16 pixels under 32 on a side, where x265 is
+		/// strictest, 32 under 64, and 64.
+		#[test]
+		fn every_preset_tune_and_aq_mode_is_one_x265_accepts_at_any_size() {
+			let settings: Vec<HeicSettings> = HeicPreset::ALL.map(|preset| HeicSettings { preset, tu_intra_depth: 4, ..HeicSettings::default() }).into_iter().chain([HeicTune::Psnr, HeicTune::Ssim, HeicTune::Grain, HeicTune::Fastdecode].map(|tune| HeicSettings { tune, ..HeicSettings::default() })).chain([HeicAqMode::Off, HeicAqMode::Variance, HeicAqMode::AutoVariance, HeicAqMode::AutoVarianceDark, HeicAqMode::AutoVarianceEdge].map(|aq_mode| HeicSettings { aq_mode, ..HeicSettings::default() })).collect();
+			let mut refused = Vec::new();
+			for (width, height) in [(16, 16), (48, 40), (64, 64)] {
+				for alpha in [false, true] {
+					let pixels = fixture(width, height, alpha);
+					for settings in &settings {
+						// The one combination x265 cannot do, refused up front with a reason.
+						let impossible = alpha && width < 32 && settings.preset == HeicPreset::Placebo;
+						match run(settings.clone(), Resize::default(), width, height, &pixels, &mut |_| true) {
+							Err(error) if !impossible => refused.push(format!("{width}x{height} alpha {alpha} {:?}/{:?}/{:?}: {error}", settings.preset, settings.tune, settings.aq_mode)),
+							Ok(_) if impossible => refused.push(format!("{width}x{height} transparent placebo was not refused")),
+							_ => {}
+						}
+					}
+				}
+			}
+			assert!(refused.is_empty(), "x265 refused {refused:#?}");
+		}
+
+		#[test]
+		fn the_tuning_controls_reach_x265() {
+			let pixels = fixture(64, 64, false);
+			let default = heic(&HeicSettings::default(), 64, 64, &pixels);
+			let tuned = HeicSettings { preset: HeicPreset::Ultrafast, tu_intra_depth: 4, aq_strength: 25, psy_rd: 40, psy_rdoq: 200, deblock_strength: -3, deblock_threshold: 4, ..HeicSettings::default() };
+			assert_ne!(heic(&tuned, 64, 64, &pixels), default, "the tuning changed nothing");
+			let off = HeicSettings { deblock: false, sao: false, aq_mode: HeicAqMode::Off, psy_rd: 0, psy_rdoq: 0, ..HeicSettings::default() };
+			let bytes = heic(&off, 64, 64, &pixels);
+			assert!(psnr(&pixels, &decode(&bytes).expect("decode").2) > 30.0);
+		}
 	}
 }

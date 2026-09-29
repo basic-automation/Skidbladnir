@@ -1,7 +1,7 @@
 //! The AVIF controls: every `avifenc` option that changes the file it writes for a still
 //! image, with libaom as the AV1 encoder.
 //!
-//! Until 0.12 AVIF went through `ravif`, whose seven controls reached a fraction of what
+//! Until 0.14 AVIF went through `ravif`, whose seven controls reached a fraction of what
 //! `avifenc` can write: no 12-bit, no 4:2:0, 4:2:2 or 4:0:0, no true lossless, no colour
 //! signalling, tiling, grids, target size or codec tuning. The encoder is now libavif with
 //! libaom, `avifenc`'s own library and default codec, and these settings are `avifenc`'s
@@ -286,7 +286,7 @@ impl AvifSettings {
 	}
 }
 
-/// The pre-0.12 `ravif` settings, as they were written.
+/// The pre-0.14 `ravif` settings, as they were written.
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 struct Ravif {
@@ -367,7 +367,7 @@ const fn default_speed() -> Option<u8> {
 	Some(6)
 }
 
-/// Accept the pre-0.12 `ravif` shape as well as this one. `ravif`'s controls map onto
+/// Accept the pre-0.14 `ravif` shape as well as this one. `ravif`'s controls map onto
 /// `avifenc`'s where they have an equivalent; an untouched `ravif` default becomes
 /// `avifenc`'s default rather than being carried across as though it were a choice.
 impl<'de> Deserialize<'de> for AvifSettings {

@@ -10,13 +10,14 @@
 // components/; the crop and resize they share are GeometrySettingsPanel. Help text is each
 // tool's own, with the flag the control sets.
 import { computed, onMounted, onUnmounted, ref, toRaw, watch } from 'vue'
-import type { ConversionReport, EncodeJob, OutputFormat } from '~/composables/useSettings'
+import type { ConversionReport, Edition, EncodeJob, OutputFormat } from '~/composables/useSettings'
 import { formatBytes } from '~/composables/useSettings'
 import { invokeCommand, isTauri } from '~/composables/useTauri'
 
 const settings = ref<EncodeJob | null>(null)
 const backendVersion = ref('')
 const appVersion = ref('')
+const edition = ref<Edition | null>(null)
 const startupError = ref('')
 
 const inputPaths = ref<string[]>([])
@@ -31,7 +32,7 @@ let unlistenDrop: (() => void) | null = null
 
 /** What the Rust core says about a path the user offered. */
 interface WebpInfo { width: number, height: number, hasAlpha: boolean, hasAnimation: boolean, compression: 'lossy' | 'lossless' | 'mixed' }
-interface PathInspection { path: string, supported: boolean, format: string | null, webp: WebpInfo | null }
+interface PathInspection { path: string, supported: boolean, format: string | null, webp: WebpInfo | null, animated: boolean }
 
 const inspected = ref<PathInspection[]>([])
 
@@ -46,7 +47,7 @@ const mirrorStructure = ref(true)
 const includeSubfolders = ref(false)
 // The folder the queue was scanned from, so the scan can be redone when the option changes.
 const scannedRoot = ref('')
-const animatedInputs = computed(() => inspected.value.filter(entry => entry.webp?.hasAnimation))
+const animatedInputs = computed(() => inspected.value.filter(entry => entry.animated))
 
 /** Preferences as the Rust side stores them, plus why it fell back if it did. */
 interface Preferences { settings: EncodeJob, outputDirectory: string | null }
@@ -81,9 +82,12 @@ const isWebp = computed(() => settings.value?.format === 'webp')
 const isAvif = computed(() => settings.value?.format === 'avif')
 const isJxl = computed(() => settings.value?.format === 'jxl')
 const isHeic = computed(() => settings.value?.format === 'heic')
+// The GPL edition encodes HEIC with x265, and only it has x265's controls.
+const x265 = computed(() => edition.value?.x265 === true)
 onMounted(async () => {
 	try {
 		backendVersion.value = await invokeCommand<string>('encoder_version')
+		edition.value = await invokeCommand<Edition>('edition')
 		const { getVersion } = await import('@tauri-apps/api/app')
 		appVersion.value = await getVersion()
 		// Preferences carry the defaults when there is nothing stored, so this is the only
@@ -141,7 +145,7 @@ onUnmounted(() => {
 
 async function chooseInputs() {
 	const { open } = await import('@tauri-apps/plugin-dialog')
-	const picked = await open({ multiple: true, filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'jpe', 'jif', 'jfif', 'jfi', 'tif', 'tiff', 'webp', 'avif', 'jxl', 'heic', 'heif'] }] })
+	const picked = await open({ multiple: true, filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'jpe', 'jif', 'jfif', 'jfi', 'tif', 'tiff', 'webp', 'avif', 'jxl', 'heic', 'heif', 'gif'] }] })
 	scanned.value = []
 	scannedRoot.value = ''
 	if (Array.isArray(picked)) inputPaths.value = picked
@@ -299,7 +303,7 @@ const converted = computed(() => reports.value.length > 0 && failures.value.leng
 // Preview: encode one of the selected files into memory with the current settings and
 // show it beside the original. Nothing is written to disk. The core returns both sides as
 // data: URLs and computes the saving itself.
-interface Preview { original: string, encoded: string, sourceBytes: number, encodedBytes: number, width: number, height: number, savingPercent: number | null }
+interface Preview { original: string, encoded: string, sourceBytes: number, encodedBytes: number, width: number, height: number, savingPercent: number | null, frames: number }
 const preview = ref<Preview | null>(null)
 const previewFormat = ref<OutputFormat>('webp')
 const previewPath = ref('')
@@ -534,7 +538,9 @@ function basename(path: string): string {
 
 			<div class="flex-1" />
 			<p v-if="appVersion" class="text-[10px] text-paleday-bright" data-selectable>
-				v{{ appVersion }}
+				v{{ appVersion }}<template v-if="edition?.x265">
+					· GPL edition
+				</template>
 			</p>
 		</aside>
 
@@ -623,13 +629,20 @@ function basename(path: string): string {
 							{{ inspected[0]!.webp!.compression }}{{ inspected[0]!.webp!.hasAlpha ? ', with alpha' : '' }}.
 						</p>
 						<p v-if="animatedInputs.length > 0" class="text-paleday-warning">
-							{{ animatedInputs.length === 1 ? 'One queued file is an animated WebP' : `${animatedInputs.length} queued files are animated WebPs` }}.
-							Skidbladnir encodes still images, so {{ animatedInputs.length === 1 ? 'it' : 'they' }} will be
-							skipped with an error rather than converted.
+							{{ animatedInputs.length === 1 ? 'One queued file is an animation' : `${animatedInputs.length} queued files are animations` }} (animated WebP or GIF).
+							<template v-if="!isWebp">
+								This format holds still images only here, so {{ animatedInputs.length === 1 ? 'it' : 'they' }} will be
+								skipped with an error rather than cut down to one frame. Choose WebP to convert
+								{{ animatedInputs.length === 1 ? 'it' : 'them' }} with every frame.
+							</template>
+							<template v-else>
+								{{ animatedInputs.length === 1 ? 'It' : 'They' }} will be re-encoded as animated WebP with every
+								frame and its timing kept. Every setting applies to each frame.
+							</template>
 						</p>
 						<p v-if="dropRejected > 0" class="text-paleday-warning">
 							{{ dropRejected }} dropped {{ dropRejected === 1 ? 'file was' : 'files were' }} not a
-							PNG, JPEG, TIFF, WebP, AVIF, JPEG XL or HEIC and {{ dropRejected === 1 ? 'was' : 'were' }} skipped.
+							PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC or GIF and {{ dropRejected === 1 ? 'was' : 'were' }} skipped.
 						</p>
 					</div>
 
@@ -711,7 +724,7 @@ function basename(path: string): string {
 						<WebpSettingsPanel v-if="isWebp" v-model="settings.webp" />
 						<AvifSettingsPanel v-if="isAvif" v-model="settings.avif" />
 						<JxlSettingsPanel v-if="isJxl" v-model="settings.jxl" />
-						<HeicSettingsPanel v-if="isHeic" v-model="settings.heic" />
+						<HeicSettingsPanel v-if="isHeic" v-model="settings.heic" :x265="x265" />
 						<GeometrySettingsPanel v-model="settings" />
 
 						<ControlPanel v-if="inputPaths.length > 0 && !busy" title="Preview">
@@ -752,6 +765,9 @@ function basename(path: string): string {
 										</p>
 										<figcaption class="text-xs text-paleday-dim">
 											{{ previewFormat.toUpperCase() }} · {{ formatBytes(preview.encodedBytes) }} · {{ preview.width }}×{{ preview.height }}
+											<template v-if="preview.frames > 1">
+												· {{ preview.frames }} frames
+											</template>
 											<template v-if="preview.savingPercent !== null">
 												· <span class="font-semibold" :class="preview.savingPercent >= 0 ? 'text-paleday-accent-text' : 'text-paleday-warning'">{{ preview.savingPercent >= 0 ? '−' : '+' }}{{ Math.abs(preview.savingPercent).toFixed(1) }}%</span>
 											</template>

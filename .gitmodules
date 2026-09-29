@@ -31,3 +31,7 @@
 	url = https://github.com/libjpeg-turbo/libjpeg-turbo.git
 	shallow = true
 	version = 3.2.0
+[submodule "third_party/x265"]
+	path = third_party/x265
+	url = https://bitbucket.org/multicoreware/x265_git.git
+	version = 4.2

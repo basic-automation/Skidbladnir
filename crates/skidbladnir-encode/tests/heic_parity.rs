@@ -75,6 +75,12 @@ impl Run {
 }
 
 fn prepare() -> Option<Run> {
+	// The claim is the standard edition's: Kvazaar, as `heif-enc -e kvazaar`. The GPL
+	// edition encodes with x265 instead, which this reference is not.
+	if skidbladnir_encode::settings::HEIC_X265 {
+		eprintln!("HEIC PARITY NOT RUN: this is the GPL edition, whose HEIC encoder is x265; the heif-enc parity gate is the standard edition's (Kvazaar).");
+		return None;
+	}
 	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
 	let (heif_enc, lib) = match reference() {
 		Ok(found) => found,

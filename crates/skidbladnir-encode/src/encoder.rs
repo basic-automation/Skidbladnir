@@ -52,11 +52,11 @@
 
 use std::ffi::c_int;
 
-use libwebp_sys::{WEBP_ENCODER_ABI_VERSION, WebPBlendAlpha, WebPConfig, WebPConfigInitInternal, WebPEncode, WebPMemoryWrite, WebPMemoryWriter, WebPMemoryWriterClear, WebPMemoryWriterInit, WebPPicture, WebPPictureCopy, WebPPictureFree, WebPPictureImportRGBA, WebPPictureImportRGBX, WebPPictureInitInternal, WebPPictureRescale, WebPPictureView, WebPPreset, WebPValidateConfig};
+use libwebp_sys::{VP8StatusCode, WEBP_CSP_MODE, WEBP_DECODER_ABI_VERSION, WEBP_ENCODER_ABI_VERSION, WebPBlendAlpha, WebPConfig, WebPConfigInitInternal, WebPDecode, WebPDecoderConfig, WebPEncCSP, WebPEncode, WebPFreeDecBuffer, WebPGetFeaturesInternal, WebPInitDecoderConfigInternal, WebPMemoryWrite, WebPMemoryWriter, WebPMemoryWriterClear, WebPMemoryWriterInit, WebPPicture, WebPPictureAlloc, WebPPictureCopy, WebPPictureFree, WebPPictureImportRGBA, WebPPictureImportRGBX, WebPPictureInitInternal, WebPPictureRescale, WebPPictureView, WebPPreset, WebPValidateConfig, WebPYUVABuffer};
 use thiserror::Error;
 
 use crate::{
-	metadata::Metadata, settings::{Crop, EncodeJob, FilterType, OutputFormat, Resize, TargetMetric, WebpMetadata, WebpSettings}, source::SourceImage
+	metadata::Metadata, settings::{Crop, EncodeJob, FilterType, OutputFormat, Resize, TargetMetric, WebpMetadata, WebpSettings}, source::{SourceFormat, SourceImage}
 };
 
 /// An 8-bit RGBA source image, borrowed.
@@ -144,6 +144,10 @@ pub enum EncodeError {
 		/// Height of the image.
 		height: u32,
 	},
+	/// The metadata was asked to be kept but is malformed, in a way `cwebp -metadata` also
+	/// refuses (see [`Metadata::cwebp_refusal`]).
+	#[error("could not keep the metadata: {0}")]
+	Metadata(&'static str),
 	/// Adding the metadata would take the file past the 4 GiB RIFF limit.
 	#[error("adding the metadata would exceed the WebP container's size limit")]
 	MetadataTooLarge,
@@ -155,7 +159,8 @@ pub enum EncodeError {
 /// Every field is written, not only the ones that differ from the default, so the config
 /// is fully determined by the settings. The one piece of `cwebp.c` logic that is not a
 /// plain assignment is kept: a size or PSNR target with a single pass forces six passes.
-fn build_config(settings: &WebpSettings) -> Result<WebPConfig, EncodeError> {
+/// Animations (`crate::animation`) build each frame's config here too.
+pub(crate) fn build_config(settings: &WebpSettings) -> Result<WebPConfig, EncodeError> {
 	settings.validate()?;
 
 	// WebPConfigInit: the inline helper libwebp declares in its header is not exported,
@@ -244,12 +249,12 @@ const fn unpack_version(packed: c_int) -> (i32, i32, i32) {
 ///
 /// The `*Internal` functions take this so a binary built against one libwebp cannot
 /// silently pass a differently-shaped struct to another.
-const fn abi_version() -> c_int {
+pub(crate) const fn abi_version() -> c_int {
 	WEBP_ENCODER_ABI_VERSION.cast_signed()
 }
 
 /// Owns a `WebPPicture` so its buffers are released even if an encode step fails.
-struct Picture(WebPPicture);
+pub(crate) struct Picture(pub(crate) WebPPicture);
 
 impl Drop for Picture {
 	fn drop(&mut self) {
@@ -417,7 +422,7 @@ fn checked_dimensions(image: &RgbaImage<'_>) -> Result<(c_int, c_int), EncodeErr
 }
 
 /// Import RGBA pixels into a fresh ARGB `WebPPicture`.
-fn argb_picture(image: &RgbaImage<'_>) -> Result<Picture, EncodeError> {
+pub(crate) fn argb_picture(image: &RgbaImage<'_>) -> Result<Picture, EncodeError> {
 	let (width, height) = checked_dimensions(image)?;
 	let mut picture = Picture(unsafe {
 		let mut picture = std::mem::zeroed::<WebPPicture>();
@@ -482,39 +487,50 @@ pub fn rescale_rgba(image: &RgbaImage<'_>, resize: Resize) -> Result<(u32, u32, 
 fn encode_webp(job: &EncodeJob, source: &SourceImage, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
 	let settings = &job.webp;
 	let config = build_config(settings)?;
+	if settings.metadata.any()
+		&& let Some(reason) = Metadata::cwebp_refusal(&source.bytes, source.format)
+	{
+		return Err(EncodeError::Metadata(reason));
+	}
 	// cwebp's PNG reader has libpng correct a PNG's gamma to a 2.2 display.
 	let corrected = crate::png_gamma::like_cwebp(source);
 	let image = corrected.as_deref().map_or_else(|| source.as_rgba(), |pixels| RgbaImage { width: source.width, height: source.height, pixels });
 	let (width, height) = checked_dimensions(&image)?;
 
-	let mut picture = Picture(unsafe {
-		let mut picture = std::mem::zeroed::<WebPPicture>();
-		if WebPPictureInitInternal(&raw mut picture, abi_version()) == 0 {
-			return Err(EncodeError::Libwebp("WebPPictureInit"));
-		}
-		picture
-	});
-
 	// cwebp.c decides the colour path *before* reading the input, because it changes which
 	// conversion the samples go through. It looks at the resize as given, before
 	// `-resize_mode` has had a chance to decline it. Matching it is a parity requirement,
 	// not an optimisation.
-	picture.0.use_argb = c_int::from(config.lossless == 1 || config.use_sharp_yuv == 1 || config.preprocessing > 0 || job.crop.is_some() || !job.resize.is_noop());
-	picture.0.width = width;
-	picture.0.height = height;
+	let use_argb = config.lossless == 1 || config.use_sharp_yuv == 1 || config.preprocessing > 0 || job.crop.is_some() || !job.resize.is_noop();
+	let mut picture = if !use_argb && source.format == SourceFormat::Webp && !source.bytes.is_empty() {
+		// A WebP source off the ARGB path is decoded straight into YUV 4:2:0, never RGB.
+		yuv_picture(&source.bytes, settings.keep_alpha)?
+	} else {
+		let mut picture = Picture(unsafe {
+			let mut picture = std::mem::zeroed::<WebPPicture>();
+			if WebPPictureInitInternal(&raw mut picture, abi_version()) == 0 {
+				return Err(EncodeError::Libwebp("WebPPictureInit"));
+			}
+			picture
+		});
+		picture.0.use_argb = c_int::from(use_argb);
+		picture.0.width = width;
+		picture.0.height = height;
 
-	// 4 bytes per pixel, tightly packed, so the stride is the row length.
-	let stride = width.checked_mul(4).ok_or(EncodeError::ImageTooLarge { width: image.width, height: image.height })?;
-	// `-noalpha` makes cwebp's readers drop the alpha channel, keeping the colour under it
-	// as it is. Importing RGBX is exactly that. An opaque RGBA import is identical to an
-	// RGB one, which is what cwebp's readers do for a source with no alpha.
-	// SAFETY: beyond the module-wide invariants, this one depends on the buffer actually
-	// being as large as the dimensions claim — libwebp reads `height * stride` bytes from
-	// it. That was checked above: `pixels.len()` is exactly `width * height * 4`.
-	let imported = unsafe { if settings.keep_alpha { WebPPictureImportRGBA(&raw mut picture.0, image.pixels.as_ptr(), stride) } else { WebPPictureImportRGBX(&raw mut picture.0, image.pixels.as_ptr(), stride) } };
-	if imported == 0 {
-		return Err(EncodeError::Libwebp("WebPPictureImportRGBA"));
-	}
+		// 4 bytes per pixel, tightly packed, so the stride is the row length.
+		let stride = width.checked_mul(4).ok_or(EncodeError::ImageTooLarge { width: image.width, height: image.height })?;
+		// `-noalpha` makes cwebp's readers drop the alpha channel, keeping the colour under
+		// it as it is. Importing RGBX is exactly that. An opaque RGBA import is identical to
+		// an RGB one, which is what cwebp's readers do for a source with no alpha.
+		// SAFETY: beyond the module-wide invariants, this one depends on the buffer actually
+		// being as large as the dimensions claim — libwebp reads `height * stride` bytes
+		// from it. That was checked above: `pixels.len()` is exactly `width * height * 4`.
+		let imported = unsafe { if settings.keep_alpha { WebPPictureImportRGBA(&raw mut picture.0, image.pixels.as_ptr(), stride) } else { WebPPictureImportRGBX(&raw mut picture.0, image.pixels.as_ptr(), stride) } };
+		if imported == 0 {
+			return Err(EncodeError::Libwebp("WebPPictureImportRGBA"));
+		}
+		picture
+	};
 
 	if let Some(colour) = settings.blend_alpha {
 		// SAFETY: the picture was imported above; the call reads and writes its own planes.
@@ -539,6 +555,68 @@ fn encode_webp(job: &EncodeJob, source: &SourceImage, on_progress: &mut dyn FnMu
 		resize_picture(&mut picture, resize, &config)?;
 	}
 
+	let dimensions = (picture.0.width, picture.0.height);
+	let bytes = encode_picture(&config, picture, on_progress)?;
+	if !settings.metadata.any() {
+		return Ok(bytes);
+	}
+	let metadata = Metadata::read_like_cwebp(&source.bytes, source.format);
+	with_metadata(bytes, &metadata, settings.metadata, dimensions)
+}
+
+/// Decode a WebP file into a fresh YUV 4:2:0 `WebPPicture` (with an alpha plane if the
+/// file has alpha and it is kept), exactly as `cwebp`'s `ReadWebP` (`imageio/webpdec.c`)
+/// does when `use_argb` is off. Decoding to RGBA and converting back lands a few bytes away.
+fn yuv_picture(webp: &[u8], keep_alpha: bool) -> Result<Picture, EncodeError> {
+	let decode_failed = EncodeError::Libwebp("WebPDecode");
+	let mut decoder = unsafe {
+		let mut config = std::mem::zeroed::<WebPDecoderConfig>();
+		if WebPInitDecoderConfigInternal(&raw mut config, WEBP_DECODER_ABI_VERSION.cast_signed()) == 0 {
+			return Err(EncodeError::Libwebp("WebPInitDecoderConfig"));
+		}
+		config
+	};
+	// SAFETY: `webp` is a live slice of `webp.len()` bytes for the whole call.
+	if unsafe { WebPGetFeaturesInternal(webp.as_ptr(), webp.len(), &raw mut decoder.input, WEBP_DECODER_ABI_VERSION.cast_signed()) } != VP8StatusCode::VP8_STATUS_OK {
+		return Err(decode_failed);
+	}
+	let has_alpha = keep_alpha && decoder.input.has_alpha != 0;
+
+	let mut picture = Picture(unsafe {
+		let mut picture = std::mem::zeroed::<WebPPicture>();
+		if WebPPictureInitInternal(&raw mut picture, abi_version()) == 0 {
+			return Err(EncodeError::Libwebp("WebPPictureInit"));
+		}
+		picture
+	});
+	picture.0.use_argb = 0;
+	picture.0.width = decoder.input.width;
+	picture.0.height = decoder.input.height;
+	picture.0.colorspace = if has_alpha { WebPEncCSP::WEBP_YUV420A } else { WebPEncCSP::WEBP_YUV420 };
+	if unsafe { WebPPictureAlloc(&raw mut picture.0) } == 0 {
+		return Err(EncodeError::ImageTooLarge { width: decoder.input.width.cast_unsigned(), height: decoder.input.height.cast_unsigned() });
+	}
+
+	// The decoder writes into the picture's own planes, laid out as WebPPictureAlloc made
+	// them, and sized as cwebp sizes them.
+	let (height, uv_rows) = (picture.0.height, (picture.0.height + 1) / 2);
+	let plane = |stride: c_int, rows: c_int| usize::try_from(stride).unwrap_or(0) * usize::try_from(rows).unwrap_or(0);
+	decoder.output.colorspace = if has_alpha { WEBP_CSP_MODE::MODE_YUVA } else { WEBP_CSP_MODE::MODE_YUV };
+	decoder.output.u.YUVA = WebPYUVABuffer { y: picture.0.y, u: picture.0.u, v: picture.0.v, a: if has_alpha { picture.0.a } else { std::ptr::null_mut() }, y_stride: picture.0.y_stride, u_stride: picture.0.uv_stride, v_stride: picture.0.uv_stride, a_stride: if has_alpha { picture.0.a_stride } else { 0 }, y_size: plane(picture.0.y_stride, height), u_size: plane(picture.0.uv_stride, uv_rows), v_size: plane(picture.0.uv_stride, uv_rows), a_size: plane(picture.0.a_stride, height) };
+	decoder.output.is_external_memory = 1;
+	// SAFETY: the output buffer points into the picture's allocation with the sizes just
+	// computed from its own strides, and the picture outlives the call.
+	let status = unsafe { WebPDecode(webp.as_ptr(), webp.len(), &raw mut decoder) };
+	unsafe { WebPFreeDecBuffer(&raw mut decoder.output) };
+	if status != VP8StatusCode::VP8_STATUS_OK {
+		return Err(decode_failed);
+	}
+	Ok(picture)
+}
+
+/// Run `WebPEncode` on a prepared picture, with progress and cancellation, and return the
+/// file it wrote.
+fn encode_picture(config: &WebPConfig, mut picture: Picture, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
 	let mut writer = Writer(unsafe {
 		let mut writer = std::mem::zeroed::<WebPMemoryWriter>();
 		WebPMemoryWriterInit(&raw mut writer);
@@ -553,7 +631,7 @@ fn encode_webp(job: &EncodeJob, source: &SourceImage, on_progress: &mut dyn FnMu
 	picture.0.user_data = (&raw mut state).cast();
 	picture.0.progress_hook = Some(progress_trampoline);
 
-	let encoded = unsafe { WebPEncode(&raw const config, &raw mut picture.0) };
+	let encoded = unsafe { WebPEncode(config, &raw mut picture.0) };
 	// Clear the borrow of `state` from the picture before it goes out of scope.
 	picture.0.progress_hook = None;
 	picture.0.user_data = std::ptr::null_mut();
@@ -570,12 +648,7 @@ fn encode_webp(job: &EncodeJob, source: &SourceImage, on_progress: &mut dyn FnMu
 	// SAFETY: on success WebPMemoryWrite has filled `mem` with exactly `size` bytes; the
 	// null check covers the case where the encode produced nothing. The slice is copied
 	// before `writer` is dropped and frees it.
-	let bytes = if writer.0.mem.is_null() { Vec::new() } else { unsafe { std::slice::from_raw_parts(writer.0.mem, writer.0.size) }.to_vec() };
-	if !settings.metadata.any() {
-		return Ok(bytes);
-	}
-	let metadata = Metadata::read_like_cwebp(&source.bytes, source.format);
-	with_metadata(bytes, &metadata, settings.metadata, (picture.0.width, picture.0.height))
+	Ok(if writer.0.mem.is_null() { Vec::new() } else { unsafe { std::slice::from_raw_parts(writer.0.mem, writer.0.size) }.to_vec() })
 }
 
 /// Add the source's metadata to an encoded WebP: `cwebp.c`'s `WriteWebPWithMetadata`.
@@ -660,7 +733,7 @@ fn with_metadata(webp: Vec<u8>, metadata: &Metadata, keep: WebpMetadata, (width,
 /// rescaling an opaque copy for the colour channels and the real picture for alpha, then
 /// reassembling. Without this, a lossless resize diverges from `cwebp` in every
 /// transparent pixel.
-fn resize_picture(picture: &mut Picture, resize: Resize, config: &WebPConfig) -> Result<(), EncodeError> {
+pub(crate) fn resize_picture(picture: &mut Picture, resize: Resize, config: &WebPConfig) -> Result<(), EncodeError> {
 	let target_w = i32::try_from(resize.width).map_err(|_| EncodeError::ImageTooLarge { width: resize.width, height: resize.height })?;
 	let target_h = i32::try_from(resize.height).map_err(|_| EncodeError::ImageTooLarge { width: resize.width, height: resize.height })?;
 

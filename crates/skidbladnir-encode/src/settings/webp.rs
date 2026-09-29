@@ -2,7 +2,7 @@
 //!
 //! # One field per flag, not modes
 //!
-//! Until 0.12 these were grouped into five modes — lossy, lossless, near-lossless,
+//! Until 0.14 these were grouped into five modes — lossy, lossless, near-lossless,
 //! JPEG-like and preset — which is how the Electron app offered them. The grouping made
 //! `cwebp` results unreachable: `-near_lossless 60 -q 90 -m 6` (the near-lossless level
 //! was the quality slider, so effort and method could not be set), `-lossless` without
@@ -23,7 +23,7 @@
 //! offers them as buttons that set the controls, which is what they do on the command line
 //! too. Everything they can produce is therefore reachable through the fields.
 //!
-//! Settings saved before 0.12 still load: see [`super::legacy`].
+//! Settings saved before 0.14 still load: see [`super::legacy`].
 
 use serde::{Deserialize, Serialize};
 
@@ -188,7 +188,7 @@ impl WebpMetadata {
 /// [`super::EncodeJob`] because every output format shares them.
 ///
 /// Field names follow `WebPConfig`, and the doc comment of each names the `cwebp` flag.
-/// [`WebpSettings::default`] reproduces what the app encoded by default before 0.12, so an
+/// [`WebpSettings::default`] reproduces what the app encoded by default before 0.14, so an
 /// untouched window still writes the same file it always did.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -365,7 +365,7 @@ impl WebpSettings {
 	}
 }
 
-/// Accept the pre-0.12 shape as well as this one. See [`super::legacy`].
+/// Accept the pre-0.14 shape as well as this one. See [`super::legacy`].
 impl<'de> Deserialize<'de> for WebpSettings {
 	fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
 		super::legacy::WebpWire::deserialize(deserializer).map(super::legacy::WebpWire::into_settings)
@@ -377,7 +377,7 @@ mod tests {
 	use super::*;
 
 	/// The default is the Electron app's default encode, flag for flag, so a window nobody
-	/// has touched writes the same file after 0.12 as before it.
+	/// has touched writes the same file after 0.14 as before it.
 	#[test]
 	fn default_is_the_apps_historic_encode() {
 		let s = WebpSettings::default();

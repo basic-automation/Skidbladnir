@@ -403,7 +403,7 @@ impl JxlSettings {
 	}
 }
 
-/// Accept the pre-0.12 shape as well as this one: a whole-number `quality` and a
+/// Accept the pre-0.14 shape as well as this one: a whole-number `quality` and a
 /// `lossless` switch, which was `-d 0`.
 impl<'de> Deserialize<'de> for JxlSettings {
 	fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {

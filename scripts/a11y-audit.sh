@@ -129,7 +129,8 @@ audit "as it opens (WebP)" ""
 audit "with AVIF selected" \
 	'[...document.querySelectorAll("[aria-label=\"Output format\"] [role=radio]")][1].click(); await sleep(300); return "ok"'
 # Each format with everything showing: every folded section open and every optional
-# control switched on, so the controls those reveal are audited too.
+# control switched on, so the controls those reveal are audited too. HEIC's panel differs
+# by edition (x265's controls are the GPL edition's), so audit each edition's build.
 everything='const open = () => [...document.querySelectorAll("button[data-disclosure][aria-expanded=false]")].forEach(b => b.click());
 	open(); await sleep(300);
 	[...document.querySelectorAll("main [role=checkbox][data-state=unchecked]")].forEach(c => c.click()); await sleep(300);

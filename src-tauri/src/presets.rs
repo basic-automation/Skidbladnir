@@ -59,8 +59,9 @@ pub fn load_from(directory: &Path) -> Vec<Preset> {
 	let Ok(text) = fs::read_to_string(directory.join(FILE_NAME)) else { return Vec::new() };
 	let Ok(stored) = serde_json::from_str::<BTreeMap<String, EncodeJob>>(&text) else { return Vec::new() };
 	// A BTreeMap is already name-ordered, which keeps the UI's list stable across saves.
-	// Anything the encoder would refuse is dropped rather than offered to the user.
-	stored.into_iter().filter(|(_, settings)| settings.validate().is_ok()).map(|(name, settings)| Preset { name, settings }).collect()
+	// A preset saved by the GPL edition is brought within what this edition writes first;
+	// anything the encoder would still refuse is dropped rather than offered to the user.
+	stored.into_iter().map(|(name, settings)| (name, settings.for_this_edition())).filter(|(_, settings)| settings.validate().is_ok()).map(|(name, settings)| Preset { name, settings }).collect()
 }
 
 /// Save a preset under `name`, replacing any existing one with that name.
@@ -115,7 +116,7 @@ fn write(directory: &Path, stored: &BTreeMap<String, EncodeJob>) -> Result<(), P
 mod tests {
 	use std::{fs, path::PathBuf};
 
-	use skidbladnir_encode::settings::{EncodeJob, WebpSettings};
+	use skidbladnir_encode::settings::{EncodeJob, HEIC_X265, HeicChroma, HeicPreset, WebpSettings};
 
 	use super::{PresetError, delete_from, load_from, save_to};
 
@@ -218,6 +219,20 @@ mod tests {
 		fs::write(scratch.0.join("presets.json"), br#"{"Good":{"quality":50},"Bad":{"method":42}}"#).expect("write");
 		let presets = load_from(&scratch.0);
 		assert_eq!(presets.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), vec!["Good"]);
+	}
+
+	/// A HEIC preset saved by the GPL edition — 4:4:4, from x265 — still opens in the
+	/// standard edition, as the nearest thing Kvazaar writes, and unchanged in the GPL one.
+	/// Lossless survives in both: Kvazaar has its own (`-p lossless=true`).
+	#[test]
+	fn a_gpl_edition_heic_preset_opens_in_either_edition() {
+		let scratch = Scratch::new("gplheic");
+		fs::write(scratch.0.join("presets.json"), br#"{"Archive":{"format":"heic","heic":{"quality":70,"lossless":true,"chroma":"444","preset":"veryslow"}}}"#).expect("write");
+		let presets = load_from(&scratch.0);
+		assert_eq!(presets.len(), 1, "the preset was dropped");
+		let heic = &presets[0].settings.heic;
+		assert_eq!((heic.quality, heic.preset, heic.lossless), (70, HeicPreset::Veryslow, true));
+		assert_eq!(heic.chroma, if HEIC_X265 { HeicChroma::Yuv444 } else { HeicChroma::Yuv420 });
 	}
 
 	#[test]

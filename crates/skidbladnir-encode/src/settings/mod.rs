@@ -24,7 +24,7 @@ pub(crate) mod legacy;
 mod webp;
 
 pub use avif::{AvifSettings, Cicp, CleanAperture, CodecOption, Fraction, Grid, QuantizerRange, Tiling, YuvFormat};
-pub use heic::{ChromaDownsampling, ColorProfile, HeicSettings, OmafProjection, Orientation};
+pub use heic::{ChromaDownsampling, ColorProfile, HEIC_X265, HeicAqMode, HeicBitDepth, HeicChroma, HeicMetadata, HeicPreset, HeicSettings, HeicTune, OmafProjection, Orientation};
 pub use jxl::{JxlColorSpace, JxlSettings, JxlTarget, MetadataSource, Primaries, RenderingIntent, TransferFunction, Tristate, WhitePoint};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -127,7 +127,7 @@ impl Resize {
 }
 
 impl<'de> Deserialize<'de> for Resize {
-	/// Reads the pre-0.12 `noEnlarge` switch as well as `mode`. `noEnlarge` was the only
+	/// Reads the pre-0.14 `noEnlarge` switch as well as `mode`. `noEnlarge` was the only
 	/// resize condition before `cwebp`'s modes were offered, and is `down_only`'s nearest
 	/// equivalent.
 	fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -173,7 +173,7 @@ impl Crop {
 ///
 /// This is the type that crosses the IPC boundary and is written to disk by presets and
 /// the preferences file. It reads every shape an earlier version wrote — the flat shape
-/// from before the per-format split, and the WebP modes from before 0.12 — so a saved
+/// from before the per-format split, and the WebP modes from before 0.14 — so a saved
 /// preset loads with every value intact, and always writes its own shape.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -223,13 +223,19 @@ impl<'de> Deserialize<'de> for EncodeJob {
 			jxl: JxlSettings,
 			#[serde(default)]
 			heic: HeicSettings,
+			/// 0.12 and 0.13 kept metadata job-wide, off by default.
+			metadata: Option<legacy::KeepMetadata>,
 			#[serde(flatten)]
 			flat: legacy::WebpWire,
 		}
 
 		let wire = Wire::deserialize(deserializer)?;
 		let webp = wire.webp.unwrap_or_else(|| if wire.flat.is_empty() { WebpSettings::default() } else { wire.flat.into_settings() });
-		Ok(Self { format: wire.format, crop: wire.crop, resize: wire.resize, webp, avif: wire.avif, jxl: wire.jxl, heic: wire.heic })
+		let mut job = Self { format: wire.format, crop: wire.crop, resize: wire.resize, webp, avif: wire.avif, jxl: wire.jxl, heic: wire.heic };
+		if let Some(keep) = wire.metadata {
+			keep.apply(&mut job);
+		}
+		Ok(job)
 	}
 }
 
@@ -254,6 +260,13 @@ impl EncodeJob {
 			OutputFormat::Jxl => self.jxl.validate(),
 			OutputFormat::Heic => self.heic.validate(),
 		}
+	}
+
+	/// This job with anything this edition cannot write put back to what it can; see
+	/// [`HeicSettings::for_this_edition`]. Applied to settings read from disk.
+	#[must_use]
+	pub fn for_this_edition(self) -> Self {
+		Self { heic: self.heic.for_this_edition(), ..self }
 	}
 }
 
@@ -317,11 +330,32 @@ pub enum ValidationError {
 	/// A crop with no width or no height.
 	#[error("the crop rectangle is empty")]
 	EmptyCrop,
+	/// Only x265 can write this, and this is the standard edition, which encodes with
+	/// Kvazaar.
+	#[error("{field} needs x265, which only the GPL edition of Skidbladnir has")]
+	NeedsX265 {
+		/// The field's name, spelled as the struct field.
+		field: &'static str,
+	},
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// 0.12 and 0.13 stored the metadata choice job-wide; each format now has its own, set
+	/// to what that choice did.
+	#[test]
+	fn the_job_wide_metadata_of_0_12_reaches_every_format() {
+		let job: EncodeJob = serde_json::from_str(r#"{"format":"jxl","metadata":{"icc":true,"exif":false,"xmp":true}}"#).expect("parse");
+		assert_eq!(job.webp.metadata, WebpMetadata { exif: false, icc: true, xmp: true });
+		assert_eq!((&job.avif.icc, &job.avif.exif, &job.avif.xmp), (&MetadataSource::Keep, &MetadataSource::Strip, &MetadataSource::Keep));
+		assert_eq!((&job.jxl.exif, &job.jxl.xmp), (&MetadataSource::Strip, &MetadataSource::Keep));
+		assert_eq!(job.heic.metadata, HeicMetadata { icc: true, exif: false, xmp: true });
+		// Without it, each format keeps its reference tool's own default.
+		let fresh: EncodeJob = serde_json::from_str(r#"{"format":"jxl"}"#).expect("parse");
+		assert_eq!((fresh.jxl.exif, fresh.heic.metadata, fresh.webp.metadata.any()), (MetadataSource::Keep, HeicMetadata::default(), false));
+	}
 
 	#[test]
 	fn default_job_is_an_untouched_webp_encode() {
@@ -346,7 +380,7 @@ mod tests {
 		assert_eq!(Resize::to(10, 0).for_source(1, 1), Resize::to(10, 0));
 	}
 
-	/// The pre-0.12 `noEnlarge` switch becomes `down_only`.
+	/// The pre-0.14 `noEnlarge` switch becomes `down_only`.
 	#[test]
 	fn no_enlarge_reads_as_down_only() {
 		let resize: Resize = serde_json::from_str(r#"{"width":640,"height":0,"noEnlarge":true}"#).expect("deserialize");

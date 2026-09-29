@@ -33,6 +33,17 @@ export interface EncodeJob {
 	heic: HeicSettings
 }
 
+/**
+ * Which edition this build is: standard (Kvazaar, ISC) or GPL (x265, GPL-3.0-or-later).
+ * Only the GPL edition has x265's HEIC controls.
+ */
+export interface Edition {
+	name: 'standard' | 'gpl'
+	label: string
+	license: string
+	x265: boolean
+}
+
 // ---- WebP: cwebp ------------------------------------------------------------------------
 
 export type Preset = 'default' | 'photo' | 'picture' | 'drawing' | 'icon' | 'text'
@@ -186,7 +197,12 @@ export interface JxlSettings {
 	jumbf: MetadataSource
 }
 
-// ---- HEIC: heif-enc -e kvazaar ----------------------------------------------------------
+// ---- HEIC: heif-enc -e kvazaar (standard edition) or -e x265 (GPL edition) --------------
+
+export type HeicChroma = '420' | '422' | '444'
+export type HeicPreset = 'ultrafast' | 'superfast' | 'veryfast' | 'faster' | 'fast' | 'medium' | 'slow' | 'slower' | 'veryslow' | 'placebo'
+export type HeicTune = 'psnr' | 'ssim' | 'grain' | 'fastdecode'
+export type HeicAqMode = 'off' | 'variance' | 'autoVariance' | 'autoVarianceDark' | 'autoVarianceEdge'
 
 export type ChromaDownsampling = 'nearestNeighbor' | 'average' | 'sharpYuv'
 export type ColorProfile =
@@ -214,6 +230,24 @@ export interface HeicSettings {
 	compatibleBrands: string[]
 	unif: boolean
 	mini: boolean
+	/** Which of the input's metadata goes into the file; `heif-enc` copies all three. */
+	metadata: { icc: boolean, exif: boolean, xmp: boolean }
+	// x265's controls, the GPL edition's alone: `heif-enc -p` parameters. Kvazaar has no
+	// equivalent, so the standard edition neither shows nor sends anything but the defaults.
+	// The fractional ones are held in tenths.
+	chroma: HeicChroma
+	bitDepth: 'eight' | 'ten'
+	preset: HeicPreset
+	tune: HeicTune
+	tuIntraDepth: number
+	aqMode: HeicAqMode
+	aqStrength: number
+	psyRd: number
+	psyRdoq: number
+	deblock: boolean
+	deblockStrength: number
+	deblockThreshold: number
+	sao: boolean
 }
 
 // ---- Results ----------------------------------------------------------------------------

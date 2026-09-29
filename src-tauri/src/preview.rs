@@ -13,7 +13,7 @@ use std::path::Path;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::Serialize;
 use skidbladnir_encode::{
-	encoder::{RgbaImage, encode_rgba, encode_source_with_progress}, settings::{EncodeJob, OutputFormat, Resize, WebpSettings}, source::{self, Conversion}
+	animation, encoder::{RgbaImage, encode_rgba, encode_source_with_progress}, settings::{EncodeJob, OutputFormat, Resize, WebpSettings}, source::{self, Conversion, SourceError}
 };
 
 /// Above this many pixels a preview is refused rather than attempted.
@@ -42,6 +42,9 @@ pub struct Preview {
 	/// [`Conversion::saving_percent`] for this preview, so the window shows the core's
 	/// figure rather than recomputing it. `null` for a zero-byte source.
 	pub saving_percent: Option<f64>,
+	/// How many frames both sides have: `1` for a still image. An animated WebP previews
+	/// as two animations, which the webview plays.
+	pub frames: u32,
 }
 
 /// Encode `input` with `settings` and return it beside a faithful copy of the original.
@@ -56,8 +59,16 @@ pub struct Preview {
 ///
 /// Returns the failure as a string for display.
 pub fn preview(settings: &EncodeJob, input: &Path) -> Result<Preview, String> {
-	let source_bytes = std::fs::metadata(input).map(|meta| meta.len()).map_err(|error| format!("could not read `{}`: {error}", input.display()))?;
-	let image = source::load(input).map_err(|error| error.to_string())?;
+	let bytes = std::fs::read(input).map_err(|error| format!("could not read `{}`: {error}", input.display()))?;
+	let source_bytes = bytes.len() as u64;
+	// The same routing as a conversion: an animated WebP or any GIF previews through the
+	// animation encoder when the output is WebP. A still GIF bound for AVIF is a still.
+	if let Some(source) = source::animated_source(input, &bytes).map_err(|error| error.to_string())?
+		&& (settings.format == OutputFormat::Webp || source.animation.frames.len() > 1)
+	{
+		return preview_animation(settings, input, source_bytes, &source);
+	}
+	let image = source::decode(input, bytes).map_err(|error| error.to_string())?;
 
 	if let Some(refusal) = too_large_to_preview(image.width, image.height) {
 		return Err(refusal);
@@ -103,7 +114,29 @@ pub fn preview(settings: &EncodeJob, input: &Path) -> Result<Preview, String> {
 		}
 	};
 	let saving_percent = Conversion { source_bytes, output_bytes: encoded.len() as u64, width, height }.saving_percent();
-	Ok(Preview { original: data_url(&original), encoded: data_url(&shown), source_bytes, encoded_bytes: encoded.len() as u64, width, height, saving_percent })
+	Ok(Preview { original: data_url(&original), encoded: data_url(&shown), source_bytes, encoded_bytes: encoded.len() as u64, width, height, saving_percent, frames: 1 })
+}
+
+/// [`preview`] for an animation: both sides are whole animations, encoded exactly as a
+/// conversion would encode them, so the preview shows every frame rather than the first.
+fn preview_animation(settings: &EncodeJob, input: &Path, source_bytes: u64, source: &source::AnimatedSource) -> Result<Preview, String> {
+	// Same refusal, and the same words, as a conversion: AVIF holds stills only.
+	if settings.format != OutputFormat::Webp {
+		return Err(SourceError::Animated { path: input.to_path_buf() }.to_string());
+	}
+	let animation = &source.animation;
+	// Every frame is held decoded at once, so the guard counts all of them.
+	let frames = u32::try_from(animation.frames.len()).unwrap_or(u32::MAX);
+	if let Some(refusal) = too_large_to_preview(animation.width, animation.height.saturating_mul(frames)) {
+		return Err(format!("{refusal} (an animation counts every frame: {frames} frames of {}x{})", animation.width, animation.height));
+	}
+
+	let encoded = animation::encode_with(&settings.webp, settings.resize, animation, source.keyframes, &mut |_| true).map_err(|error| error.to_string())?;
+	let original = animation::encode(&lossless(settings.resize).webp, settings.resize, animation, &mut |_| true).map_err(|error| error.to_string())?;
+
+	let (width, height) = dimensions(&encoded).unwrap_or((animation.width, animation.height));
+	let saving_percent = Conversion { source_bytes, output_bytes: encoded.len() as u64, width, height }.saving_percent();
+	Ok(Preview { original: data_url(&original), encoded: data_url(&encoded), source_bytes, encoded_bytes: encoded.len() as u64, width, height, saving_percent, frames })
 }
 
 /// A lossless WebP job, for showing pixels exactly.
@@ -251,6 +284,31 @@ mod tests {
 		}
 		// And the multiplication cannot overflow into a false pass.
 		assert!(too_large_to_preview(u32::MAX, u32::MAX).is_some());
+	}
+
+	/// An animated WebP previews as two animations with every frame, and AVIF is refused
+	/// by name rather than previewing a first-frame still the conversion would never write.
+	#[test]
+	fn an_animated_webp_previews_every_frame() {
+		use skidbladnir_encode::animation::{self, Animation, Frame};
+
+		let scratch = Scratch::new("animated");
+		let frames = (0..3_u8).map(|index| Frame { pixels: (0..40 * 30).flat_map(|i| [u8::try_from(i % 200).unwrap_or(0), index * 80, 40, 255]).collect(), duration_ms: 90 }).collect();
+		let source = Animation { width: 40, height: 30, loop_count: 0, background: 0xffff_ffff, frames };
+		let bytes = animation::encode(&WebpSettings { lossless: true, ..Default::default() }, Resize::default(), &source, &mut |_| true).expect("build the fixture");
+		let input = scratch.join("animation.webp");
+		fs::write(&input, &bytes).expect("write");
+
+		let result = preview(&EncodeJob { resize: Resize::to(20, 0), ..Default::default() }, &input).expect("an animation must preview");
+		assert_eq!((result.frames, result.width, result.height), (3, 20, 15));
+		for (label, url) in [("original", &result.original), ("encoded", &result.encoded)] {
+			let side = super::STANDARD.decode(url.trim_start_matches("data:image/webp;base64,")).expect("valid base64");
+			let decoded = animation::decode(&side).expect("each side must be an animation");
+			assert_eq!((decoded.frames.len(), decoded.width, decoded.height), (3, 20, 15), "{label} side");
+		}
+
+		let refused = preview(&EncodeJob { format: OutputFormat::Avif, ..Default::default() }, &input).expect_err("AVIF of an animation must be refused");
+		assert!(refused.contains("animated WebP"), "{refused}");
 	}
 
 	#[test]

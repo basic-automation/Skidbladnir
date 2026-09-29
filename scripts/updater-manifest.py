@@ -13,8 +13,14 @@ The keys are the updater plugin's `{os}-{arch}-{bundle}` targets, so a copy inst
 the .deb is updated with a .deb and one from the AppImage with an AppImage, rather than
 one format replacing the other.
 
+Each edition has its own manifest, and `--prefix` picks its installers out of a directory
+that holds both: `Skidbladnir_` (the default) for the standard edition's latest.json,
+`Skidbladnir-GPL_` for the GPL edition's latest-gpl.json. A GPL install reads only the
+latter (tauri.gpl.conf.json), so it can never be updated to the standard edition, or the
+other way round.
+
 usage: updater-manifest.py --dir DIR --version X.Y.Z --tag vX.Y.Z --repo OWNER/NAME
-                           [--notes-file FILE] [--out latest.json]
+                           [--prefix Skidbladnir_] [--notes-file FILE] [--out latest.json]
 """
 
 import argparse
@@ -43,12 +49,15 @@ def main() -> int:
 	parser.add_argument("--version", required=True)
 	parser.add_argument("--tag", required=True)
 	parser.add_argument("--repo", required=True)
+	parser.add_argument("--prefix", default="Skidbladnir_")
 	parser.add_argument("--notes-file", type=pathlib.Path)
 	parser.add_argument("--out", default="latest.json", type=pathlib.Path)
 	args = parser.parse_args()
 
 	platforms = {}
 	for installer in sorted(args.dir.iterdir()):
+		if not installer.name.startswith(args.prefix):
+			continue
 		for pattern, target in TARGETS:
 			if not pattern.search(installer.name):
 				continue

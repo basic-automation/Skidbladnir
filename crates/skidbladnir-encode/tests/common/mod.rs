@@ -156,10 +156,10 @@ pub fn raw_profile(name: &str, bytes: &[u8]) -> Vec<u8> {
 	text
 }
 
-/// The JPEG fixtures in `tests/fixtures`: the test pattern of [`sample`], written by `cjpeg
+/// The `cjpeg-*` fixtures in `tests/fixtures`: the test pattern of [`sample`], written by `cjpeg
 /// -quality 90` (libjpeg-turbo 3.2.0) at each chroma sampling libjpeg writes, as gray, as
-/// progressive, and with RGB coding, which some readers refuse. `jpeg-420-odd.jpg` is 61x45.
-pub const JPEGS: [(&str, &[u8]); 9] = [("4:2:0", include_bytes!("../fixtures/jpeg-420.jpg")), ("4:4:4", include_bytes!("../fixtures/jpeg-444.jpg")), ("4:2:2", include_bytes!("../fixtures/jpeg-422.jpg")), ("4:4:0", include_bytes!("../fixtures/jpeg-440.jpg")), ("4:1:1", include_bytes!("../fixtures/jpeg-411.jpg")), ("gray", include_bytes!("../fixtures/jpeg-gray.jpg")), ("progressive", include_bytes!("../fixtures/jpeg-progressive.jpg")), ("RGB-coded", include_bytes!("../fixtures/jpeg-rgb.jpg")), ("4:2:0, odd size", include_bytes!("../fixtures/jpeg-420-odd.jpg"))];
+/// progressive, and with RGB coding, which some readers refuse. `cjpeg-420-odd.jpg` is 61x45.
+pub const JPEGS: [(&str, &[u8]); 9] = [("4:2:0", include_bytes!("../fixtures/cjpeg-420.jpg")), ("4:4:4", include_bytes!("../fixtures/cjpeg-444.jpg")), ("4:2:2", include_bytes!("../fixtures/cjpeg-422.jpg")), ("4:4:0", include_bytes!("../fixtures/cjpeg-440.jpg")), ("4:1:1", include_bytes!("../fixtures/cjpeg-411.jpg")), ("gray", include_bytes!("../fixtures/cjpeg-gray.jpg")), ("progressive", include_bytes!("../fixtures/cjpeg-progressive.jpg")), ("RGB-coded", include_bytes!("../fixtures/cjpeg-rgb.jpg")), ("4:2:0, odd size", include_bytes!("../fixtures/cjpeg-420-odd.jpg"))];
 
 /// A JPEG with `segments` (marker, payload) inserted right after its SOI.
 pub fn jpeg_with(jpeg: &[u8], segments: &[(u8, Vec<u8>)]) -> Vec<u8> {
