@@ -26,6 +26,8 @@
 //! Without that build the system libheif is linked instead, through `pkg-config`, with a
 //! warning, and `cfg(skidbladnir_system_libheif)` lets the code fall back to whatever HEVC
 //! encoder the system library has. `SKIDBLADNIR_LIBHEIF=vendored` refuses that fallback.
+//! `native/heic_shim.c`, `heif-enc`'s still-image path as a function, is compiled against
+//! whichever libheif's headers.
 
 use std::{env, path::PathBuf, process::Command};
 
@@ -116,13 +118,20 @@ fn link_libheif() {
 	println!("cargo:rustc-check-cfg=cfg(skidbladnir_vendored_libavif)");
 	println!("cargo:rerun-if-env-changed=SKIDBLADNIR_LIBHEIF");
 	println!("cargo:rerun-if-env-changed=SKIDBLADNIR_LIBHEIF_DIR");
+	println!("cargo:rerun-if-changed=native/heic_shim.c");
 	let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"));
 	let prefix = env::var_os("SKIDBLADNIR_LIBHEIF_DIR").map_or_else(|| manifest.join("../../build/libheif"), PathBuf::from);
 	let lib = prefix.join("lib");
 	let built = ["libheif.so", "libheif.dylib", "heif.lib"].iter().any(|name| lib.join(name).exists());
 	println!("cargo:rerun-if-changed={}", lib.display());
 
+	// `native/heic_shim.c` is `heif-enc`'s still-image path over this libheif (see src/heic.rs).
+	// It is compiled first so the linker sees its references before the library.
+	let mut shim = cc::Build::new();
+	shim.file(manifest.join("native/heic_shim.c")).warnings(false);
 	if built {
+		shim.include(prefix.join("include"));
+		shim.compile("skidheic");
 		println!("cargo:rustc-link-search=native={}", lib.display());
 		println!("cargo:rustc-link-lib=dylib=heif");
 		// This package's own tests find the library where it was built. The app binary sets
@@ -134,7 +143,12 @@ fn link_libheif() {
 		panic!("SKIDBLADNIR_LIBHEIF=vendored, but there is no libheif in {}: run scripts/build-libheif.sh first", lib.display());
 	} else {
 		println!("cargo:warning=linking the SYSTEM libheif through pkg-config (no build/libheif); release builds ship their own, with the Kvazaar encoder");
-		pkg_config::Config::new().atleast_version("1.20").probe("libheif").unwrap_or_else(|error| panic!("HEIC needs libheif: run scripts/build-libheif.sh, or install the system libheif development files. {error}"));
+		let library = pkg_config::Config::new().atleast_version("1.23").cargo_metadata(false).probe("libheif").unwrap_or_else(|error| panic!("HEIC needs libheif 1.23: run scripts/build-libheif.sh, or install the system libheif development files. {error}"));
+		for include in &library.include_paths {
+			shim.include(include);
+		}
+		shim.compile("skidheic");
+		pkg_config::Config::new().atleast_version("1.23").probe("libheif").expect("probed above");
 		println!("cargo:rustc-cfg=skidbladnir_system_libheif");
 	}
 }

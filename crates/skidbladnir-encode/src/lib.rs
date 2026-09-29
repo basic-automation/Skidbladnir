@@ -16,6 +16,7 @@ pub mod cjxl;
 pub mod cwebp;
 pub mod encoder;
 pub mod heic;
+pub mod heif_enc;
 pub mod inspect;
 pub mod jxl;
 pub mod metadata;

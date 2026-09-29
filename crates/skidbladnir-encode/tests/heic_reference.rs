@@ -103,8 +103,8 @@ fn reference_heifdec_reads_our_heic_correctly() {
 		}
 	}
 
-	let low = opaque_psnr(&pixels, &decode(&heifdec, &encode(HeicSettings { quality: 20 }, Resize::default(), &pixels), "q20").2);
-	let high = opaque_psnr(&pixels, &decode(&heifdec, &encode(HeicSettings { quality: 95 }, Resize::default(), &pixels), "q95").2);
+	let low = opaque_psnr(&pixels, &decode(&heifdec, &encode(HeicSettings { quality: 20, ..HeicSettings::default() }, Resize::default(), &pixels), "q20").2);
+	let high = opaque_psnr(&pixels, &decode(&heifdec, &encode(HeicSettings { quality: 95, ..HeicSettings::default() }, Resize::default(), &pixels), "q95").2);
 	assert!(high > low, "quality 95 decodes at {high:.1} dB but quality 20 at {low:.1} dB");
 
 	let (width, height, _) = decode(&heifdec, &encode(HeicSettings::default(), Resize::to(32, 0), &pixels), "resize");
@@ -117,7 +117,7 @@ fn reference_heifdec_reads_our_heic_correctly() {
 #[test]
 fn our_heic_decoder_agrees_with_heifdec() {
 	let Some(heifdec) = heifdec_or_skip("HEIC input") else { return };
-	let file = encode(HeicSettings { quality: 80 }, Resize::default(), &fixture());
+	let file = encode(HeicSettings { quality: 80, ..HeicSettings::default() }, Resize::default(), &fixture());
 	let (_, _, reference) = decode(&heifdec, &file, "agree");
 	let (width, height, ours) = heic::decode(&file).expect("our decoder reads our own file");
 	assert_eq!((width, height), (WIDTH, HEIGHT));

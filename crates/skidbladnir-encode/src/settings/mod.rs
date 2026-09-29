@@ -24,7 +24,7 @@ pub(crate) mod legacy;
 mod webp;
 
 pub use avif::{AvifSettings, Cicp, CleanAperture, CodecOption, Fraction, Grid, QuantizerRange, Tiling, YuvFormat};
-pub use heic::HeicSettings;
+pub use heic::{ChromaDownsampling, ColorProfile, HeicSettings, OmafProjection, Orientation};
 pub use jxl::{JxlColorSpace, JxlSettings, JxlTarget, MetadataSource, Primaries, RenderingIntent, TransferFunction, Tristate, WhitePoint};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
