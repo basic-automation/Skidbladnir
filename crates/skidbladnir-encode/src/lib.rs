@@ -11,6 +11,7 @@
 //! Every control it exposes is represented in [`EncodeJob`]; see ROADMAP.md Phase 2.
 
 pub mod avif;
+pub mod cjxl;
 pub mod cwebp;
 pub mod encoder;
 pub mod heic;

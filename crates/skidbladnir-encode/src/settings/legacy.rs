@@ -132,7 +132,7 @@ impl LegacyWebpSettings {
 /// A field that may be absent, explicitly `null`, or set — three states, because in the
 /// old shape `null` meant "leave libwebp's default" where absent meant the old default.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-enum Explicit<T> {
+pub(crate) enum Explicit<T> {
 	/// The key was not there.
 	#[default]
 	Absent,
@@ -144,7 +144,7 @@ enum Explicit<T> {
 
 impl<T> Explicit<T> {
 	/// The value as an `Option`, or `absent` if the key was not there.
-	fn or(self, absent: Option<T>) -> Option<T> {
+	pub(crate) fn or(self, absent: Option<T>) -> Option<T> {
 		match self {
 			Self::Absent => absent,
 			Self::Null => None,

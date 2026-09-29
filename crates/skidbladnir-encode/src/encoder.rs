@@ -346,16 +346,48 @@ pub fn encode_source_with_progress(job: &EncodeJob, source: &SourceImage, on_pro
 	}
 	match job.format {
 		OutputFormat::Webp => encode_webp(job, source, on_progress),
-		OutputFormat::Avif | OutputFormat::Jxl | OutputFormat::Heic => {
+		OutputFormat::Jxl => crate::jxl::encode(job, source, on_progress),
+		OutputFormat::Avif | OutputFormat::Heic => {
 			let (width, height, pixels) = crop_and_rescale_rgba(&source.as_rgba(), job.crop, job.resize)?;
 			let image = RgbaImage { width, height, pixels: &pixels };
 			match job.format {
 				OutputFormat::Avif => crate::avif::encode(&job.avif, Resize::default(), &image, on_progress),
-				OutputFormat::Jxl => crate::jxl::encode(&job.jxl, Resize::default(), &image, on_progress),
 				_ => crate::heic::encode(&job.heic, Resize::default(), &image, on_progress),
 			}
 		}
 	}
+}
+
+/// The source after the job's crop and resize, with every sample depth it carries.
+///
+/// The 8-bit pixels go through libwebp's rescaler, as they always have, so a resize gives
+/// the same dimensions and filtering whichever format is chosen. 16-bit samples cannot go
+/// through it without losing their depth, so they are resampled by the `image` crate's
+/// triangle filter instead, to the dimensions libwebp chose. Neither reference tool other
+/// than `cwebp` resizes at all, so there is nothing else to match.
+///
+/// # Errors
+///
+/// Returns [`EncodeError`] if the crop does not fit or the rescale fails.
+pub(crate) fn transformed(source: &SourceImage, crop: Option<Crop>, resize: Resize) -> Result<std::borrow::Cow<'_, SourceImage>, EncodeError> {
+	let resize_after_crop = resize.for_source(crop.map_or(source.width, |c| c.width), crop.map_or(source.height, |c| c.height));
+	if crop.is_none() && resize_after_crop.is_noop() {
+		return Ok(std::borrow::Cow::Borrowed(source));
+	}
+	let (width, height, pixels) = crop_and_rescale_rgba(&source.as_rgba(), crop, resize)?;
+	let deep = match &source.deep {
+		None => None,
+		Some(samples) => {
+			let full = image::ImageBuffer::<image::Rgba<u16>, Vec<u16>>::from_raw(source.width, source.height, samples.clone()).ok_or(EncodeError::MalformedImage { width: source.width, height: source.height, actual: samples.len(), expected: source.width as usize * source.height as usize * 4 })?;
+			let cropped = match crop {
+				Some(c) => image::imageops::crop_imm(&full, c.x, c.y, c.width, c.height).to_image(),
+				None => full,
+			};
+			let resized = if (cropped.width(), cropped.height()) == (width, height) { cropped } else { image::imageops::resize(&cropped, width, height, image::imageops::FilterType::Triangle) };
+			Some(resized.into_raw())
+		}
+	};
+	Ok(std::borrow::Cow::Owned(SourceImage { width, height, pixels, deep, gray: source.gray, has_alpha: source.has_alpha, format: source.format, bytes: source.bytes.clone() }))
 }
 
 /// Crop and then resize RGBA pixels, the order `cwebp` applies them in. The resize's mode

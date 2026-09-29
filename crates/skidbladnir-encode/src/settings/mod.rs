@@ -25,7 +25,7 @@ mod webp;
 
 pub use avif::{AvifAlphaMode, AvifBitDepth, AvifColorModel, AvifSettings};
 pub use heic::HeicSettings;
-pub use jxl::JxlSettings;
+pub use jxl::{JxlColorSpace, JxlSettings, JxlTarget, MetadataSource, Primaries, RenderingIntent, TransferFunction, Tristate, WhitePoint};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 pub use webp::{AlphaFiltering, FilterType, ImageHint, Preset, TargetMetric, WebpMetadata, WebpSettings};

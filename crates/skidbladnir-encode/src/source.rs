@@ -638,18 +638,8 @@ pub fn encode_file_with_progress(settings: &EncodeJob, input: &Path, output: &Pa
 	}
 
 	let source_bytes = fs::metadata(input).map(|meta| meta.len()).map_err(|source| SourceError::Read { path: input.to_path_buf(), source })?;
-	let transcoded = if settings.format == OutputFormat::Jxl && settings.jxl.lossless_jpeg {
-		let bytes = fs::read(input).map_err(|source| SourceError::Read { path: input.to_path_buf(), source })?;
-		transcode_jpeg(settings, &bytes, on_progress)?
-	} else {
-		None
-	};
-	let (encoded, fallback_dimensions) = if let Some(encoded) = transcoded {
-		(encoded, (0, 0))
-	} else {
-		let image = load(input)?;
-		(crate::encoder::encode_source_with_progress(settings, &image, on_progress)?, (image.width, image.height))
-	};
+	let image = load(input)?;
+	let (encoded, fallback_dimensions) = (crate::encoder::encode_source_with_progress(settings, &image, on_progress)?, (image.width, image.height));
 
 	// A temporary name in the destination directory, so the rename stays on one filesystem
 	// and is therefore atomic.
@@ -668,28 +658,6 @@ pub fn encode_file_with_progress(settings: &EncodeJob, input: &Path, output: &Pa
 	}
 	.unwrap_or(fallback_dimensions);
 	Ok(Conversion { source_bytes, output_bytes: encoded.len() as u64, width, height })
-}
-
-/// The lossless JPEG XL recompression of `bytes`, when the job asks for it and it applies:
-/// the job writes JPEG XL with [`JxlSettings::lossless_jpeg`] on, the input is a JPEG, and
-/// no resize takes effect for it (a resize needs pixels, and recompression never decodes
-/// any). `Ok(None)` means "encode the pixels instead", including when libjxl declines a
-/// particular JPEG.
-///
-/// # Errors
-///
-/// Returns [`EncodeError`] if libjxl fails outright or the encode was cancelled.
-///
-/// [`JxlSettings::lossless_jpeg`]: crate::settings::JxlSettings::lossless_jpeg
-pub fn transcode_jpeg(settings: &EncodeJob, bytes: &[u8], on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Option<Vec<u8>>, EncodeError> {
-	if settings.format != OutputFormat::Jxl || !settings.jxl.lossless_jpeg || SourceFormat::sniff(bytes) != Some(SourceFormat::Jpeg) {
-		return Ok(None);
-	}
-	let Ok((width, height)) = image::ImageReader::with_format(io::Cursor::new(bytes), image::ImageFormat::Jpeg).into_dimensions() else { return Ok(None) };
-	if !settings.resize.for_source(width, height).is_noop() {
-		return Ok(None);
-	}
-	crate::jxl::recompress_jpeg(&settings.jxl, bytes, on_progress)
 }
 
 /// Read the dimensions back out of an encoded WebP, which is the only way to learn what a

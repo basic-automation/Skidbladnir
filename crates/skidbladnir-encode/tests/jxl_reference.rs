@@ -16,7 +16,7 @@
 use std::{env, fs, path::PathBuf, process::Command};
 
 use skidbladnir_encode::{
-	RgbaImage, encode_rgba, jxl, settings::{EncodeJob, JxlSettings, OutputFormat, Resize}
+	RgbaImage, encode_rgba, jxl, settings::{EncodeJob, JxlSettings, JxlTarget, OutputFormat, Resize}
 };
 
 const WIDTH: u32 = 64;
@@ -120,12 +120,12 @@ fn reference_djxl_reads_our_jpeg_xl_correctly() {
 	}
 
 	// Quality means something: higher quality, closer pixels.
-	let low = opaque_psnr(&pixels, &decode(&djxl, &encode(JxlSettings { quality: 30, ..fast.clone() }, Resize::default(), &pixels), "q30").2);
-	let high = opaque_psnr(&pixels, &decode(&djxl, &encode(JxlSettings { quality: 98, ..fast.clone() }, Resize::default(), &pixels), "q98").2);
+	let low = opaque_psnr(&pixels, &decode(&djxl, &encode(JxlSettings { target: JxlTarget::Quality(30.0), ..fast.clone() }, Resize::default(), &pixels), "q30").2);
+	let high = opaque_psnr(&pixels, &decode(&djxl, &encode(JxlSettings { target: JxlTarget::Quality(98.0), ..fast.clone() }, Resize::default(), &pixels), "q98").2);
 	assert!(high > low, "quality 98 decodes at {high:.1} dB but quality 30 at {low:.1} dB");
 
 	// Lossless is lossless to the reference decoder too, colour under transparency included.
-	let (_, _, exact) = decode(&djxl, &encode(JxlSettings { lossless: true, ..fast.clone() }, Resize::default(), &pixels), "lossless");
+	let (_, _, exact) = decode(&djxl, &encode(JxlSettings { target: JxlTarget::Distance(0.0), ..fast.clone() }, Resize::default(), &pixels), "lossless");
 	assert_eq!(exact, pixels, "djxl's decode of a lossless file must be the source, byte for byte");
 
 	// Every effort level and single-threaded encoding still produce readable files.
@@ -160,7 +160,7 @@ fn reference_djxl_rebuilds_a_recompressed_jpeg_bit_for_bit() {
 fn our_jpeg_xl_decoder_agrees_with_djxl() {
 	let Some(djxl) = djxl_or_skip("JPEG XL input") else { return };
 	let pixels = fixture();
-	for (name, settings) in [("lossy", JxlSettings { effort: 3, ..JxlSettings::default() }), ("lossless", JxlSettings { effort: 3, lossless: true, ..JxlSettings::default() })] {
+	for (name, settings) in [("lossy", JxlSettings { effort: 3, ..JxlSettings::default() }), ("lossless", JxlSettings { effort: 3, target: JxlTarget::Distance(0.0), ..JxlSettings::default() })] {
 		let file = encode(settings, Resize::default(), &pixels);
 		let (_, _, reference) = decode(&djxl, &file, &format!("agree-{name}"));
 		let (width, height, ours) = jxl::decode(&file).expect("our decoder reads our own file");

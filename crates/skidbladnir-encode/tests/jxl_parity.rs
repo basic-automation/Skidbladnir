@@ -1,0 +1,420 @@
+//! The JPEG XL parity gate: our encoder against the real `cjxl`, byte for byte.
+//!
+//! Every case writes a file, runs `cjxl` on it with [`cjxl_args`], converts the same file
+//! through [`encode_file`], and compares the two outputs. The fixtures are PNGs built chunk
+//! by chunk, because `cjxl`'s result depends on far more than the pixels: the bit depth and
+//! `sBIT`, gray or colour, alpha or `tRNS`, each colour chunk and their precedence, the Exif
+//! orientation, and the text chunks it reads metadata from. A JPEG is covered through the
+//! lossless recompression path; a JPEG decoded to pixels is not compared, because it would
+//! compare two JPEG decoders (see ROADMAP.md, Phase 8).
+//!
+//! It needs a `cjxl` of the same libjxl version this crate links, found through
+//! `SKIDBLADNIR_REFERENCE_CJXL` or on `PATH`, and says so and returns when there is none.
+//! `SKIDBLADNIR_REQUIRE_PARITY=1` turns that into a failure.
+
+use std::{
+	env, fs, io::Write as _, path::{Path, PathBuf}, process::Command
+};
+
+use skidbladnir_encode::{
+	cjxl::cjxl_args, jxl, settings::{EncodeJob, JxlColorSpace, JxlSettings, JxlTarget, MetadataSource, OutputFormat, Primaries, RenderingIntent, TransferFunction, Tristate, WhitePoint}, source::encode_file
+};
+
+fn reference_cjxl() -> Option<PathBuf> {
+	if let Some(path) = env::var_os("SKIDBLADNIR_REFERENCE_CJXL") {
+		let path = PathBuf::from(path);
+		return path.is_file().then_some(path);
+	}
+	Command::new("cjxl").arg("--version").output().ok().filter(|out| out.status.success()).map(|_| PathBuf::from("cjxl"))
+}
+
+/// The libjxl version `cjxl --version` reports, e.g. `cjxl v0.12.0 ...`.
+fn reference_version(cjxl: &Path) -> Option<(u32, u32, u32)> {
+	let out = Command::new(cjxl).arg("--version").output().ok()?;
+	let text = String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+	let version = text.split_whitespace().find_map(|word| word.strip_prefix('v'))?;
+	let mut parts = version.split('.').map(str::parse::<u32>);
+	match (parts.next(), parts.next(), parts.next()) {
+		(Some(Ok(a)), Some(Ok(b)), Some(Ok(c))) => Some((a, b, c)),
+		_ => None,
+	}
+}
+
+/// A PNG chunk, CRC included.
+fn chunk(kind: [u8; 4], data: &[u8]) -> Vec<u8> {
+	let mut out = u32::try_from(data.len()).expect("small").to_be_bytes().to_vec();
+	out.extend_from_slice(&kind);
+	out.extend_from_slice(data);
+	let mut crc = flate2::Crc::new();
+	crc.update(&kind);
+	crc.update(data);
+	out.extend_from_slice(&crc.sum().to_be_bytes());
+	out
+}
+
+fn zlib(data: &[u8]) -> Vec<u8> {
+	let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+	encoder.write_all(data).expect("compress");
+	encoder.finish().expect("compress")
+}
+
+/// A PNG from raw rows (without filter bytes), with `extra` chunks before the image data
+/// and `trailing` ones after it.
+fn png(width: u32, height: u32, bit_depth: u8, colour_type: u8, rows: &[u8], extra: &[Vec<u8>], trailing: &[Vec<u8>]) -> Vec<u8> {
+	let mut ihdr = width.to_be_bytes().to_vec();
+	ihdr.extend_from_slice(&height.to_be_bytes());
+	ihdr.extend_from_slice(&[bit_depth, colour_type, 0, 0, 0]);
+	let row = rows.len() / height as usize;
+	let filtered: Vec<u8> = rows.chunks_exact(row).flat_map(|line| std::iter::once(0).chain(line.iter().copied())).collect();
+	let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
+	out.extend(chunk(*b"IHDR", &ihdr));
+	for extra in extra {
+		out.extend_from_slice(extra);
+	}
+	out.extend(chunk(*b"IDAT", &zlib(&filtered)));
+	for trailing in trailing {
+		out.extend_from_slice(trailing);
+	}
+	out.extend(chunk(*b"IEND", &[]));
+	out
+}
+
+/// Sample `c` of pixel `(x, y)`: ramps and a ripple, so every encoder tool has detail.
+fn sample(x: u32, y: u32, c: u32, max: u32) -> u32 {
+	match c {
+		0 => (x * 13 + y * 7) % 97 * max / 97,
+		1 => x * max / 63,
+		2 => y * max / 47,
+		_ => {
+			if (x / 8 + y / 8).is_multiple_of(3) {
+				0
+			} else {
+				max - x * max / 127
+			}
+		}
+	}
+}
+
+const W: u32 = 64;
+const H: u32 = 48;
+
+/// Rows for a colour type and depth: `channels` samples of `bit_depth` bits each.
+fn rows(channels: u32, bit_depth: u8) -> Vec<u8> {
+	let max = (1_u32 << bit_depth) - 1;
+	let mut out = Vec::new();
+	for y in 0..H {
+		let mut bits: Vec<u8> = Vec::new();
+		for x in 0..W {
+			for c in 0..channels {
+				// Gray is channel 0; gray+alpha takes alpha from channel 3.
+				let source = if channels == 2 && c == 1 { 3 } else { c };
+				let value = sample(x, y, source, max);
+				match bit_depth {
+					16 => out.extend_from_slice(&u16::try_from(value).expect("16-bit").to_be_bytes()),
+					8 => out.push(u8::try_from(value).expect("8-bit")),
+					_ => bits.push(u8::try_from(value).expect("low-bit")),
+				}
+			}
+		}
+		if bit_depth < 8 {
+			let per_byte = 8 / bit_depth;
+			for group in bits.chunks(usize::from(per_byte)) {
+				let mut byte = 0_u8;
+				for (i, value) in group.iter().enumerate() {
+					byte |= value << (8 - bit_depth * (u8::try_from(i).expect("small") + 1));
+				}
+				out.push(byte);
+			}
+		}
+	}
+	out
+}
+
+/// A matrix/TRC RGB (or gray TRC) ICC v2 profile that libpng and libjxl both accept.
+fn icc(gray: bool) -> Vec<u8> {
+	fn s15(v: f64) -> [u8; 4] {
+		#[expect(clippy::cast_possible_truncation, reason = "test fixture: the values are small and exact enough")]
+		let fixed = (v * 65536.0).round() as i32;
+		fixed.to_be_bytes()
+	}
+	let xyz = |x: f64, y: f64, z: f64| [b"XYZ ".as_slice(), &[0; 4], &s15(x), &s15(y), &s15(z)].concat();
+	let mut desc = b"desc\0\0\0\0".to_vec();
+	desc.extend_from_slice(&5_u32.to_be_bytes());
+	desc.extend_from_slice(b"test\0");
+	desc.extend_from_slice(&[0; 4 + 4 + 2 + 1 + 67]);
+	let curv = [b"curv".as_slice(), &[0; 4], &1_u32.to_be_bytes(), &[0x02, 0x33, 0, 0]].concat();
+	let mut tags: Vec<(&[u8; 4], Vec<u8>)> = vec![(b"desc", desc), (b"wtpt", xyz(0.9642, 1.0, 0.8249))];
+	if gray {
+		tags.push((b"kTRC", curv));
+	} else {
+		tags.extend([(b"rXYZ", xyz(0.4361, 0.2225, 0.0139)), (b"gXYZ", xyz(0.3851, 0.7169, 0.0971)), (b"bXYZ", xyz(0.1431, 0.0606, 0.7141)), (b"rTRC", curv.clone()), (b"gTRC", curv.clone()), (b"bTRC", curv)]);
+	}
+	let table = 132 + 12 * tags.len();
+	let mut data = Vec::new();
+	let mut entries = Vec::new();
+	for (sig, bytes) in &tags {
+		let offset = table + data.len();
+		entries.extend_from_slice(*sig);
+		entries.extend_from_slice(&u32::try_from(offset).expect("small").to_be_bytes());
+		entries.extend_from_slice(&u32::try_from(bytes.len()).expect("small").to_be_bytes());
+		data.extend_from_slice(bytes);
+		while data.len() % 4 != 0 {
+			data.push(0);
+		}
+	}
+	let total = table + data.len();
+	let mut header = vec![0_u8; 128];
+	header[0..4].copy_from_slice(&u32::try_from(total).expect("small").to_be_bytes());
+	header[8..12].copy_from_slice(&0x0210_0000_u32.to_be_bytes());
+	header[12..16].copy_from_slice(b"mntr");
+	header[16..20].copy_from_slice(if gray { b"GRAY" } else { b"RGB " });
+	header[20..24].copy_from_slice(b"XYZ ");
+	header[36..40].copy_from_slice(b"acsp");
+	header[68..80].copy_from_slice(&[0, 0, 0xf6, 0xd6, 0, 1, 0, 0, 0, 0, 0xd3, 0x2d]);
+	[header, u32::try_from(tags.len()).expect("small").to_be_bytes().to_vec(), entries, data].concat()
+}
+
+/// Big-endian TIFF with one IFD0 entry: orientation 6.
+fn exif() -> Vec<u8> {
+	[b"MM\0*".as_slice(), &[0, 0, 0, 8], &[0, 1], &[1, 18, 0, 3, 0, 0, 0, 1, 0, 6, 0, 0], &[0, 0, 0, 0]].concat()
+}
+
+/// `ImageMagick`'s raw profile text, lowercase hex, 36 bytes a line, as libjxl requires.
+fn raw_profile(name: &str, bytes: &[u8]) -> Vec<u8> {
+	let mut text = format!("\n{name}\n{:8}", bytes.len()).into_bytes();
+	for (i, byte) in bytes.iter().enumerate() {
+		if i % 36 == 0 {
+			text.push(b'\n');
+		}
+		text.extend_from_slice(format!("{byte:02x}").as_bytes());
+	}
+	text.push(b'\n');
+	text
+}
+
+/// Every PNG fixture: a name and the file.
+fn fixtures() -> Vec<(&'static str, Vec<u8>)> {
+	let rgb8 = rows(3, 8);
+	let text = |key: &str, value: &[u8]| chunk(*b"tEXt", &[key.as_bytes(), &[0], value].concat());
+	let itxt = |key: &str, value: &[u8]| chunk(*b"iTXt", &[key.as_bytes(), &[0, 0, 0, 0, 0], value].concat());
+	let palette: Vec<u8> = (0..=255_u8).flat_map(|i| [i, 255 - i, i.wrapping_mul(7)]).collect();
+	let palette_rows: Vec<u8> = (0..H).flat_map(|y| (0..W).map(move |x| u8::try_from((x * 5 + y * 3) % 256).expect("byte"))).collect();
+	let trns: Vec<u8> = (0..=255_u8).map(|i| if i % 5 == 0 { 0 } else { 255 - i / 2 }).collect();
+	vec![("rgb8", png(W, H, 8, 2, &rgb8, &[], &[])), ("rgba8", png(W, H, 8, 6, &rows(4, 8), &[], &[])), ("gray8", png(W, H, 8, 0, &rows(1, 8), &[], &[])), ("graya8", png(W, H, 8, 4, &rows(2, 8), &[], &[])), ("gray4", png(W, H, 4, 0, &rows(1, 4), &[], &[])), ("gray1", png(W, H, 1, 0, &rows(1, 1), &[], &[])), ("rgb16", png(W, H, 16, 2, &rows(3, 16), &[], &[])), ("rgba16", png(W, H, 16, 6, &rows(4, 16), &[], &[])), ("gray16", png(W, H, 16, 0, &rows(1, 16), &[], &[])), ("palette+tRNS", png(W, H, 8, 3, &palette_rows, &[chunk(*b"PLTE", &palette), chunk(*b"tRNS", &trns)], &[])), ("rgb+tRNS", png(W, H, 8, 2, &rgb8, &[chunk(*b"tRNS", &[0, 0, 0, 0, 0, 0])], &[])), ("sRGB", png(W, H, 8, 2, &rgb8, &[chunk(*b"sRGB", &[0])], &[])), ("gAMA", png(W, H, 8, 2, &rgb8, &[chunk(*b"gAMA", &45_455_u32.to_be_bytes())], &[])), ("gAMA+cHRM", png(W, H, 8, 2, &rgb8, &[chunk(*b"gAMA", &55_555_u32.to_be_bytes()), chunk(*b"cHRM", &[31270_u32, 32900, 64000, 33000, 30000, 60000, 15000, 6000].iter().flat_map(|v| v.to_be_bytes()).collect::<Vec<_>>())], &[])), ("iCCP", png(W, H, 8, 2, &rgb8, &[chunk(*b"iCCP", &[b"test\0\0".as_slice(), &zlib(&icc(false))].concat())], &[])), ("gray iCCP", png(W, H, 8, 0, &rows(1, 8), &[chunk(*b"iCCP", &[b"test\0\0".as_slice(), &zlib(&icc(true))].concat())], &[])), ("sRGB then iCCP", png(W, H, 8, 2, &rgb8, &[chunk(*b"sRGB", &[1]), chunk(*b"iCCP", &[b"test\0\0".as_slice(), &zlib(&icc(false))].concat())], &[])), ("cICP P3", png(W, H, 8, 2, &rgb8, &[chunk(*b"cICP", &[12, 13, 0, 1])], &[])), ("cICP PQ + cLLi", png(W, H, 16, 2, &rows(3, 16), &[chunk(*b"cICP", &[9, 16, 0, 1]), chunk(*b"cLLi", &[&4_000_000_u32.to_be_bytes()[..], &1_000_000_u32.to_be_bytes()].concat())], &[])), ("sBIT 5", png(W, H, 8, 2, &rgb8, &[chunk(*b"sBIT", &[5, 5, 5])], &[])), ("sBIT uneven", png(W, H, 16, 6, &rows(4, 16), &[chunk(*b"sBIT", &[10, 12, 10, 16])], &[])), ("eXIf + XMP", png(W, H, 8, 2, &rgb8, &[chunk(*b"eXIf", &exif()), itxt("XML:com.adobe.xmp", b"<x:xmpmeta xmlns:x='adobe:ns:meta/'/>")], &[])), ("raw profile exif", png(W, H, 8, 2, &rgb8, &[chunk(*b"eXIf", b"MM\0*\0\0\0\x08\0\0\0\0\0\0")], &[text("Raw profile type exif", &raw_profile("exif", &[b"Exif\0\0".as_slice(), &exif()].concat()))]))]
+}
+
+/// Settings to run over one fixture: each option away from its default on its own, then
+/// some combinations.
+fn option_cases() -> Vec<(String, JxlSettings)> {
+	let d = || JxlSettings { effort: 3, ..JxlSettings::default() };
+	let mut cases: Vec<(String, JxlSettings)> = vec![("default".into(), JxlSettings::default())];
+	let mut add = |name: &str, settings: JxlSettings| cases.push((name.to_owned(), settings));
+	add("target default", JxlSettings { target: JxlTarget::Default, ..d() });
+	for distance in [0.0_f32, 0.5, 1.0, 2.5, 25.0] {
+		add(&format!("-d {distance}"), JxlSettings { target: JxlTarget::Distance(distance), ..d() });
+	}
+	for quality in [0.0_f32, 42.5, 90.0, 100.0] {
+		add(&format!("-q {quality}"), JxlSettings { target: JxlTarget::Quality(quality), ..d() });
+	}
+	for effort in [1_u8, 2, 5, 9] {
+		add(&format!("-e {effort}"), JxlSettings { effort, ..d() });
+	}
+	add("-e 10", JxlSettings { effort: 10, ..d() });
+	add("-a 1.5", JxlSettings { alpha_distance: Some(1.5), ..d() });
+	add("-p", JxlSettings { progressive: true, ..d() });
+	add("-p with patches on", JxlSettings { progressive: true, patches: Tristate::On, ..d() });
+	for (name, value) in [("off", Tristate::Off), ("on", Tristate::On)] {
+		add(&format!("modular {name}"), JxlSettings { modular: value, ..d() });
+		add(&format!("group order {name}"), JxlSettings { group_order: value, ..d() });
+		add(&format!("keep invisible {name}"), JxlSettings { keep_invisible: value, ..d() });
+		add(&format!("gaborish {name}"), JxlSettings { gaborish: value, ..d() });
+		add(&format!("noise {name}"), JxlSettings { noise: value, ..d() });
+		add(&format!("dots {name}"), JxlSettings { dots: value, ..d() });
+		add(&format!("patches {name}"), JxlSettings { patches: value, ..d() });
+		add(&format!("container {name}"), JxlSettings { container: value, ..d() });
+	}
+	add("centre-first from (10, 20)", JxlSettings { group_order: Tristate::On, center_x: 10, center_y: 20, ..d() });
+	add("photon noise 800", JxlSettings { photon_noise_iso: 800.0, ..d() });
+	add("intensity target 250", JxlSettings { intensity_target: 250.0, ..d() });
+	add("codestream level 10", JxlSettings { codestream_level: 10, ..d() });
+	for buffering in [0_i8, 1, 2, 3] {
+		add(&format!("buffering {buffering}"), JxlSettings { buffering, ..d() });
+	}
+	for faster_decoding in 1..=4_u8 {
+		add(&format!("faster decoding {faster_decoding}"), JxlSettings { faster_decoding, ..d() });
+	}
+	add("premultiply", JxlSettings { premultiply: 1, ..d() });
+	add("progressive AC", JxlSettings { progressive_ac: true, ..d() });
+	add("qprogressive AC", JxlSettings { qprogressive_ac: true, ..d() });
+	for progressive_dc in [0_i8, 1, 2] {
+		add(&format!("progressive DC {progressive_dc}"), JxlSettings { progressive_dc, ..d() });
+	}
+	for resampling in [1_i8, 2, 4, 8] {
+		add(&format!("resampling {resampling}"), JxlSettings { resampling, ..d() });
+		add(&format!("ec resampling {resampling}"), JxlSettings { ec_resampling: resampling, ..d() });
+	}
+	add("already downsampled 2", JxlSettings { resampling: 2, already_downsampled: true, ..d() });
+	add("upsampling mode 0", JxlSettings { resampling: 2, already_downsampled: true, upsampling_mode: 0, ..d() });
+	for epf in 0..=3_i8 {
+		add(&format!("epf {epf}"), JxlSettings { epf, ..d() });
+	}
+	add("override bit depth 10", JxlSettings { override_bitdepth: 10, ..d() });
+	add("frame index box", JxlSettings { frame_index_box: true, container: Tristate::On, ..d() });
+	add("disable perceptual optimizations", JxlSettings { disable_perceptual_optimizations: true, ..d() });
+	for output_mode in [0_i8, 1, 2] {
+		add(&format!("output mode {output_mode}"), JxlSettings { output_mode, ..d() });
+	}
+	add("streaming output", JxlSettings { streaming_output: true, ..d() });
+	add("brotli effort 0 with a container", JxlSettings { brotli_effort: 0, container: Tristate::On, ..d() });
+	add("compress boxes off", JxlSettings { compress_boxes: Tristate::Off, ..d() });
+	add("expert effort 11", JxlSettings { effort: 11, allow_expert_options: true, target: JxlTarget::Distance(0.0), ..d() });
+	add("no threads", JxlSettings { multi_threading: false, ..d() });
+	let modular = || JxlSettings { modular: Tristate::On, target: JxlTarget::Distance(0.0), ..d() };
+	add("modular lossless", modular());
+	add("-I 50", JxlSettings { iterations: 50.0, ..modular() });
+	add("-C 6", JxlSettings { modular_colorspace: 6, ..modular() });
+	add("-g 0", JxlSettings { modular_group_size: 0, ..modular() });
+	add("-P 5", JxlSettings { modular_predictor: 5, ..modular() });
+	add("-E 3", JxlSettings { modular_nb_prev_channels: 3, ..modular() });
+	add("palette colors 0", JxlSettings { modular_palette_colors: 0, ..modular() });
+	add("lossy palette", JxlSettings { modular_lossy_palette: true, modular_palette_colors: 0, target: JxlTarget::Distance(1.0), ..modular() });
+	add("-X 20 -Y 30", JxlSettings { pre_compact: 20.0, post_compact: 30.0, ..modular() });
+	add("-R 0", JxlSettings { responsive: Some(false), ..modular() });
+	add("-R 1", JxlSettings { responsive: Some(true), ..modular() });
+	cases
+}
+
+/// Colour and metadata hints, run over the untagged fixture and the tagged ones.
+fn hint_cases(dir: &Path) -> Vec<(String, JxlSettings)> {
+	let d = || JxlSettings { effort: 3, ..JxlSettings::default() };
+	let icc_path = dir.join("hint.icc");
+	fs::write(&icc_path, icc(false)).expect("write the ICC hint");
+	let exif_path = dir.join("hint.exif");
+	fs::write(&exif_path, exif()).expect("write the Exif hint");
+	let xmp_path = dir.join("hint.xmp");
+	fs::write(&xmp_path, b"<x:xmpmeta xmlns:x='adobe:ns:meta/'><hint/></x:xmpmeta>").expect("write the XMP hint");
+	let p3 = JxlColorSpace { gray: false, white_point: WhitePoint::D65, primaries: Primaries::P3, rendering_intent: RenderingIntent::Perceptual, transfer_function: TransferFunction::Srgb };
+	vec![("color_space DisplayP3".into(), JxlSettings { color_space: Some(p3), ..d() }), ("color_space custom gamma".into(), JxlSettings { color_space: Some(JxlColorSpace { white_point: WhitePoint::Custom([0.3127, 0.329]), primaries: Primaries::Custom([0.64, 0.33, 0.3, 0.6, 0.15, 0.06]), transfer_function: TransferFunction::Gamma(0.45455), ..p3 }), ..d() }), ("color_space ProPhoto".into(), JxlSettings { color_space: Some(JxlColorSpace { white_point: WhitePoint::D50, primaries: Primaries::ProPhoto, transfer_function: TransferFunction::ProPhoto, rendering_intent: RenderingIntent::Relative, gray: false }), ..d() }), ("icc_pathname".into(), JxlSettings { icc_file: Some(icc_path), ..d() }), ("exif file".into(), JxlSettings { exif: MetadataSource::File(exif_path), ..d() }), ("xmp file".into(), JxlSettings { xmp: MetadataSource::File(xmp_path), ..d() }), ("strip exif and xmp".into(), JxlSettings { exif: MetadataSource::Strip, xmp: MetadataSource::Strip, ..d() })]
+}
+
+struct Run {
+	cjxl: PathBuf,
+	dir: PathBuf,
+	mismatches: Vec<String>,
+	total: usize,
+}
+
+impl Run {
+	fn compare(&mut self, name: &str, input: &Path, settings: &JxlSettings) {
+		let job = EncodeJob { format: OutputFormat::Jxl, jxl: settings.clone(), ..Default::default() };
+		let theirs = self.dir.join(format!("cjxl-{}.jxl", self.total));
+		let ours = self.dir.join(format!("ours-{}.jxl", self.total));
+		self.total += 1;
+		let args = cjxl_args(&job, input, &theirs);
+		let run = Command::new(&self.cjxl).args(&args).output().expect("run cjxl");
+		let reference = run.status.success().then(|| fs::read(&theirs).ok()).flatten();
+		let result = encode_file(&job, input, &ours).map(|_| fs::read(&ours).expect("read ours"));
+		match (reference, result) {
+			(Some(expected), Ok(actual)) if expected == actual => {}
+			(Some(expected), Ok(actual)) => {
+				let first = actual.iter().zip(&expected).position(|(a, b)| a != b).map_or_else(|| "length only".to_owned(), |at| format!("byte {at}"));
+				self.mismatches.push(format!("`{name}`: ours {} bytes, cjxl {} bytes, first difference at {first}\n    cjxl {}", actual.len(), expected.len(), args.iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" ")));
+			}
+			(Some(_), Err(error)) => self.mismatches.push(format!("`{name}`: cjxl succeeded but ours failed: {error}")),
+			// Every case here is one cjxl accepts; a refusal means the arguments are wrong,
+			// and letting it pass would make the whole gate vacuous.
+			(None, _) => self.mismatches.push(format!("`{name}`: cjxl refused it: {}\n    cjxl {}", String::from_utf8_lossy(&run.stderr).trim(), args.iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" "))),
+		}
+	}
+}
+
+fn prepare() -> Option<Run> {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let Some(cjxl) = reference_cjxl() else {
+		let message = "JXL PARITY NOT RUN: no reference cjxl found. Set SKIDBLADNIR_REFERENCE_CJXL or put cjxl on PATH.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return None;
+	};
+	let linked = jxl::linked_version();
+	if reference_version(&cjxl) != Some(linked) {
+		let message = format!("JXL PARITY NOT RUN: reference cjxl is {:?} but this crate links libjxl {linked:?}.", reference_version(&cjxl));
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return None;
+	}
+	let dir = env::temp_dir().join(format!("skidbladnir-jxl-parity-{}-{}", std::process::id(), rand_suffix()));
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+	Some(Run { cjxl, dir, mismatches: Vec::new(), total: 0 })
+}
+
+/// Distinguishes the scratch directories of tests running at once in one process.
+fn rand_suffix() -> u128 {
+	std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos())
+}
+
+fn finish(run: &Run, what: &str) {
+	let _ = fs::remove_dir_all(&run.dir);
+	assert!(run.mismatches.is_empty(), "{} of {} {what} diverged from cjxl:\n  {}", run.mismatches.len(), run.total, run.mismatches.join("\n  "));
+	eprintln!("JXL PARITY OK: {} {what} matched cjxl byte for byte.", run.total);
+}
+
+#[test]
+fn matches_cjxl_across_png_inputs() {
+	let Some(mut run) = prepare() else { return };
+	for (name, bytes) in fixtures() {
+		let input = run.dir.join(format!("{}.png", name.replace([' ', '+'], "_")));
+		fs::write(&input, &bytes).expect("write the fixture");
+		for settings in [JxlSettings { effort: 3, ..JxlSettings::default() }, JxlSettings { effort: 3, target: JxlTarget::Distance(0.0), ..JxlSettings::default() }] {
+			run.compare(&format!("{name}, {:?}", settings.target), &input, &settings);
+		}
+	}
+	finish(&run, "PNG inputs");
+}
+
+#[test]
+fn matches_cjxl_across_the_option_surface() {
+	let Some(mut run) = prepare() else { return };
+	let input = run.dir.join("rgba.png");
+	fs::write(&input, png(W, H, 8, 6, &rows(4, 8), &[chunk(*b"eXIf", &exif())], &[])).expect("write the fixture");
+	for (name, settings) in option_cases() {
+		run.compare(&name, &input, &settings);
+	}
+	finish(&run, "option settings");
+}
+
+#[test]
+fn matches_cjxl_applying_hints() {
+	let Some(mut run) = prepare() else { return };
+	let untagged = run.dir.join("untagged.png");
+	fs::write(&untagged, png(W, H, 8, 2, &rows(3, 8), &[], &[])).expect("write");
+	let tagged = run.dir.join("tagged.png");
+	fs::write(&tagged, png(W, H, 8, 2, &rows(3, 8), &[chunk(*b"sRGB", &[0]), chunk(*b"eXIf", &exif())], &[])).expect("write");
+	let dir = run.dir.clone();
+	for (name, settings) in hint_cases(&dir) {
+		run.compare(&format!("untagged, {name}"), &untagged, &settings);
+		run.compare(&format!("tagged, {name}"), &tagged, &settings);
+	}
+	finish(&run, "hint settings");
+}
+
+#[test]
+fn matches_cjxl_recompressing_jpeg() {
+	let Some(mut run) = prepare() else { return };
+	let rgb: Vec<u8> = rows(3, 8);
+	let mut plain = Vec::new();
+	image::codecs::jpeg::JpegEncoder::new_with_quality(&mut plain, 85).encode(&rgb, W, H, image::ExtendedColorType::Rgb8).expect("write a JPEG");
+	// The same JPEG with Exif and XMP segments after SOI.
+	let segment = |marker: u8, data: &[u8]| [&[0xff, marker][..], &u16::try_from(data.len() + 2).expect("small").to_be_bytes(), data].concat();
+	let tagged = [&plain[..2], &segment(0xe1, &[b"Exif\0\0".as_slice(), &exif()].concat()), &segment(0xe1, b"http://ns.adobe.com/xap/1.0/\0<x:xmpmeta/>"), &plain[2..]].concat();
+	let d = || JxlSettings { effort: 3, target: JxlTarget::Default, ..JxlSettings::default() };
+	let cases = [("default", d()), ("effort 9", JxlSettings { effort: 9, ..d() }), ("container on", JxlSettings { container: Tristate::On, ..d() }), ("container off", JxlSettings { container: Tristate::Off, ..d() }), ("no reconstruction", JxlSettings { allow_jpeg_reconstruction: false, ..d() }), ("no reconstruction, strip exif and xmp", JxlSettings { allow_jpeg_reconstruction: false, exif: MetadataSource::Strip, xmp: MetadataSource::Strip, ..d() }), ("strip jumbf", JxlSettings { jumbf: MetadataSource::Strip, ..d() }), ("compress boxes off", JxlSettings { compress_boxes: Tristate::Off, ..d() }), ("reconstruction cfl off", JxlSettings { jpeg_reconstruction_cfl: Tristate::Off, ..d() }), ("brotli effort 11", JxlSettings { brotli_effort: 11, ..d() })];
+	for (label, bytes) in [("plain", &plain), ("tagged", &tagged)] {
+		let input = run.dir.join(format!("{label}.jpg"));
+		fs::write(&input, bytes).expect("write the JPEG");
+		for (name, settings) in &cases {
+			run.compare(&format!("{label} JPEG, {name}"), &input, settings);
+		}
+	}
+	finish(&run, "JPEG recompressions");
+}
