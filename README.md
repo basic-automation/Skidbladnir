@@ -183,6 +183,10 @@ What it can do:
   rotation and mirror are applied, so a sideways-stored portrait converts upright. Tiled
   (grid) AVIFs, as some cameras write large captures, are decoded whole. JPEG
   XL input is checked against libjxl's `djxl`.
+- Keep a photo's **ICC colour profile, EXIF and XMP** in the WebP it becomes, if you ask —
+  exactly as `cwebp -metadata` does, checked against `cwebp` itself. Off by default, as
+  in `cwebp`: without the profile a wide-gamut (Display P3, Adobe RGB) photo's colours
+  are read as sRGB.
 - Refuse to overwrite your source image, and stage every write through a temporary
   file so a failed conversion cannot damage a file that was already there.
 - Report the before and after sizes, and the dimensions actually produced.
@@ -200,6 +204,8 @@ Known gaps:
   Cancel takes effect when the current file finishes (which is then discarded, not
   written). There is no chroma subsampling control — AVIF is always written 4:4:4 —
   animated AVIF is not read.
+- Metadata is kept in still WebP output only: not in animations, and not yet in AVIF,
+  JPEG XL or HEIC output.
 - An animation (animated WebP or GIF) converts to WebP only. AVIF, JPEG XL and HEIC
   output refuse it by name rather than keeping just the first frame, because those
   encoders write still images here. A target size or PSNR applies to each frame of an

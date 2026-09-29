@@ -24,6 +24,15 @@ export interface EncodeJob {
 	avif: AvifSettings
 	jxl: JxlSettings
 	heic: HeicSettings
+	/** Which of the source's metadata to keep (`cwebp -metadata`). WebP output only, so far. */
+	metadata: KeepMetadata
+}
+
+/** `cwebp -metadata`: each kind the source carries is copied into the output when on. */
+export interface KeepMetadata {
+	icc: boolean
+	exif: boolean
+	xmp: boolean
 }
 
 /** The HEIC controls, as libheif exposes them for the Kvazaar encoder. */

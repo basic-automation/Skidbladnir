@@ -911,6 +911,18 @@ function basename(path: string): string {
 							</div>
 						</ControlPanel>
 
+						<!-- cwebp -metadata. Off by default, as in cwebp and the Electron app. -->
+						<ControlPanel v-if="isWebp" title="Metadata">
+							<div class="grid grid-cols-3 gap-3">
+								<ControlToggle v-model="settings.metadata.icc" label="Keep colour profile" help="The ICC profile. Without it a wide-gamut photo (Display P3, Adobe RGB) is shown as sRGB and its colours shift." />
+								<ControlToggle v-model="settings.metadata.exif" label="Keep EXIF" help="Camera, exposure, date and orientation — and location, if the camera recorded it." />
+								<ControlToggle v-model="settings.metadata.xmp" label="Keep XMP" help="Editing history, ratings, rights and captions." />
+							</div>
+							<p class="px-2.5 text-xs text-paleday-dim">
+								Kept exactly as cwebp -metadata keeps them, from JPEG, PNG, TIFF and WebP files. Not yet for animations or the other output formats.
+							</p>
+						</ControlPanel>
+
 						<!-- The expert controls, behind a disclosure as in the Electron app, open by default. -->
 						<UAccordion
 							v-if="lossy"

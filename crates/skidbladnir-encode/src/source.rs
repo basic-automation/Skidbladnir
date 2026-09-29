@@ -158,6 +158,16 @@ pub enum SourceError {
 		/// The path that failed.
 		path: PathBuf,
 	},
+	/// The file's metadata was asked to be kept but is malformed, in a way `cwebp` also
+	/// refuses (an ICC profile split inconsistently across JPEG segments, say). Converting
+	/// without it would silently drop what was asked for.
+	#[error("could not keep the metadata of `{path}`: {detail}")]
+	Metadata {
+		/// The path that failed.
+		path: PathBuf,
+		/// What was wrong with it.
+		detail: String,
+	},
 	/// The file claims a supported format but could not be decoded.
 	#[error("could not decode `{path}` as {format}: {detail}")]
 	Decode {
@@ -666,7 +676,9 @@ pub fn encode_file_with_progress(settings: &EncodeJob, input: &Path, output: &Pa
 			(Some(source), _) if source.animation.frames.len() > 1 => return Err(SourceError::Animated { path: input.to_path_buf() }.into()),
 			_ => {
 				let image = decode(input, &bytes)?;
-				(encode_rgba_with_progress(settings, &image.as_rgba(), on_progress)?, (image.width, image.height))
+				let encoded = encode_rgba_with_progress(settings, &image.as_rgba(), on_progress)?;
+				let encoded = crate::metadata::keep(settings, &bytes, encoded).map_err(|detail| SourceError::Metadata { path: input.to_path_buf(), detail })?;
+				(encoded, (image.width, image.height))
 			}
 		}
 	};

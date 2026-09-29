@@ -198,8 +198,8 @@ jobs:
         # animation is the animated-WebP gate, byte for byte against img2webp.
         # gif is the GIF-input gate, byte for byte against gif2webp. avif_input is the wide
         # AVIF-input gate: avifenc writes 17 colour encodings and our decoder must agree
-        # with avifdec's reading of them.
-        run: cargo test --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_reference --test jxl_reference --test heic_reference --test animation --test gif --test avif_input -- --nocapture
+        # with avifdec's reading of them. metadata is `-metadata`, against cwebp itself.
+        run: cargo test --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_reference --test jxl_reference --test heic_reference --test animation --test gif --test avif_input --test metadata -- --nocapture
 
   # Drives the real window over WebDriver. Separate from the compile matrix because it
   # needs a display, a WebKit driver and a full release build, and because a flaky display

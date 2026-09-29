@@ -4037,6 +4037,7 @@ dependencies = [
  "jxl-oxide",
  "libwebp-sys",
  "pkg-config",
+ "png 0.18.1",
  "ravif",
  "serde",
  "serde_json",

@@ -270,6 +270,13 @@ The Electron app shells out to `cwebp.exe`. The Rust port should not.
       reading of the file, and fails if the decoder ever starts honouring the missing
       marker. The reference `cwebp` refuses this file too, now checked alongside the Adobe one.
 
+- [ ] **A WebP source converted to lossy WebP differs from `cwebp` by a few bytes**
+      (found 2026-09-28 by the metadata gate: 4 bytes on a 232-byte file, with no metadata
+      involved). For a lossy encode with no resize and no sharp YUV, `cwebp` decodes a WebP
+      input straight into a YUV 4:2:0 picture with libwebp's decoder (`imageio/webpdec.c`,
+      `use_argb` off), where Skidbladnir decodes to RGBA and lets the encoder convert. PAM,
+      PNG, JPEG and TIFF sources are unaffected: `cwebp` imports their RGB the same way we do.
+
 ## Phase 3 — Frontend parity (Nuxt + Tailwind)
 
 Parity means a user of the Electron app finds every control they had, not a
@@ -436,6 +443,27 @@ prettier subset.
       way: the app's default alpha filtering ("best") moved mostly-transparent lossy
       frames 2 bytes from libwebp's default ("fast"). CI builds `gif2webp` (giflib).
       Verified in the running window by the smoke test.
+- [x] **Keep metadata** — ICC profile, EXIF and XMP — in WebP output: `cwebp -metadata`,
+      which the Electron app never exposed, so every conversion silently dropped a photo's
+      colour profile (a Display P3 or Adobe RGB image then shows as sRGB). A job-level
+      `metadata` choice, all off by default so a default job still matches `cwebp`
+      exactly; a "Metadata" panel in the WebP settings. `crates/skidbladnir-encode/src/metadata.rs`
+      reads the metadata the way libwebp 1.6.0's `imageio` does (JPEG `APP1`/`APP2`, the ICC
+      profile reassembled by segment number and refused when inconsistent, as `cwebp`
+      refuses it; PNG `iCCP`, `eXIf`, XMP and `ImageMagick` raw-profile text; TIFF ICC and XMP;
+      WebP `ICCP`/`EXIF`/`XMP `) and writes the container the way `WriteWebPWithMetadata`
+      does. The preview keeps it too, so its size is the size written.
+      **Gate:** `tests/metadata.rs` — 84 conversions (7 fixtures with hand-built metadata,
+      incl. a 140 KB ICC profile in three out-of-order JPEG segments, × lossy/lossless × six
+      `-metadata` choices) against `cwebp -metadata`: 54 byte-identical whole files; the
+      JPEG sources (libjpeg decodes their pixels in `cwebp`, not us) and lossy output from
+      a WebP source (below) match chunk for chunk apart from the image data. A JPEG with a
+      missing ICC segment is refused as `cwebp` refuses it. Mutation-tested: unsorted ICC
+      segments, a missing `VP8X` alpha flag, no RIFF padding, `ICCP` after the image and
+      last-EXIF-wins each fail it.
+- [ ] Keep metadata in **animated** WebP output (`gif2webp -metadata` keeps ICC and XMP
+      from a GIF's application extensions), and in AVIF, JPEG XL and HEIC output, which
+      each carry ICC and EXIF in their own way. Only still WebP output keeps it today.
 
 ## Phase 5 — Tri-platform packaging and release
 

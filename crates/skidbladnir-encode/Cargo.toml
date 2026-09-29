@@ -11,6 +11,7 @@ repository.workspace = true
 gif = { workspace = true }
 image = { workspace = true }
 libwebp-sys = { workspace = true }
+png = { workspace = true }
 ravif = { workspace = true }
 avif-decode = { workspace = true }
 jxl-oxide = { workspace = true }
@@ -24,6 +25,7 @@ pkg-config = { workspace = true }
 [dev-dependencies]
 # The parity test writes PNG fixtures; integration tests do not inherit [dependencies].
 image = { workspace = true }
+png = { workspace = true }
 serde_json = { workspace = true }
 
 [lints]

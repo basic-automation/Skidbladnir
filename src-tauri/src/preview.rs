@@ -81,6 +81,9 @@ pub fn preview(settings: &EncodeJob, input: &Path) -> Result<Preview, String> {
 		Some(encoded) => encoded,
 		None => encode_rgba(settings, &image.as_rgba()).map_err(|error| error.to_string())?,
 	};
+	// With the metadata the conversion would keep, so the size shown is the size written
+	// and an ICC profile is shown as the webview colour-manages it.
+	let encoded = skidbladnir_encode::metadata::keep(settings, &bytes, encoded).map_err(|detail| SourceError::Metadata { path: input.to_path_buf(), detail }.to_string())?;
 
 	// The original is shown at the same dimensions as the encoded side when a resize is in
 	// play, so the comparison is like for like rather than a big image next to a small one.
