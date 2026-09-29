@@ -52,6 +52,23 @@ fn main() {
 	jpeg.link();
 }
 
+/// A macOS build for the other architecture (the Intel release is built on Apple Silicon):
+/// libaom and libjpeg-turbo pick their SIMD code from `CMAKE_SYSTEM_PROCESSOR`, which is
+/// the host's unless told otherwise. Returns the architecture as `CMake` spells it.
+fn apple_cross(config: &mut cmake::Config) -> Option<&'static str> {
+	if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
+		return None;
+	}
+	let target = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+	let host = env::var("HOST").unwrap_or_default();
+	if host.starts_with(&target) {
+		return None;
+	}
+	let arch = if target == "aarch64" { "arm64" } else { "x86_64" };
+	config.define("CMAKE_OSX_ARCHITECTURES", arch).define("CMAKE_SYSTEM_PROCESSOR", arch);
+	Some(arch)
+}
+
 /// libjpeg-turbo: where its headers are, and how to link it once everything using it is
 /// compiled.
 struct Libjpeg {
@@ -139,7 +156,11 @@ fn link_libavif(jpeg: &Libjpeg) {
 
 	// libaom: static, no tools, tests, docs or examples. The decoder is built too, because
 	// `avifenc -d 12,8` reconstructs the primary image to encode the residual beside it.
-	let aom = cmake::Config::new(third_party.join("aom")).profile("Release").define("BUILD_SHARED_LIBS", "OFF").define("CONFIG_AV1_DECODER", "1").define("CONFIG_AV1_ENCODER", "1").define("ENABLE_DOCS", "OFF").define("ENABLE_EXAMPLES", "OFF").define("ENABLE_TESTDATA", "OFF").define("ENABLE_TESTS", "OFF").define("ENABLE_TOOLS", "OFF").define("CMAKE_POLICY_VERSION_MINIMUM", "3.5").build();
+	let mut aom_config = cmake::Config::new(third_party.join("aom"));
+	if let Some(arch) = apple_cross(&mut aom_config) {
+		aom_config.define("AOM_TARGET_CPU", arch);
+	}
+	let aom = aom_config.profile("Release").define("BUILD_SHARED_LIBS", "OFF").define("CONFIG_AV1_DECODER", "1").define("CONFIG_AV1_ENCODER", "1").define("ENABLE_DOCS", "OFF").define("ENABLE_EXAMPLES", "OFF").define("ENABLE_TESTDATA", "OFF").define("ENABLE_TESTS", "OFF").define("ENABLE_TOOLS", "OFF").define("CMAKE_POLICY_VERSION_MINIMUM", "3.5").build();
 	let aom_lib = ["lib", "lib64"].iter().map(|dir| aom.join(dir)).find(|dir| dir.join("libaom.a").exists() || dir.join("aom.lib").exists()).unwrap_or_else(|| aom.join("lib"));
 	let aom_library = if aom_lib.join("aom.lib").exists() { aom_lib.join("aom.lib") } else { aom_lib.join("libaom.a") };
 
@@ -148,7 +169,9 @@ fn link_libavif(jpeg: &Libjpeg) {
 	// exist as a path; the symbols come from libwebp-sys.
 	let placeholder = PathBuf::from(env::var("OUT_DIR").expect("cargo sets OUT_DIR")).join(if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") { "sharpyuv.lib" } else { "libsharpyuv.a" });
 	std::fs::write(&placeholder, b"").expect("write the sharpyuv placeholder");
-	let avif = cmake::Config::new(third_party.join("libavif"))
+	let mut avif_config = cmake::Config::new(third_party.join("libavif"));
+	apple_cross(&mut avif_config);
+	let avif = avif_config
 		.profile("Release")
 		.define("BUILD_SHARED_LIBS", "OFF")
 		.define("AVIF_CODEC_AOM", "SYSTEM")

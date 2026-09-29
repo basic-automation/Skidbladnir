@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build the avifenc that tests/avif_parity.rs compares Skidbladnir's AVIF output against.
 #
-#   scripts/build-reference-avifenc.sh [--prefix <dir>]
+#   scripts/build-reference-avifenc.sh [--prefix <dir>] [--jpeg <prefix>]
 #
 # Byte parity is only meaningful against an avifenc built the way Skidbladnir's libavif is
 # built: the same pinned libavif and libaom (third_party/), no libyuv (it changes the
@@ -10,16 +10,19 @@
 #
 # sharpyuv is built from third_party/libwebp, the libwebp libwebp-sys vendors. avifenc's own
 # PNG and JPEG readers use the system libpng, libjpeg and zlib, so their development files
-# are needed, and its configure step fetches libargparse from GitHub.
+# are needed, and its configure step fetches libargparse from GitHub. --jpeg uses a libjpeg
+# installed under <prefix> instead of the system's (see scripts/build-reference-tools.sh).
 #
 # Installs avifenc into build/reference-avifenc (or --prefix) and prints its path.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 prefix="$root/build/reference-avifenc"
+jpeg=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--prefix) prefix="$2"; shift 2;;
+		--jpeg) jpeg="$2"; shift 2;;
 		*) echo "unknown argument: $1" >&2; exit 2;;
 	esac
 done
@@ -47,7 +50,8 @@ cmake -S "$root/third_party/libavif" -B "$work/libavif" -DCMAKE_BUILD_TYPE=Relea
 	-DAVIF_CODEC_AOM=SYSTEM -DAVIF_CODEC_AOM_DECODE=ON -DAVIF_CODEC_AOM_ENCODE=ON \
 	"-DAOM_INCLUDE_DIR=$work/aom-install/include" "-DAOM_LIBRARY=$work/aom-install/lib/libaom.a" \
 	-DAVIF_LIBYUV=OFF -DAVIF_LIBSHARPYUV=SYSTEM "-DLIBSHARPYUV_INCLUDE_DIR=$root/third_party/libwebp" "-DLIBSHARPYUV_LIBRARY=$sharpyuv" \
-	-DAVIF_JPEG=SYSTEM -DAVIF_ZLIBPNG=SYSTEM -DAVIF_BUILD_APPS=ON -DAVIF_BUILD_TESTS=OFF -DAVIF_ENABLE_WERROR=OFF >/dev/null
+	-DAVIF_JPEG=SYSTEM -DAVIF_ZLIBPNG=SYSTEM -DAVIF_BUILD_APPS=ON -DAVIF_BUILD_TESTS=OFF -DAVIF_ENABLE_WERROR=OFF \
+	${jpeg:+"-DCMAKE_PREFIX_PATH=$jpeg"} >/dev/null
 cmake --build "$work/libavif" --parallel "$jobs" --target avifenc >/dev/null
 cp "$work/libavif/avifenc" "$prefix/avifenc"
 echo "$prefix/avifenc"

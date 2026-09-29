@@ -785,17 +785,31 @@ run the real tool and compare bytes. The owner's scoping (2026-09-28): AVIF move
 libavif + libaom so `avifenc`'s surface is reachable; HEIC stays on Kvazaar (x265 is GPL)
 and its claim says "with Kvazaar"; multi-image features are queued below, not built now.
 
-- [ ] WebP: every `cwebp` option, one field per flag (backend done; window pending).
-- [ ] JPEG XL: every `cjxl` option for a still image.
-- [ ] AVIF: libavif + libaom replace `ravif`; every `avifenc` option for a still image.
-- [ ] HEIC: every `heif-enc` option Kvazaar can honour.
-- [ ] Each format's window exposes its whole surface, and a saved preset round-trips it.
-- [ ] Decode JPEG input the way each reference tool does: libjpeg-turbo with its default
-      settings, and `avifenc`'s and `heif-enc`'s direct YCbCr copy when the output
-      subsampling matches. Until then a JPEG source can differ from the tools' decode by
-      a rounding step, so JPEG-to-X parity is not claimed byte for byte.
-- [ ] More input formats the tools read: PNM/PAM/PFM (all four), GIF (`cjxl`), Y4M
-      (`avifenc`, `heif-enc`), PGX and EXR (`cjxl`), raw pixels (`heif-enc --raw`).
+- [x] WebP: every `cwebp` option, one field per flag. `-preset` and `-z` are buttons the
+      Rust core applies, as they are shorthands on the command line too. 246 parity cases,
+      including `cwebp`'s libpng gamma correction (`png_gamma.rs`, libpng 1.6.58's tables).
+- [x] JPEG XL: every `cjxl` option for a still image. 202 parity cases.
+- [x] AVIF: libavif + libaom replace `ravif`; every `avifenc` option for a still image,
+      its still path ported as `native/avif_shim.c`. 191 parity cases.
+- [x] HEIC: every `heif-enc` option Kvazaar can honour, its still path ported as
+      `native/heic_shim.c`. 147 parity cases. `-L` cannot work with Kvazaar (it asks for a
+      `chroma` parameter Kvazaar lacks), so lossless is `-p lossless=true`; `-b` only
+      affects 16-bit input, which Kvazaar refuses; `--enable-metadata-compression` needs a
+      libheif built with zlib, which the default build is not.
+- [x] Each format's window exposes its whole surface (a panel per format, the flag in
+      every control's help), and presets round-trip it: presets store the `EncodeJob`
+      itself. The accessibility audit covers every control with every section open.
+- [x] Decode JPEG input the way each reference tool does: libjpeg-turbo 3.2.0 (a pinned
+      submodule, linked statically) with libjpeg's defaults for `cwebp` and `cjxl`, and
+      `avifenc`'s and `heif-enc`'s own JPEG readers compiled into their shims, reading from
+      memory, so their direct YCbCr copies happen exactly when theirs do. zune-jpeg had
+      differed by up to 3 levels on a quarter of the samples.
+- [x] CI builds all four references from the sources the app links, reading JPEG through
+      the same libjpeg-turbo (`scripts/build-reference-tools.sh`), and the `parity` job
+      requires all 786 cases.
+- [ ] More input formats the tools read: PNM/PAM (all four), PFM (`cjxl`), GIF (`cjxl`),
+      Y4M (`avifenc`, `heif-enc`), PGX and EXR (`cjxl`), raw pixels (`heif-enc --raw`,
+      `cwebp -s`), and `heif-enc`'s WebP and HEIF input.
 
 **Multi-image features the tools have, deferred by the owner (2026-09-28):**
 

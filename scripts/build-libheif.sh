@@ -2,11 +2,13 @@
 # Build the libheif Skidbladnir ships: one shared library with the Kvazaar HEVC encoder
 # (BSD-3-Clause) and the libde265 HEVC decoder (LGPL-3.0) built into it, and nothing else.
 #
-#   scripts/build-libheif.sh [--prefix <dir>] [--with-heif-enc]
+#   scripts/build-libheif.sh [--prefix <dir>] [--with-heif-enc] [--jpeg <prefix>]
 #
 # --with-heif-enc also builds libheif's heif-enc, linked to this same libheif: the reference
 # tests/heic_parity.rs compares against (it needs the libpng and libjpeg development files).
-# Never ship that build; the app's libheif is the one without it.
+# --jpeg points its JPEG reader at a libjpeg installed under <prefix> rather than the
+# system's (see scripts/build-reference-tools.sh). Never ship that build; the app's libheif
+# is the one without them.
 #
 # Installs into build/libheif (or --prefix, or $SKIDBLADNIR_LIBHEIF_DIR): lib/ holds the
 # shared library (bin/heif.dll on Windows, beside the import library in lib/), include/
@@ -31,10 +33,12 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 prefix="${SKIDBLADNIR_LIBHEIF_DIR:-$root/build/libheif}"
 examples=OFF
+jpeg=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--prefix) prefix="$2"; shift 2;;
 		--with-heif-enc) examples=ON; shift;;
+		--jpeg) jpeg="$2"; shift 2;;
 		*) echo "unknown argument: $1" >&2; exit 2;;
 	esac
 done
@@ -102,7 +106,7 @@ build libheif "$root/third_party/libheif" "$prefix" \
 	-DWITH_UNCOMPRESSED_CODEC=OFF -DWITH_HEADER_COMPRESSION=OFF \
 	-DWITH_EXAMPLES=$examples -DWITH_GDK_PIXBUF=OFF -DBUILD_TESTING=OFF -DWITH_FUZZERS=OFF \
 	-DBUILD_DOCUMENTATION=OFF \
-	"-DCMAKE_PREFIX_PATH=$(native "$deps")" \
+	"-DCMAKE_PREFIX_PATH=$(native "$deps")${jpeg:+;$(native "$jpeg")}" \
 	"-DCMAKE_C_FLAGS=$static_defines" "-DCMAKE_CXX_FLAGS=$static_defines" \
 	"${extra[@]}"
 

@@ -25,8 +25,11 @@ permissions:
   contents: write
 
 env:
-  # Every installer carries its own static libjxl, built from source; never the runner's.
+  # Every installer carries its own static libjxl, libavif with libaom, and libjpeg-turbo,
+  # built from source; never the runner's.
   SKIDBLADNIR_LIBJXL: vendored
+  SKIDBLADNIR_LIBAVIF: vendored
+  SKIDBLADNIR_LIBJPEG: vendored
 
 jobs:
   bundle:
@@ -67,8 +70,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install nasm
-        # The AV1 encoder (rav1e) and decoder (rav1d) assemble their SIMD with nasm; their
-        # build scripts fail outright without it.
+        # libaom, libjpeg-turbo and the AV1 decoder (rav1d) assemble their SIMD with nasm;
+        # rav1d's and libaom's builds fail outright without it.
         uses: ilammy/setup-nasm@v1
 
       - name: Build libheif (Kvazaar + libde265)
