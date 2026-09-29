@@ -912,7 +912,7 @@ function basename(path: string): string {
 						</ControlPanel>
 
 						<!-- cwebp -metadata. Off by default, as in cwebp and the Electron app. -->
-						<ControlPanel v-if="isWebp || isJxl" title="Metadata">
+						<ControlPanel v-if="isWebp || isJxl || isHeic" title="Metadata">
 							<div class="grid grid-cols-3 gap-3">
 								<ControlToggle v-model="settings.metadata.icc" label="Keep colour profile" help="The ICC profile. Without it a wide-gamut photo (Display P3, Adobe RGB) is shown as sRGB and its colours shift." />
 								<ControlToggle v-model="settings.metadata.exif" label="Keep EXIF" help="Camera, exposure, date and orientation — and location, if the camera recorded it." />
@@ -920,8 +920,9 @@ function basename(path: string): string {
 							</div>
 							<p class="px-2.5 text-xs text-paleday-dim">
 								<template v-if="isWebp">Kept exactly as cwebp -metadata keeps them, from JPEG, PNG, TIFF and WebP files. Not yet for animations.</template>
-								<template v-else>The colour profile labels the image in the JPEG XL file; EXIF and XMP are stored beside it. A JPEG recompressed losslessly always keeps its own metadata, since the original must be rebuildable bit for bit.</template>
-								Not yet for AVIF or HEIC.
+								<template v-else-if="isJxl">The colour profile labels the image in the JPEG XL file; EXIF and XMP are stored beside it. A JPEG recompressed losslessly always keeps its own metadata, since the original must be rebuildable bit for bit.</template>
+								<template v-else>The colour profile labels the image in the HEIC file; EXIF and XMP are stored as its metadata items.</template>
+								Not yet for AVIF.
 							</p>
 						</ControlPanel>
 

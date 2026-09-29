@@ -332,25 +332,9 @@ fn bmff_boxes(file: &[u8]) -> Vec<([u8; 4], &[u8])> {
 	out
 }
 
-/// Keeping metadata in **JPEG XL** output, checked by libjxl's own decoder: `djxl` must
-/// report the source's ICC profile as the image's (`--icc_out`) — verbatim for lossless,
-/// with the same primaries for lossy — and decode a lossless file to the source's pixels — so the profile *labels* them rather than being carried
-/// beside sRGB. EXIF and XMP must be the container's `Exif` (after its 4-byte TIFF-header
-/// offset) and `xml ` boxes, byte for byte. With nothing kept, none of the three appears.
-#[test]
-fn keeps_metadata_in_jpeg_xl() {
-	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
-	let djxl = env::var_os("SKIDBLADNIR_REFERENCE_DJXL").map(PathBuf::from).filter(|path| path.is_file()).or_else(|| Command::new("djxl").arg("--version").output().ok().filter(|out| out.status.success()).map(|_| PathBuf::from("djxl")));
-	let Some(djxl) = djxl else {
-		let message = "JPEG XL METADATA NOT CHECKED: no djxl (set SKIDBLADNIR_REFERENCE_DJXL).";
-		assert!(!require, "{message}");
-		eprintln!("{message}");
-		return;
-	};
-	let dir = env::temp_dir().join(format!("skidbladnir-jxl-metadata-{}", std::process::id()));
-	let _ = fs::remove_dir_all(&dir);
-	fs::create_dir_all(&dir).expect("create the scratch directory");
-
+/// A PNG carrying all three kinds: the Display P3 profile, an eXIf chunk and an XMP iTXt
+/// chunk. Returns its path, the three payloads and its pixels.
+fn rich_png(dir: &Path) -> (PathBuf, Vec<u8>, Vec<u8>, String, image::RgbaImage) {
 	let icc = display_p3_profile();
 	let (exif, xmp) = (exif_block(), xmp_packet());
 	let img = pixels(true);
@@ -371,6 +355,30 @@ fn keeps_metadata_in_jpeg_xl() {
 	}
 	let found = metadata::extract(&fs::read(&source).expect("read")).expect("well formed");
 	assert_eq!((found.icc.as_deref(), found.exif.as_deref(), found.xmp.as_deref()), (Some(&icc[..]), Some(&exif[..]), Some(xmp.as_bytes())), "the fixture must carry all three");
+
+	(source, icc, exif, xmp, img)
+}
+
+/// Keeping metadata in **JPEG XL** output, checked by libjxl's own decoder: `djxl` must
+/// report the source's ICC profile as the image's (`--icc_out`) — verbatim for lossless,
+/// with the same primaries for lossy — and decode a lossless file to the source's pixels — so the profile *labels* them rather than being carried
+/// beside sRGB. EXIF and XMP must be the container's `Exif` (after its 4-byte TIFF-header
+/// offset) and `xml ` boxes, byte for byte. With nothing kept, none of the three appears.
+#[test]
+fn keeps_metadata_in_jpeg_xl() {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let djxl = env::var_os("SKIDBLADNIR_REFERENCE_DJXL").map(PathBuf::from).filter(|path| path.is_file()).or_else(|| Command::new("djxl").arg("--version").output().ok().filter(|out| out.status.success()).map(|_| PathBuf::from("djxl")));
+	let Some(djxl) = djxl else {
+		let message = "JPEG XL METADATA NOT CHECKED: no djxl (set SKIDBLADNIR_REFERENCE_DJXL).";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+	let dir = env::temp_dir().join(format!("skidbladnir-jxl-metadata-{}", std::process::id()));
+	let _ = fs::remove_dir_all(&dir);
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+
+	let (source, icc, exif, xmp, img) = rich_png(&dir);
 
 	let mut failures = Vec::new();
 	for (mode, lossless) in [("lossless", true), ("lossy", false)] {
@@ -426,4 +434,78 @@ fn keeps_metadata_in_jpeg_xl() {
 	}
 	assert!(failures.is_empty(), "JPEG XL METADATA FAILED:\n{}", failures.join("\n"));
 	eprintln!("JPEG XL METADATA OK: djxl reads the kept ICC profile as the image's, lossless pixels decode exactly in it, EXIF and XMP are the container's boxes; nothing is kept when nothing is asked for");
+}
+
+/// Keeping metadata in **HEIC** output, checked by libheif's own `heif-info` (a separate
+/// build from ours in CI) and by reading the file's boxes: the source's ICC profile must be
+/// the primary image's `colr` box of type `prof`, byte for byte, and `heif-info` must list
+/// it along with an `Exif` and an `XMP` metadata item. With nothing kept, none appears.
+#[test]
+fn keeps_metadata_in_heic() {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let heif_info = env::var_os("SKIDBLADNIR_REFERENCE_HEIFINFO").map(PathBuf::from).filter(|path| path.is_file()).or_else(|| Command::new("heif-info").arg("--version").output().ok().filter(|out| out.status.success()).map(|_| PathBuf::from("heif-info")));
+	let Some(heif_info) = heif_info else {
+		let message = "HEIC METADATA NOT CHECKED: no heif-info (set SKIDBLADNIR_REFERENCE_HEIFINFO).";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+	let dir = env::temp_dir().join(format!("skidbladnir-heic-metadata-{}", std::process::id()));
+	let _ = fs::remove_dir_all(&dir);
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+	let (source, icc, _, _, _) = rich_png(&dir);
+
+	let mut failures = Vec::new();
+	for kind in ["all", "none"] {
+		let mut job = EncodeJob { format: skidbladnir_encode::OutputFormat::Heic, metadata: keep(kind), ..EncodeJob::default() };
+		job.heic.quality = 80;
+		let output = dir.join(format!("{kind}.heic"));
+		if let Err(error) = encode_file(&job, &source, &output) {
+			failures.push(format!("keep {kind}: {error}"));
+			continue;
+		}
+		let written = fs::read(&output).expect("read");
+		let run = Command::new(&heif_info).arg(&output).output().expect("run heif-info");
+		let report = String::from_utf8_lossy(&run.stdout).into_owned();
+		if !run.status.success() {
+			failures.push(format!("keep {kind}: heif-info refused the file"));
+			continue;
+		}
+		let profile = colr_profile(&written);
+		let (listed_icc, listed_exif, listed_xmp) = (report.contains("color profile: prof"), report.contains("Exif:"), report.contains("XMP:"));
+		if kind == "all" {
+			if profile.as_deref() != Some(&icc[..]) {
+				failures.push(format!("keep all: the colr prof box is {:?} bytes, not the source's {}", profile.map(|p| p.len()), icc.len()));
+			}
+			if !(listed_icc && listed_exif && listed_xmp) {
+				failures.push(format!("keep all: heif-info lists profile {listed_icc}, Exif {listed_exif}, XMP {listed_xmp}:\n{report}"));
+			}
+		} else if profile.is_some() || listed_icc || listed_exif || listed_xmp {
+			failures.push(format!("keep none: metadata was kept when none was asked for:\n{report}"));
+		}
+	}
+	let _ = fs::remove_dir_all(&dir);
+	assert!(failures.is_empty(), "HEIC METADATA FAILED:\n{}", failures.join("\n"));
+	eprintln!("HEIC METADATA OK: the ICC profile is the primary image's colr prof box byte for byte, heif-info lists it with Exif and XMP; nothing is kept when nothing is asked for");
+}
+
+/// The ICC profile in a HEIF's `meta/iprp/ipco/colr` box of type `prof`, if any.
+fn colr_profile(file: &[u8]) -> Option<Vec<u8>> {
+	let children = |data: &[u8]| {
+		let mut out = Vec::new();
+		let mut at = 0;
+		while let Some(header) = data.get(at..at + 8) {
+			let size = u32::from_be_bytes(header[..4].try_into().expect("four")) as usize;
+			if size < 8 || at + size > data.len() {
+				break;
+			}
+			out.push((<[u8; 4]>::try_from(&header[4..8]).expect("four"), data[at + 8..at + size].to_vec()));
+			at += size;
+		}
+		out
+	};
+	let meta = children(file).into_iter().find(|(kind, _)| kind == b"meta")?.1;
+	let iprp = children(meta.get(4..)?).into_iter().find(|(kind, _)| kind == b"iprp")?.1;
+	let ipco = children(&iprp).into_iter().find(|(kind, _)| kind == b"ipco")?.1;
+	children(&ipco).into_iter().find(|(kind, body)| kind == b"colr" && body.starts_with(b"prof")).map(|(_, body)| body[4..].to_vec())
 }

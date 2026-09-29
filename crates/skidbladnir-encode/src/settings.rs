@@ -194,8 +194,9 @@ impl Resize {
 /// Which of the source's metadata to carry into the output (`cwebp -metadata`).
 ///
 /// All off by default, as in `cwebp` and the Electron app, so a default job still
-/// matches `cwebp` exactly. Applies to still WebP and JPEG XL output; see
-/// [`crate::metadata`] and [`crate::jxl::encode_with_metadata`].
+/// matches `cwebp` exactly. Applies to still WebP, JPEG XL and HEIC output; see
+/// [`crate::metadata`], [`crate::jxl::encode_with_metadata`] and
+/// [`crate::heic::encode_with_metadata`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct KeepMetadata {
@@ -506,8 +507,8 @@ pub struct EncodeJob {
 	pub jxl: JxlSettings,
 	/// The HEIC controls, likewise.
 	pub heic: HeicSettings,
-	/// Which of the source's metadata to keep. Shared by every format, though only WebP
-	/// and JPEG XL output write it so far.
+	/// Which of the source's metadata to keep. Shared by every format, though only WebP,
+	/// JPEG XL and HEIC output write it so far.
 	pub metadata: KeepMetadata,
 }
 

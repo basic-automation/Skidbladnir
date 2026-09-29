@@ -569,12 +569,21 @@ prettier subset.
       boxes and omitting the `Exif` offset each fail it.
       Found on the way: the WebP gate's `-metadata all` cases had kept nothing on our side
       *or* `cwebp`'s (a test helper misread "all"); fixed, and all 84 still match.
+- [x] **Keep metadata in HEIC output** (2026-09-28): the ICC profile as the primary image's
+      `colr` box of type `prof` (`heif_image_set_raw_color_profile`), EXIF and XMP as its
+      metadata items (`heif_context_add_exif_metadata` / `_XMP_metadata`). **Gate:**
+      `keeps_metadata_in_heic` — the `colr prof` box is the source's profile byte for byte,
+      and libheif's own `heif-info` (the runner's separate build in CI) lists the profile,
+      `Exif` and `XMP`; nothing when nothing is kept. Mutation-tested: an unset profile and
+      a missing EXIF item each fail it.
+- [ ] **An opaque image is written to HEIC with an alpha channel** (found 2026-09-28:
+      `heif-info` reports "alpha channel: yes" for a JPEG). `heic.rs` always hands libheif
+      interleaved RGBA; an opaque image should go as RGB, as `jxl.rs` already does, to save
+      the alpha plane's bytes and not tell viewers the image has transparency.
 - [ ] Keep metadata in **animated** WebP output (`gif2webp -metadata` keeps ICC and XMP
-      from a GIF's application extensions), and in **AVIF** and **HEIC** output. `ravif`
+      from a GIF's application extensions), and in **AVIF** output. `ravif`
       0.13 embeds EXIF (`with_exif`) but has no ICC setter, so AVIF's profile needs another
-      route <https://docs.rs/ravif/latest/ravif/struct.Encoder.html>; libheif takes an ICC
-      profile per image (`heif_image_set_raw_color_profile`)
-      <https://raw.githubusercontent.com/strukturag/libheif/master/libheif/api/libheif/heif_color.h>.
+      route <https://docs.rs/ravif/latest/ravif/struct.Encoder.html>.
 - [x] `cargo tauri build` green on **Linux** for `.deb` — **this was not actually blocked
       on `patchelf`.** Only the AppImage target needs it; `cargo tauri build --bundles deb`
       produces a valid 3.8 MB `Skidbladnir_<version>_amd64.deb` on the dev host today,
