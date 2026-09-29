@@ -263,7 +263,7 @@ fn decode(path: &Path, bytes: &[u8]) -> Result<SourceImage, SourceError> {
 		SourceFormat::Jpeg if let Some(decoded) = decode_jpeg(bytes) => decoded.map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?,
 		SourceFormat::Png | SourceFormat::Jpeg | SourceFormat::Tiff => {
 			let decoded = image::load_from_memory(bytes).map_err(|error| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: error.to_string() })?;
-			let rgba = to_rgba8(decoded);
+			let rgba = to_rgba8(decoded, format);
 			(rgba.width(), rgba.height(), rgba.into_raw())
 		}
 	};
@@ -280,9 +280,14 @@ fn decode(path: &Path, bytes: &[u8]) -> Result<SourceImage, SourceError> {
 /// before this, a 16-bit RGBA fixture encoded to 216 bytes here against `cwebp`'s 212, and
 /// 16-bit RGB to 168 against 166. Truncating to match makes them identical.
 ///
+/// **TIFF is reduced differently again**: `cwebp` reads it through libtiff's
+/// `TIFFReadRGBAImage`, which maps each 16-bit sample with its `Bitdepth16To8` table,
+/// `(v * 255 + 32767) / 65535` — a rounding, not a truncation. Truncating a 16-bit TIFF
+/// moved every one of the 76 settings off `cwebp`'s output.
+///
 /// 8-bit grayscale, grayscale+alpha and palette PNGs were already byte-identical and are
 /// left to `into_rgba8`.
-fn to_rgba8(decoded: image::DynamicImage) -> image::RgbaImage {
+fn to_rgba8(decoded: image::DynamicImage, format: SourceFormat) -> image::RgbaImage {
 	use image::DynamicImage::{ImageLuma16, ImageLumaA16, ImageRgb16, ImageRgba16};
 
 	if !matches!(decoded, ImageLuma16(_) | ImageLumaA16(_) | ImageRgb16(_) | ImageRgba16(_)) {
@@ -291,8 +296,12 @@ fn to_rgba8(decoded: image::DynamicImage) -> image::RgbaImage {
 
 	let wide = decoded.into_rgba16();
 	let (width, height) = (wide.width(), wide.height());
-	// `sample >> 8` of a u16 is always within u8, so this cannot lose anything further.
-	let narrowed: Vec<u8> = wide.into_raw().into_iter().map(|sample| u8::try_from(sample >> 8).unwrap_or(u8::MAX)).collect();
+	// Both results are always within u8, so neither can lose anything further.
+	let narrow = |sample: u16| -> u8 {
+		let wide = u32::from(sample);
+		u8::try_from(if format == SourceFormat::Tiff { (wide * 255 + 32_767) / 65_535 } else { wide >> 8 }).unwrap_or(u8::MAX)
+	};
+	let narrowed: Vec<u8> = wide.into_raw().into_iter().map(narrow).collect();
 	image::RgbaImage::from_raw(width, height, narrowed).unwrap_or_else(|| image::RgbaImage::new(width, height))
 }
 

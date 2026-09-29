@@ -187,9 +187,12 @@ What it can do:
   exactly as `cwebp -metadata` does, checked against `cwebp` itself. Off by default, as
   in `cwebp`: without the profile a wide-gamut (Display P3, Adobe RGB) photo's colours
   are read as sRGB.
-- Convert **JPEG and WebP files to WebP byte for byte as `cwebp` itself would**, across
-  every setting, checked against `cwebp` in CI: JPEGs are decoded with libjpeg-turbo's
-  decoder, as `cwebp` decodes them, and WebP sources take `cwebp`'s route straight to YUV.
+- Convert **JPEG, PNG, TIFF and WebP files to WebP byte for byte as `cwebp` itself
+  would**, across every setting, checked against `cwebp` in CI: JPEGs are decoded with
+  libjpeg-turbo's decoder, as `cwebp` decodes them, 16-bit files are reduced to 8 bits
+  the way `cwebp`'s libpng or libtiff reduces them, and WebP sources take `cwebp`'s route
+  straight to YUV. One deliberate exception: a TIFF with straight (unassociated) alpha
+  keeps its colours, where `cwebp` darkens its semi-transparent pixels.
 - Refuse to overwrite your source image, and stage every write through a temporary
   file so a failed conversion cannot damage a file that was already there.
 - Report the before and after sizes, and the dimensions actually produced.

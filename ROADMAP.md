@@ -302,6 +302,25 @@ The Electron app shells out to `cwebp.exe`. The Rust port should not.
       (2.1 on Ubuntu 24.04, 3.x on Arch and Homebrew), so the gate also shows whether
       libjpeg-turbo versions agree with each other.
 
+- [x] **TIFF to WebP, across the whole surface** (2026-09-28). 8-bit RGB TIFFs (plain and
+      LZW) already matched `cwebp`; **16-bit TIFFs matched in 0 of 76 settings**, because
+      libtiff's `TIFFReadRGBAImage` reduces 16-bit samples with rounding,
+      `(v * 255 + 32767) / 65535` (its `Bitdepth16To8`), where we truncated as libpng does
+      for PNG. The reduction is now per format. **Gate:**
+      `matches_reference_cwebp_through_a_tiff_file` — four committed `magick`-written TIFFs
+      minus the one below × 76 settings: 228 of 228 byte-identical; truncating again fails 76.
+- [x] **Decided: an unassociated-alpha TIFF keeps its colours, unlike `cwebp`.** libtiff
+      returns such a file premultiplied, and `cwebp` un-multiplies only *associated* alpha,
+      so it encodes premultiplied colour as straight and darkens every semi-transparent
+      pixel — measured exactly, `(c * a + 127) / 255` on all 24,444 samples. A reading bug,
+      not a setting, so not copied (as the Electron app's `-size 1` default was not).
+      Pinned both ways by `unassociated_alpha_tiff_keeps_its_colours`: ours lossless equals
+      the source; `cwebp`'s equals it premultiplied, and the test says what to do if a
+      libtiff or libwebp release changes that.
+- [ ] **Associated-alpha (premultiplied) TIFF input.** `cwebp` un-multiplies it; whether the
+      `image` crate's decoder does is unchecked, and an `magick`-written associated-alpha
+      fixture reads back oddly even in `magick`. Needs a trustworthy fixture first.
+
 ## Phase 3 — Frontend parity (Nuxt + Tailwind)
 
 Parity means a user of the Electron app finds every control they had, not a
