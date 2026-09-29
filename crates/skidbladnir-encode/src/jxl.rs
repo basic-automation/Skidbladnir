@@ -20,7 +20,7 @@ use std::{
 };
 
 use crate::{
-	encoder::{EncodeError, RgbaImage, rescale_rgba}, settings::{JxlSettings, Resize}
+	encoder::{EncodeError, RgbaImage, rescale_rgba}, metadata::Metadata, settings::{JxlSettings, Resize}
 };
 
 #[repr(C)]
@@ -144,6 +144,9 @@ unsafe extern "C" {
 	fn JxlEncoderStoreJPEGMetadata(enc: *mut JxlEncoder, store_jpeg_metadata: c_int) -> c_int;
 	fn JxlEncoderAddJPEGFrame(frame_settings: *const JxlEncoderFrameSettings, buffer: *const u8, size: usize) -> c_int;
 	fn JxlEncoderAddImageFrame(frame_settings: *const JxlEncoderFrameSettings, pixel_format: *const JxlPixelFormat, buffer: *const c_void, size: usize) -> c_int;
+	fn JxlEncoderSetICCProfile(enc: *mut JxlEncoder, icc_profile: *const u8, size: usize) -> c_int;
+	fn JxlEncoderUseBoxes(enc: *mut JxlEncoder) -> c_int;
+	fn JxlEncoderAddBox(enc: *mut JxlEncoder, box_type: *const u8, contents: *const u8, size: usize, compress_box: c_int) -> c_int;
 	fn JxlEncoderCloseInput(enc: *mut JxlEncoder);
 	fn JxlEncoderProcessOutput(enc: *mut JxlEncoder, next_out: *mut *mut u8, avail_out: *mut usize) -> c_int;
 
@@ -255,6 +258,18 @@ impl Encoder {
 /// Returns [`EncodeError`] if the settings are out of range, the buffer does not match its
 /// dimensions, the resize fails, libjxl fails, or `on_progress` asked to stop.
 pub fn encode(settings: &JxlSettings, resize: Resize, image: &RgbaImage<'_>, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
+	encode_with_metadata(settings, resize, image, &Metadata::default(), on_progress)
+}
+
+/// [`encode`], carrying `metadata` into the file: an ICC profile becomes the image's colour
+/// profile (the pixels are in that space, not sRGB, so it is how they are *labelled*, and
+/// libjxl converts through it for a lossy XYB encode), EXIF an `Exif` box and XMP an
+/// `xml ` box, as `cjxl` writes them.
+///
+/// # Errors
+///
+/// As [`encode`], and when libjxl rejects the ICC profile.
+pub fn encode_with_metadata(settings: &JxlSettings, resize: Resize, image: &RgbaImage<'_>, metadata: &Metadata, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
 	settings.validate()?;
 	let (width, height, pixels) = rescale_rgba(image, resize)?;
 	if !on_progress(0) {
@@ -299,15 +314,33 @@ pub fn encode(settings: &JxlSettings, resize: Resize, image: &RgbaImage<'_>, on_
 		encoder.check("JxlEncoderSetExtraChannelInfo", unsafe { JxlEncoderSetExtraChannelInfo(encoder.enc, 0, &raw const alpha) })?;
 	}
 
-	let mut color = std::mem::MaybeUninit::<JxlColorEncoding>::uninit();
-	// SAFETY: `JxlColorEncodingSetToSRGB` writes every field. The source pixels are
-	// sRGB, which is what every decoder in this crate produces.
-	let color = unsafe {
-		JxlColorEncodingSetToSRGB(color.as_mut_ptr(), JXL_FALSE);
-		color.assume_init()
-	};
-	// SAFETY: `color` is initialised and outlives the call.
-	encoder.check("JxlEncoderSetColorEncoding", unsafe { JxlEncoderSetColorEncoding(encoder.enc, &raw const color) })?;
+	if let Some(icc) = metadata.icc.as_deref() {
+		// SAFETY: `icc` is a live slice; libjxl copies and parses it before returning.
+		encoder.check("JxlEncoderSetICCProfile", unsafe { JxlEncoderSetICCProfile(encoder.enc, icc.as_ptr(), icc.len()) })?;
+	} else {
+		let mut color = std::mem::MaybeUninit::<JxlColorEncoding>::uninit();
+		// SAFETY: `JxlColorEncodingSetToSRGB` writes every field. Pixels without a profile
+		// are taken as sRGB, as every decoder in this crate leaves them.
+		let color = unsafe {
+			JxlColorEncodingSetToSRGB(color.as_mut_ptr(), JXL_FALSE);
+			color.assume_init()
+		};
+		// SAFETY: `color` is initialised and outlives the call.
+		encoder.check("JxlEncoderSetColorEncoding", unsafe { JxlEncoderSetColorEncoding(encoder.enc, &raw const color) })?;
+	}
+
+	// EXIF and XMP travel as container boxes. An `Exif` box starts with the offset of the
+	// TIFF header within it — 0 here, as the block is the TIFF structure itself.
+	let exif_box = metadata.exif.as_deref().map(|exif| [&[0_u8; 4][..], exif].concat());
+	let boxes: Vec<(&[u8; 4], &[u8])> = [(b"Exif", exif_box.as_deref()), (b"xml ", metadata.xmp.as_deref())].into_iter().filter_map(|(kind, body)| body.map(|body| (kind, body))).collect();
+	if !boxes.is_empty() {
+		// SAFETY: `encoder.enc` is live, and this precedes the first frame as required.
+		encoder.check("JxlEncoderUseBoxes", unsafe { JxlEncoderUseBoxes(encoder.enc) })?;
+		for (kind, body) in boxes {
+			// SAFETY: both slices are live; libjxl copies the contents before returning.
+			encoder.check("JxlEncoderAddBox", unsafe { JxlEncoderAddBox(encoder.enc, kind.as_ptr(), body.as_ptr(), body.len(), JXL_FALSE) })?;
+		}
+	}
 
 	let frame = encoder.frame_settings(settings.effort)?;
 	if settings.lossless {

@@ -24,6 +24,15 @@ export interface EncodeJob {
 	avif: AvifSettings
 	jxl: JxlSettings
 	heic: HeicSettings
+	/** Which of the source's metadata to keep (`cwebp -metadata`). Every format; AVIF keeps EXIF only. */
+	metadata: KeepMetadata
+}
+
+/** `cwebp -metadata`: each kind the source carries is copied into the output when on. */
+export interface KeepMetadata {
+	icc: boolean
+	exif: boolean
+	xmp: boolean
 }
 
 /**

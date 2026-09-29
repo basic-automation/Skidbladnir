@@ -27,6 +27,18 @@ use crate::{
 /// Returns [`EncodeError`] if the settings are out of range, the buffer does not match its
 /// dimensions, the resize fails, `ravif` fails, or `on_progress` asked to stop.
 pub fn encode(settings: &AvifSettings, resize: Resize, image: &RgbaImage<'_>, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
+	encode_with_exif(settings, resize, image, None, on_progress)
+}
+
+/// [`encode`], with `exif` (the TIFF-structured block) stored as the image's `Exif` item.
+///
+/// EXIF is the only metadata an AVIF can carry here: `ravif` 0.13 writes its container
+/// with `avif-serialize`, which has no way to add an ICC profile or XMP.
+///
+/// # Errors
+///
+/// As [`encode`].
+pub fn encode_with_exif(settings: &AvifSettings, resize: Resize, image: &RgbaImage<'_>, exif: Option<&[u8]>, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
 	// `ravif` panics on an out-of-range quality or speed; validating first turns that into
 	// an error the user can read.
 	settings.validate()?;
@@ -55,6 +67,10 @@ pub fn encode(settings: &AvifSettings, resize: Resize, image: &RgbaImage<'_>, on
 			AvifAlphaMode::Premultiplied => AlphaColorMode::Premultiplied,
 		})
 		.with_num_threads(if settings.multi_threading { None } else { Some(1) });
+	let config = match exif {
+		Some(exif) => config.with_exif(exif),
+		None => config,
+	};
 	let encoded = config.encode_rgba(Img::new(pixels.as_slice(), width as usize, height as usize)).map_err(|error| EncodeError::Avif(error.to_string()))?;
 
 	// A cancel that arrived during the encode is still honoured: nothing is returned, so

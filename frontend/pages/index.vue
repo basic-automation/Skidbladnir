@@ -34,7 +34,7 @@ let unlistenDrop: (() => void) | null = null
 
 /** What the Rust core says about a path the user offered. */
 interface WebpInfo { width: number, height: number, hasAlpha: boolean, hasAnimation: boolean, compression: 'lossy' | 'lossless' | 'mixed' }
-interface PathInspection { path: string, supported: boolean, format: string | null, webp: WebpInfo | null }
+interface PathInspection { path: string, supported: boolean, format: string | null, webp: WebpInfo | null, animated: boolean }
 
 const inspected = ref<PathInspection[]>([])
 
@@ -49,7 +49,7 @@ const mirrorStructure = ref(true)
 const includeSubfolders = ref(false)
 // The folder the queue was scanned from, so the scan can be redone when the option changes.
 const scannedRoot = ref('')
-const animatedInputs = computed(() => inspected.value.filter(entry => entry.webp?.hasAnimation))
+const animatedInputs = computed(() => inspected.value.filter(entry => entry.animated))
 
 /** Preferences as the Rust side stores them, plus why it fell back if it did. */
 interface Preferences { settings: EncodeJob, outputDirectory: string | null }
@@ -266,7 +266,7 @@ onUnmounted(() => {
 
 async function chooseInputs() {
 	const { open } = await import('@tauri-apps/plugin-dialog')
-	const picked = await open({ multiple: true, filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'jpe', 'jif', 'jfif', 'jfi', 'tif', 'tiff', 'webp', 'avif', 'jxl', 'heic', 'heif'] }] })
+	const picked = await open({ multiple: true, filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'jpe', 'jif', 'jfif', 'jfi', 'tif', 'tiff', 'webp', 'avif', 'jxl', 'heic', 'heif', 'gif'] }] })
 	scanned.value = []
 	scannedRoot.value = ''
 	if (Array.isArray(picked)) inputPaths.value = picked
@@ -430,7 +430,7 @@ const converted = computed(() => reports.value.length > 0 && failures.value.leng
 // Preview: encode one of the selected files into memory with the current settings and
 // show it beside the original. Nothing is written to disk. The core returns both sides as
 // data: URLs and computes the saving itself.
-interface Preview { original: string, encoded: string, sourceBytes: number, encodedBytes: number, width: number, height: number, savingPercent: number | null }
+interface Preview { original: string, encoded: string, sourceBytes: number, encodedBytes: number, width: number, height: number, savingPercent: number | null, frames: number }
 const preview = ref<Preview | null>(null)
 const previewFormat = ref<OutputFormat>('webp')
 const previewPath = ref('')
@@ -756,13 +756,20 @@ function basename(path: string): string {
 							{{ inspected[0]!.webp!.compression }}{{ inspected[0]!.webp!.hasAlpha ? ', with alpha' : '' }}.
 						</p>
 						<p v-if="animatedInputs.length > 0" class="text-paleday-warning">
-							{{ animatedInputs.length === 1 ? 'One queued file is an animated WebP' : `${animatedInputs.length} queued files are animated WebPs` }}.
-							Skidbladnir encodes still images, so {{ animatedInputs.length === 1 ? 'it' : 'they' }} will be
-							skipped with an error rather than converted.
+							{{ animatedInputs.length === 1 ? 'One queued file is an animation' : `${animatedInputs.length} queued files are animations` }} (animated WebP or GIF).
+							<template v-if="!isWebp">
+								This format holds still images only here, so {{ animatedInputs.length === 1 ? 'it' : 'they' }} will be
+								skipped with an error rather than cut down to one frame. Choose WebP to convert
+								{{ animatedInputs.length === 1 ? 'it' : 'them' }} with every frame.
+							</template>
+							<template v-else>
+								{{ animatedInputs.length === 1 ? 'It' : 'They' }} will be re-encoded as animated WebP with every
+								frame and its timing kept. Every setting applies to each frame.
+							</template>
 						</p>
 						<p v-if="dropRejected > 0" class="text-paleday-warning">
 							{{ dropRejected }} dropped {{ dropRejected === 1 ? 'file was' : 'files were' }} not a
-							PNG, JPEG, TIFF, WebP, AVIF, JPEG XL or HEIC and {{ dropRejected === 1 ? 'was' : 'were' }} skipped.
+							PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC or GIF and {{ dropRejected === 1 ? 'was' : 'were' }} skipped.
 						</p>
 					</div>
 
@@ -1015,6 +1022,21 @@ function basename(path: string): string {
 							</div>
 						</ControlPanel>
 
+						<!-- cwebp -metadata. Off by default, as in cwebp and the Electron app. -->
+						<ControlPanel title="Metadata">
+							<div class="grid grid-cols-3 gap-3">
+								<ControlToggle v-if="!isAvif" v-model="settings.metadata.icc" label="Keep colour profile" help="The ICC profile. Without it a wide-gamut photo (Display P3, Adobe RGB) is shown as sRGB and its colours shift." />
+								<ControlToggle v-model="settings.metadata.exif" label="Keep EXIF" help="Camera, exposure, date and orientation — and location, if the camera recorded it." />
+								<ControlToggle v-if="!isAvif" v-model="settings.metadata.xmp" label="Keep XMP" help="Editing history, ratings, rights and captions." />
+							</div>
+							<p class="px-2.5 text-xs text-paleday-dim">
+								<template v-if="isWebp">Kept exactly as cwebp -metadata keeps them, from JPEG, PNG, TIFF and WebP files. Not yet for animations.</template>
+								<template v-else-if="isJxl">The colour profile labels the image in the JPEG XL file; EXIF and XMP are stored beside it. A JPEG recompressed losslessly always keeps its own metadata, since the original must be rebuildable bit for bit.</template>
+								<template v-else-if="isHeic">The colour profile labels the image in the HEIC file; EXIF and XMP are stored as its metadata items.</template>
+								<template v-else>AVIF output can keep EXIF only: its encoder has no way to store a colour profile or XMP yet.</template>
+							</p>
+						</ControlPanel>
+
 						<!-- The expert controls, behind a disclosure as in the Electron app, open by default. -->
 						<UAccordion
 							v-if="lossy"
@@ -1054,6 +1076,7 @@ function basename(path: string): string {
 											<ChoiceGroup v-model="targetKind" :items="TARGET_ITEMS" orientation="vertical" aria-label="Compression target" />
 											<p class="text-xs text-paleday-dim">
 												A size or PSNR target overrides the quality slider.
+												<template v-if="animatedInputs.length > 0">For an animation it applies to each frame, not the whole file.</template>
 											</p>
 										</div>
 										<div v-if="targetKind === 'size'" class="flex min-w-0 flex-col gap-2 px-2.5 py-[7px] text-xs">
@@ -1117,6 +1140,9 @@ function basename(path: string): string {
 										</p>
 										<figcaption class="text-xs text-paleday-dim">
 											{{ previewFormat.toUpperCase() }} · {{ formatBytes(preview.encodedBytes) }} · {{ preview.width }}×{{ preview.height }}
+											<template v-if="preview.frames > 1">
+												· {{ preview.frames }} frames
+											</template>
 											<template v-if="preview.savingPercent !== null">
 												· <span class="font-semibold" :class="preview.savingPercent >= 0 ? 'text-paleday-accent-text' : 'text-paleday-warning'">{{ preview.savingPercent >= 0 ? '−' : '+' }}{{ Math.abs(preview.savingPercent).toFixed(1) }}%</span>
 											</template>

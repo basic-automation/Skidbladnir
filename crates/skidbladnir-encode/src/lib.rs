@@ -10,17 +10,22 @@
 //! retired in Phase 6; its last source is at the `electron-final` tag.
 //! Every control it exposes is represented in [`EncodeJob`]; see ROADMAP.md Phase 2.
 
+pub mod animation;
 pub mod avif;
+pub mod avif_grid;
+pub mod avif_transform;
 pub mod cwebp;
 pub mod encoder;
+pub mod gif_input;
 pub mod heic;
 pub mod inspect;
 pub mod jxl;
+pub mod metadata;
 pub mod settings;
 pub mod source;
 
 pub use cwebp::cwebp_args;
 pub use encoder::{EncodeError, RgbaImage, encode_rgba, encode_rgba_with_progress, rescale_rgba};
 pub use inspect::{WebpCompression, WebpInfo, inspect_webp};
-pub use settings::{AlphaFiltering, AvifAlphaMode, AvifBitDepth, AvifColorModel, AvifSettings, EncodeJob, FilterType, HeicAqMode, HeicBitDepth, HeicChroma, HeicPreset, HeicSettings, HeicTune, JxlSettings, Mode, OutputFormat, Preset, Resize, TargetMetric, ValidationError, WebpSettings};
+pub use settings::{AlphaFiltering, AvifAlphaMode, AvifBitDepth, AvifColorModel, AvifSettings, EncodeJob, FilterType, HeicAqMode, HeicBitDepth, HeicChroma, HeicPreset, HeicSettings, HeicTune, JxlSettings, KeepMetadata, Mode, OutputFormat, Preset, Resize, TargetMetric, ValidationError, WebpSettings};
 pub use source::{Conversion, ConvertError, FoundImage, PathInspection, SourceError, SourceFormat, SourceImage, encode_file, encode_file_with_progress, inspect_paths, load, mirrored_output_path, scan_directory};

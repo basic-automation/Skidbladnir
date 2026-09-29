@@ -264,18 +264,18 @@ fn matches_reference_cwebp_through_a_png_file() {
 	image::RgbaImage::from_raw(width, height, pixels).expect("buffer matches the dimensions").save_with_format(&png, image::ImageFormat::Png).expect("write the PNG fixture");
 
 	let mut mismatches: Vec<String> = Vec::new();
-	// A representative slice rather than all 76: this test is about the decoder agreeing,
-	// and the encoder surface is already covered above.
-	let subset = [("default lossy", EncodeJob::default()), ("lossless", EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() })), ("near-lossless 60", EncodeJob::from(WebpSettings { mode: Mode::NearLossless, quality: 60, ..Default::default() })), ("quality 30", EncodeJob::from(WebpSettings { quality: 30, ..Default::default() })), ("sharp yuv", EncodeJob::from(WebpSettings { sharp_yuv: true, ..Default::default() })), ("resize 32x0", EncodeJob { resize: Resize { width: 32, height: 0, no_enlarge: false }, ..Default::default() })];
+	// The whole surface: an 8-bit PNG should hand the encoder exactly the PAM fixture's
+	// pixels, and this is what shows it does, setting by setting.
+	let subset = cases();
 
-	for (name, settings) in &subset {
-		let theirs_path = dir.join(format!("cwebp-{}.webp", name.replace(' ', "-")));
+	for (index, (name, settings)) in subset.iter().enumerate() {
+		let theirs_path = dir.join(format!("cwebp-{index}.webp"));
 		let args = cwebp_args(settings, &png, &theirs_path);
 		let run = Command::new(&cwebp).args(&args).output().expect("run the reference cwebp");
 		assert!(run.status.success(), "reference cwebp failed for `{name}`: {}", String::from_utf8_lossy(&run.stderr));
 		let expected = fs::read(&theirs_path).expect("read the reference output");
 
-		let ours_path = dir.join(format!("ours-{}.webp", name.replace(' ', "-")));
+		let ours_path = dir.join(format!("ours-{index}.webp"));
 		skidbladnir_encode::source::encode_file(settings, &png, &ours_path).expect("our pipeline encodes");
 		let actual = fs::read(&ours_path).expect("read our output");
 
@@ -370,4 +370,237 @@ fn matches_reference_cwebp_across_png_colour_types() {
 	let _ = fs::remove_dir_all(&dir);
 	assert!(mismatches.is_empty(), "{} of {} PNG colour types diverged. This is a DECODER difference — check how `image` reduces the sample depth against what libpng does:\n  {}", mismatches.len(), fixtures.len(), mismatches.join("\n  "));
 	eprintln!("COLOUR-TYPE PARITY OK: {} PNG colour types matched the reference cwebp.", fixtures.len());
+}
+
+/// Parity through a **WebP file**: a WebP re-encoded to WebP, across the whole control
+/// surface, from lossless and lossy sources with and without alpha.
+///
+/// This caught a real divergence. For a plain lossy encode `cwebp` has libwebp decode a
+/// WebP input straight into YUV 4:2:0 (`imageio/webpdec.c`), never through RGB, and
+/// decoding to RGBA then letting the encoder convert landed a few bytes away (228 vs 232
+/// on the metadata gate's fixture). Both sides use the same libwebp decoder here, so any
+/// mismatch is the route the pixels take, not a decoder.
+#[test]
+fn matches_reference_cwebp_through_a_webp_file() {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let Some(cwebp) = reference_cwebp() else {
+		let message = "WEBP-SOURCE PARITY NOT RUN: no reference cwebp found.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+	let linked = skidbladnir_encode::encoder::linked_encoder_version();
+	if reference_version(&cwebp) != Some(linked) {
+		let message = "WEBP-SOURCE PARITY NOT RUN: reference cwebp and the linked libwebp are different versions.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	}
+
+	let (width, height) = (64_u32, 48_u32);
+	let translucent = fixture(width, height);
+	let opaque: Vec<u8> = translucent.chunks(4).flat_map(|p| [p[0], p[1], p[2], 255]).collect();
+	let dir = env::temp_dir().join(format!("skidbladnir-parity-webp-{}", std::process::id()));
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+
+	// The sources are written by cwebp itself, from PAM.
+	let mut sources = Vec::new();
+	for (alpha, pixels) in [("alpha", &translucent), ("opaque", &opaque)] {
+		let pam = dir.join(format!("{alpha}.pam"));
+		write_pam(&pam, pixels, width, height);
+		for (kind, flags) in [("lossless", &["-lossless"][..]), ("lossy", &["-q", "90"][..])] {
+			let webp = dir.join(format!("source-{kind}-{alpha}.webp"));
+			let run = Command::new(&cwebp).arg("-quiet").args(flags).arg(&pam).arg("-o").arg(&webp).output().expect("run cwebp");
+			assert!(run.status.success(), "cwebp must write the {kind} {alpha} source");
+			sources.push((format!("{kind} {alpha}"), webp));
+		}
+	}
+
+	let mut mismatches: Vec<String> = Vec::new();
+	let cases = cases();
+	for (source_name, source) in &sources {
+		for (index, (name, settings)) in cases.iter().enumerate() {
+			let theirs_path = dir.join(format!("cwebp-{index}.webp"));
+			let run = Command::new(&cwebp).args(cwebp_args(settings, source, &theirs_path)).output().expect("run the reference cwebp");
+			assert!(run.status.success(), "reference cwebp failed for `{name}` from {source_name}: {}", String::from_utf8_lossy(&run.stderr));
+			let expected = fs::read(&theirs_path).expect("read the reference output");
+			let ours_path = dir.join(format!("ours-{index}.webp"));
+			skidbladnir_encode::source::encode_file(settings, source, &ours_path).expect("our pipeline encodes");
+			let actual = fs::read(&ours_path).expect("read our output");
+			if actual != expected {
+				mismatches.push(format!("{source_name} source, `{name}`: ours {} bytes, cwebp {} bytes", actual.len(), expected.len()));
+			}
+		}
+	}
+
+	let _ = fs::remove_dir_all(&dir);
+	let total = sources.len() * cases.len();
+	assert!(mismatches.is_empty(), "{} of {total} WebP-file conversions diverged from cwebp:\n  {}", mismatches.len(), mismatches.join("\n  "));
+	eprintln!("WEBP-SOURCE PARITY OK: {total} WebP-to-WebP conversions ({} sources x {} settings) matched the reference cwebp byte for byte.", sources.len(), cases.len());
+}
+
+/// Parity through a **JPEG file**, across the whole control surface: JPEG to WebP is the
+/// conversion most people make.
+///
+/// It needs the same *decoder* as `cwebp`, not just the same encoder: `cwebp` reads JPEGs
+/// with libjpeg(-turbo) as `JCS_RGB` with fancy upsampling, and a decoder that rounds its
+/// IDCT or chroma upsampling differently moves every output (2114 vs 2130 bytes at the
+/// defaults, before JPEG input went through libjpeg-turbo's decoder here too).
+///
+/// The fixtures were written by `ImageMagick` 7.1.2-31 from one 97x63 image (odd sizes, so
+/// the upsampler's edge handling is exercised), stripped of metadata:
+/// `magick base.png -strip -quality Q -sampling-factor F [-interlace JPEG |
+/// -define jpeg:restart-interval=2 | -colorspace Gray] out.jpg`.
+/// SHA-256: 4:4:4 643732ce…, 4:2:2 d4da8bc6…, 4:2:0 29857427…, 4:2:0 progressive
+/// 9dc9915c…, 4:2:0 with restart markers c0a654d2…, greyscale 66fc23e5….
+#[test]
+fn matches_reference_cwebp_through_a_jpeg_file() {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let Some(cwebp) = reference_cwebp() else {
+		let message = "JPEG-SOURCE PARITY NOT RUN: no reference cwebp found.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+	let linked = skidbladnir_encode::encoder::linked_encoder_version();
+	if reference_version(&cwebp) != Some(linked) {
+		let message = "JPEG-SOURCE PARITY NOT RUN: reference cwebp and the linked libwebp are different versions.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	}
+
+	let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+	let sources = ["jpeg-444.jpg", "jpeg-422.jpg", "jpeg-420.jpg", "jpeg-420-progressive.jpg", "jpeg-420-restart.jpg", "jpeg-grey.jpg"];
+	let dir = env::temp_dir().join(format!("skidbladnir-parity-jpeg-{}", std::process::id()));
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+
+	let mut mismatches: Vec<String> = Vec::new();
+	let cases = cases();
+	for source_name in sources {
+		let source = fixtures.join(source_name);
+		for (index, (name, settings)) in cases.iter().enumerate() {
+			let theirs_path = dir.join(format!("cwebp-{index}.webp"));
+			let run = Command::new(&cwebp).args(cwebp_args(settings, &source, &theirs_path)).output().expect("run the reference cwebp");
+			assert!(run.status.success(), "reference cwebp failed for `{name}` from {source_name}: {}", String::from_utf8_lossy(&run.stderr));
+			let expected = fs::read(&theirs_path).expect("read the reference output");
+			let ours_path = dir.join(format!("ours-{index}.webp"));
+			skidbladnir_encode::source::encode_file(settings, &source, &ours_path).expect("our pipeline encodes");
+			let actual = fs::read(&ours_path).expect("read our output");
+			if actual != expected {
+				mismatches.push(format!("{source_name}, `{name}`: ours {} bytes, cwebp {} bytes", actual.len(), expected.len()));
+			}
+		}
+	}
+
+	let _ = fs::remove_dir_all(&dir);
+	let total = sources.len() * cases.len();
+	assert!(mismatches.is_empty(), "{} of {total} JPEG-file conversions diverged from cwebp:\n  {}", mismatches.len(), mismatches.join("\n  "));
+	eprintln!("JPEG-SOURCE PARITY OK: {total} JPEG-to-WebP conversions ({} JPEGs x {} settings) matched the reference cwebp byte for byte.", sources.len(), cases.len());
+}
+
+/// Parity through a **TIFF file**, across the whole control surface.
+///
+/// `cwebp` reads TIFFs with libtiff's `TIFFReadRGBAImageOriented`, and we read them with
+/// the `tiff` crate; this is what shows the two hand the encoder the same pixels. The
+/// fixtures are `ImageMagick` 7.1.2-31 files (libtiff refuses the `image` crate's RGBA TIFF,
+/// which has no `ExtraSamples` tag), from the JPEG fixtures' 97x63 source:
+/// `magick base.png -strip -compress None|LZW -depth 8|16 -type TrueColor[Alpha]
+/// [-define tiff:alpha=unassociated] out.tif`, the alpha a vertical ramp.
+/// SHA-256: 8-bit RGB 9ab6f87c…, LZW aa601926…, 8-bit RGBA e97cb76b…, 16-bit 890020fe….
+/// 16-bit samples are reduced as libtiff reduces them, with rounding (unlike PNG's
+/// truncation); before that, all 76 settings diverged on the 16-bit file.
+#[test]
+fn matches_reference_cwebp_through_a_tiff_file() {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let Some(cwebp) = reference_cwebp() else {
+		let message = "TIFF-SOURCE PARITY NOT RUN: no reference cwebp found.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+	let linked = skidbladnir_encode::encoder::linked_encoder_version();
+	if reference_version(&cwebp) != Some(linked) {
+		let message = "TIFF-SOURCE PARITY NOT RUN: reference cwebp and the linked libwebp are different versions.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	}
+
+	let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+	// The RGBA fixture is not here: see `unassociated_alpha_tiff_keeps_its_colours` below.
+	let sources = ["tiff-rgb8.tif", "tiff-rgb8-lzw.tif", "tiff-rgb16.tif"];
+	let dir = env::temp_dir().join(format!("skidbladnir-parity-tiff-{}", std::process::id()));
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+
+	let mut mismatches: Vec<String> = Vec::new();
+	let cases = cases();
+	for source_name in sources {
+		let source = fixtures.join(source_name);
+		for (index, (name, settings)) in cases.iter().enumerate() {
+			let theirs_path = dir.join(format!("cwebp-{index}.webp"));
+			let run = Command::new(&cwebp).args(cwebp_args(settings, &source, &theirs_path)).output().expect("run the reference cwebp");
+			assert!(run.status.success(), "reference cwebp failed for `{name}` from {source_name}: {}", String::from_utf8_lossy(&run.stderr));
+			let expected = fs::read(&theirs_path).expect("read the reference output");
+			let ours_path = dir.join(format!("ours-{index}.webp"));
+			skidbladnir_encode::source::encode_file(settings, &source, &ours_path).expect("our pipeline encodes");
+			let actual = fs::read(&ours_path).expect("read our output");
+			if actual != expected {
+				mismatches.push(format!("{source_name}, `{name}`: ours {} bytes, cwebp {} bytes", actual.len(), expected.len()));
+			}
+		}
+	}
+
+	let _ = fs::remove_dir_all(&dir);
+	let total = sources.len() * cases.len();
+	assert!(mismatches.is_empty(), "{} of {total} TIFF-file conversions diverged from cwebp:\n  {}", mismatches.len(), mismatches.join("\n  "));
+	eprintln!("TIFF-SOURCE PARITY OK: {total} TIFF-to-WebP conversions ({} TIFFs x {} settings) matched the reference cwebp byte for byte.", sources.len(), cases.len());
+}
+
+/// The one **deliberate** divergence from `cwebp`: a TIFF with *unassociated* (straight)
+/// alpha.
+///
+/// libtiff's `TIFFReadRGBAImage` returns such a file premultiplied, and `cwebp` un-multiplies
+/// only files that declare *associated* alpha — so it encodes premultiplied colour as if it
+/// were straight, and every semi-transparent pixel comes out darker than the source. That
+/// is a reading bug, not an encoder setting, so it is not copied (as the Electron app's
+/// `-size 1` default was not): Skidbladnir keeps the colours the file holds.
+///
+/// Pinned both ways with a lossless `-exact` encode of `tiff-rgba8.tif`: ours decodes to the
+/// source exactly, and `cwebp`'s to the source premultiplied, `(c * a + 127) / 255`,
+/// exactly. If a libtiff or libwebp release stops premultiplying, the second half fails,
+/// and this file joins the byte-for-byte TIFF gate above.
+#[test]
+fn unassociated_alpha_tiff_keeps_its_colours() {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let Some(cwebp) = reference_cwebp() else {
+		let message = "UNASSOCIATED-ALPHA TIFF NOT CHECKED: no reference cwebp found.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+	let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tiff-rgba8.tif");
+	let straight = image::open(&source).expect("read the fixture").into_rgba8().into_raw();
+	assert!(straight.chunks(4).any(|p| p[3] > 0 && p[3] < 255 && p[0] > 0), "the fixture must have semi-transparent colour, or this proves nothing");
+	let premultiplied: Vec<u8> = straight
+		.chunks(4)
+		.flat_map(|p| {
+			let scale = |c: u8| u8::try_from((u32::from(c) * u32::from(p[3]) + 127) / 255).unwrap_or(u8::MAX);
+			[scale(p[0]), scale(p[1]), scale(p[2]), p[3]]
+		})
+		.collect();
+
+	let dir = env::temp_dir().join(format!("skidbladnir-tiff-alpha-{}", std::process::id()));
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+	let job = EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() });
+	let (ours, theirs) = (dir.join("ours.webp"), dir.join("cwebp.webp"));
+	skidbladnir_encode::source::encode_file(&job, &source, &ours).expect("our pipeline encodes");
+	let run = Command::new(&cwebp).args(cwebp_args(&job, &source, &theirs)).output().expect("run the reference cwebp");
+	assert!(run.status.success(), "cwebp must read the fixture");
+	let pixels = |path: &Path| skidbladnir_encode::animation::decode(&fs::read(path).expect("read")).expect("decode").frames.remove(0).pixels;
+	let (ours, theirs) = (pixels(&ours), pixels(&theirs));
+	let _ = fs::remove_dir_all(&dir);
+	assert!(ours == straight, "Skidbladnir must keep an unassociated-alpha TIFF's colours exactly");
+	assert!(theirs == premultiplied, "cwebp no longer premultiplies unassociated-alpha TIFFs: parity is now possible, so move tiff-rgba8.tif into matches_reference_cwebp_through_a_tiff_file");
+	eprintln!("UNASSOCIATED-ALPHA TIFF: ours keeps the colours exactly; cwebp premultiplies them, as pinned.");
 }
