@@ -298,9 +298,9 @@ The Electron app shells out to `cwebp.exe`. The Rust port should not.
       committed `magick`-written JPEGs (4:4:4, 4:2:2, 4:2:0, progressive, restart markers,
       greyscale; 97x63 so the upsampler's edges count) × the 76-setting surface: 456 of 456
       byte-identical; with the old decoder, 439 diverge. The metadata gate's JPEG sources
-      are now compared whole too (84 of 84). **CI's cwebp links the runner's libjpeg-turbo**
-      (2.1 on Ubuntu 24.04, 3.x on Arch and Homebrew), so the gate also shows whether
-      libjpeg-turbo versions agree with each other.
+      are now compared whole too (84 of 84). **CI's cwebp links the runner's libjpeg-turbo**,
+      so the gate also checks that libjpeg-turbo versions agree: it passed on the Arch host
+      and in CI on `ubuntu-latest` and `macos-latest` (Homebrew) — run 36518337021.
 
 - [x] **TIFF to WebP, across the whole surface** (2026-09-28). 8-bit RGB TIFFs (plain and
       LZW) already matched `cwebp`; **16-bit TIFFs matched in 0 of 76 settings**, because
@@ -559,7 +559,9 @@ prettier subset.
       profile *labels* the pixels (`JxlEncoderSetICCProfile` in place of the sRGB colour
       encoding — the decoded pixels are in the source's space, so tagging them sRGB was
       wrong whenever a profile existed), EXIF becomes an `Exif` box (after its 4-byte
-      TIFF-header offset) and XMP an `xml ` box, as `cjxl` writes them. A JPEG recompressed
+      TIFF-header offset) and XMP an `xml ` box, as `cjxl` writes them
+      (`JxlEncoderSetICCProfile`, `JxlEncoderUseBoxes`, `JxlEncoderAddBox` in libjxl's
+      `encode.h`: <https://raw.githubusercontent.com/libjxl/libjxl/main/lib/include/jxl/encode.h>). A JPEG recompressed
       losslessly already keeps its own metadata (libjxl stores it for the bit-exact rebuild),
       whatever the setting. **Gate:** `keeps_metadata_in_jpeg_xl` in `tests/metadata.rs`,
       run by libjxl's `djxl`: lossless keeps a Display P3 profile verbatim and decodes to the
@@ -901,10 +903,11 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       `&self`; plugin closures must be `Fn + Send + Sync`; `run_on_main_thread` is removed in
       favour of a trait. Still an alpha — no change to the decision.
       <https://github.com/tauri-apps/tauri/releases>
+      Re-checked 2026-09-28: `2.12.0` and `3.0.0-alpha.3` are still the newest; no change.
 - [x] Confirm the encoder is current. **No libwebp upgrade is pending:** 1.6.0
       (9 July 2025) is still the newest release, and it is exactly what `libwebp-sys`
       vendors and what the parity test compares against, so the parity claim is against
-      current upstream. Re-check each run. Re-checked 2026-09-25 and 2026-09-27: still 1.6.0.
+      current upstream. Re-check each run. Re-checked 2026-09-25, 2026-09-27 and 2026-09-28: still 1.6.0.
       <https://github.com/webmproject/libwebp/tags>
 - [x] Strike the JPEG 2000 claim from the README — done; the Status section now lists
       WebP as the only output format rather than promising JPEG 2000.
