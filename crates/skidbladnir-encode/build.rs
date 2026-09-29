@@ -235,9 +235,10 @@ fn link_libheif(jpeg: &Libjpeg) {
 	let mut shim = cc::Build::new();
 	shim.file(manifest.join("native/heic_shim.c")).warnings(false);
 	jpeg.include(&mut shim);
-	// heif-enc's JPEG reader (heifio/decoder_jpeg.cc), included by this C++ file.
+	// heif-enc's JPEG reader (heifio/decoder_jpeg.cc), included by this C++ file. C++20, as
+	// libheif builds it: the reader uses designated initializers, which MSVC refuses before.
 	let mut reader = cc::Build::new();
-	reader.cpp(true).std("c++17").file(manifest.join("native/heic_jpeg.cc")).include(manifest.join("../../third_party/libheif/heifio")).include(manifest.join("../../third_party/libheif/libheif")).warnings(false);
+	reader.cpp(true).std("c++20").file(manifest.join("native/heic_jpeg.cc")).include(manifest.join("../../third_party/libheif/heifio")).include(manifest.join("../../third_party/libheif/libheif")).warnings(false);
 	jpeg.include(&mut reader);
 	println!("cargo:rerun-if-changed=native/heic_jpeg.cc");
 	if built {
