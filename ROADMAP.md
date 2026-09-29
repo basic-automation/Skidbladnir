@@ -583,10 +583,16 @@ prettier subset.
       `only_transparent_images_carry_alpha` (libheif's `has_alpha_channel` on our output, for
       an opaque and a transparent fixture); `heif-info` confirms "alpha channel: no".
       Mutation-tested: always writing RGBA fails it.
+- [x] **Keep EXIF in AVIF output** (2026-09-28), through `ravif`'s `with_exif`. **Gate:**
+      `keeps_exif_in_avif` — libavif's `avifdec --info` reports the source's EXIF at its exact
+      size, and no ICC or XMP; none with nothing kept. Mutation-tested: dropping
+      `with_exif` fails it. The window offers only the EXIF toggle for AVIF.
+- [ ] **ICC profile and XMP in AVIF output.** `ravif` 0.13 has `with_exif` and nothing else
+      <https://docs.rs/ravif/latest/ravif/struct.Encoder.html>, and the `avif-serialize` 0.8
+      container writer beneath it has no ICC (`colr` of type `prof`) or XMP support. Needs an
+      upstream change, or writing the boxes ourselves after `ravif`.
 - [ ] Keep metadata in **animated** WebP output (`gif2webp -metadata` keeps ICC and XMP
-      from a GIF's application extensions), and in **AVIF** output. `ravif`
-      0.13 embeds EXIF (`with_exif`) but has no ICC setter, so AVIF's profile needs another
-      route <https://docs.rs/ravif/latest/ravif/struct.Encoder.html>.
+      from a GIF's application extensions; `img2webp` has no `-metadata`).
 - [x] `cargo tauri build` green on **Linux** for `.deb` — **this was not actually blocked
       on `patchelf`.** Only the AppImage target needs it; `cargo tauri build --bundles deb`
       produces a valid 3.8 MB `Skidbladnir_<version>_amd64.deb` on the dev host today,
@@ -1025,6 +1031,18 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
          here can offer that.
       3. The preview already decodes AVIF in Rust and shows lossless WebP, so JXL gets a
          preview on every web engine the same way, whatever the browsers do.
+
+- [ ] **Intermittent stack overflow in the animation tests on Windows CI** (seen once,
+      2026-09-28, run 36521408006: `a_still_webp_decodes_as_one_frame`,
+      `a_reference_animation_decodes_as_built` and `lossless_round_trip_is_exact` overflowed
+      together; the next run on the same code passed). Each builds its fixture with
+      `WebPAnimEncoder` first, whose candidate encodes are stack-heavy, and in a debug build
+      the `cc`-compiled libwebp is unoptimised. Not reproducible on the Linux host. Next:
+      measure the stack high-water mark of an animation encode on Windows, then either
+      optimise the C dependencies in the dev profile (`[profile.dev.package.libwebp-sys]
+      opt-level`, re-running the parity gates to prove the output is unchanged) or run the
+      app's animation encodes on a thread with a stated stack size — not raise
+      `RUST_MIN_STACK` in CI to hide it.
 
 ## Cross-cutting
 

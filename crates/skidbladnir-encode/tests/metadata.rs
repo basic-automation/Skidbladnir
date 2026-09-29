@@ -509,3 +509,45 @@ fn colr_profile(file: &[u8]) -> Option<Vec<u8>> {
 	let ipco = children(&iprp).into_iter().find(|(kind, _)| kind == b"ipco")?.1;
 	children(&ipco).into_iter().find(|(kind, body)| kind == b"colr" && body.starts_with(b"prof")).map(|(_, body)| body[4..].to_vec())
 }
+
+/// Keeping EXIF in **AVIF** output, checked by libavif's `avifdec --info`: the source's EXIF
+/// must be present at its exact size, and there must be no ICC profile or XMP, which the
+/// AVIF writer cannot store, rather than something half-written. With nothing kept, no
+/// EXIF either.
+#[test]
+fn keeps_exif_in_avif() {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let avifdec = env::var_os("SKIDBLADNIR_REFERENCE_AVIFDEC").map(PathBuf::from).filter(|path| path.is_file()).or_else(|| Command::new("avifdec").arg("--version").output().ok().filter(|out| out.status.success()).map(|_| PathBuf::from("avifdec")));
+	let Some(avifdec) = avifdec else {
+		let message = "AVIF METADATA NOT CHECKED: no avifdec (set SKIDBLADNIR_REFERENCE_AVIFDEC).";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+	let dir = env::temp_dir().join(format!("skidbladnir-avif-metadata-{}", std::process::id()));
+	let _ = fs::remove_dir_all(&dir);
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+	let (source, _, exif, _, _) = rich_png(&dir);
+
+	let mut failures = Vec::new();
+	for kind in ["all", "none"] {
+		let mut job = EncodeJob { format: skidbladnir_encode::OutputFormat::Avif, metadata: keep(kind), ..EncodeJob::default() };
+		job.avif.speed = 10;
+		let output = dir.join(format!("{kind}.avif"));
+		if let Err(error) = encode_file(&job, &source, &output) {
+			failures.push(format!("keep {kind}: {error}"));
+			continue;
+		}
+		let run = Command::new(&avifdec).arg("--info").arg(&output).output().expect("run avifdec");
+		let report = format!("{}{}", String::from_utf8_lossy(&run.stdout), String::from_utf8_lossy(&run.stderr));
+		let line = |label: &str| report.lines().find(|line| line.contains(label)).unwrap_or_default().to_owned();
+		let (icc, exif_line, xmp) = (line("ICC Profile"), line("Exif Metadata"), line("XMP Metadata"));
+		let expected_exif = if kind == "all" { format!("Present ({} bytes)", exif.len()) } else { "Absent".to_owned() };
+		if !run.status.success() || !exif_line.contains(&expected_exif) || !icc.contains("Absent") || !xmp.contains("Absent") {
+			failures.push(format!("keep {kind}: expected Exif {expected_exif} and no ICC or XMP, avifdec says:\n{icc}\n{exif_line}\n{xmp}"));
+		}
+	}
+	let _ = fs::remove_dir_all(&dir);
+	assert!(failures.is_empty(), "AVIF METADATA FAILED:\n{}", failures.join("\n"));
+	eprintln!("AVIF METADATA OK: avifdec reads the source's EXIF at its exact size, and no ICC or XMP; nothing when nothing is kept");
+}

@@ -187,7 +187,8 @@ What it can do:
   exactly as `cwebp -metadata` does, checked against `cwebp` itself. Off by default, as
   in `cwebp`: without the profile a wide-gamut (Display P3, Adobe RGB) photo's colours
   are read as sRGB. JPEG XL and HEIC output keep them too, the profile labelling the
-  image, checked by libjxl's `djxl` and libheif's `heif-info`.
+  image, checked by libjxl's `djxl` and libheif's `heif-info`; AVIF output keeps EXIF,
+  checked by libavif's `avifdec`.
 - Convert **JPEG, PNG, TIFF and WebP files to WebP byte for byte as `cwebp` itself
   would**, across every setting, checked against `cwebp` in CI: JPEGs are decoded with
   libjpeg-turbo's decoder, as `cwebp` decodes them, 16-bit files are reduced to 8 bits
@@ -211,8 +212,8 @@ Known gaps:
   Cancel takes effect when the current file finishes (which is then discarded, not
   written). There is no chroma subsampling control — AVIF is always written 4:4:4 —
   animated AVIF is not read.
-- Metadata is kept in still WebP, JPEG XL and HEIC output: not in animations, and not
-  yet in AVIF output.
+- Metadata is kept in still images only, not animations; AVIF output keeps EXIF but not
+  yet the colour profile or XMP.
 - An animation (animated WebP or GIF) converts to WebP only. AVIF, JPEG XL and HEIC
   output refuse it by name rather than keeping just the first frame, because those
   encoders write still images here. A target size or PSNR applies to each frame of an

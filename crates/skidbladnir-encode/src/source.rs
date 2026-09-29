@@ -759,7 +759,7 @@ pub fn encode_file_with_progress(settings: &EncodeJob, input: &Path, output: &Pa
 ///   plain lossy encode (see [`crate::encoder::encode_webp_source_with_progress`]).
 /// - The metadata the job keeps is carried over: added to the finished file for WebP
 ///   ([`crate::metadata::keep`]), handed to the encoder for JPEG XL and HEIC, where an ICC
-///   profile has to label the pixels rather than follow them.
+///   profile has to label the pixels rather than follow them, and for AVIF (EXIF only).
 ///
 /// # Errors
 ///
@@ -767,10 +767,16 @@ pub fn encode_file_with_progress(settings: &EncodeJob, input: &Path, output: &Pa
 /// [`SourceError::Metadata`] when the metadata to keep is malformed.
 pub fn encode_decoded(settings: &EncodeJob, path: &Path, bytes: &[u8], image: &SourceImage, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, ConvertError> {
 	let metadata_error = |detail| SourceError::Metadata { path: path.to_path_buf(), detail };
-	if matches!(settings.format, OutputFormat::Jxl | OutputFormat::Heic) && settings.metadata.any() {
+	if settings.format != OutputFormat::Webp && settings.metadata.any() {
 		let kept = crate::metadata::extract(bytes).map_err(metadata_error)?.kept(settings.metadata);
 		let resize = settings.resize.for_source(image.width, image.height);
-		return Ok(if settings.format == OutputFormat::Jxl { crate::jxl::encode_with_metadata(&settings.jxl, resize, &image.as_rgba(), &kept, on_progress)? } else { crate::heic::encode_with_metadata(&settings.heic, resize, &image.as_rgba(), &kept, on_progress)? });
+		let rgba = image.as_rgba();
+		return Ok(match settings.format {
+			OutputFormat::Jxl => crate::jxl::encode_with_metadata(&settings.jxl, resize, &rgba, &kept, on_progress)?,
+			OutputFormat::Heic => crate::heic::encode_with_metadata(&settings.heic, resize, &rgba, &kept, on_progress)?,
+			// EXIF only: see `avif::encode_with_exif`. (WebP never reaches this match.)
+			OutputFormat::Avif | OutputFormat::Webp => crate::avif::encode_with_exif(&settings.avif, resize, &rgba, kept.exif.as_deref(), on_progress)?,
+		});
 	}
 	let encoded = if image.format == SourceFormat::Webp { crate::encoder::encode_webp_source_with_progress(settings, bytes, &image.as_rgba(), on_progress)? } else { encode_rgba_with_progress(settings, &image.as_rgba(), on_progress)? };
 	Ok(crate::metadata::keep(settings, bytes, encoded).map_err(metadata_error)?)
