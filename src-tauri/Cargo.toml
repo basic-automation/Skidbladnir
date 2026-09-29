@@ -3,7 +3,7 @@
 name = "skidbladnir"
 # The product version — the only copy. tauri.conf.json deliberately omits `version` so it
 # reads this one; the root package.json that used to be a second copy left with Electron.
-version = "0.11.0"
+version = "0.12.0"
 description = "Convert images to next-generation formats, with the whole encoder exposed."
 edition.workspace = true
 license.workspace = true
@@ -28,6 +28,14 @@ crate-type = ["rlib"]
 # "Connection refused" rather than the app. Release builds must go through
 # `cargo tauri build`.
 custom-protocol = ["tauri/custom-protocol"]
+# The GPL edition: HEIC through x265, with lossless, 4:4:4, 10-bit and x265's tuning. The
+# binary links and ships the libheif `scripts/build-libheif.sh --edition gpl` builds, which
+# has x265 (GPL-2.0-or-later) inside, so it is distributed under GPL-3.0-or-later as a
+# whole; the source stays ISC. Bundle it with `--config tauri.gpl.conf.json` as well (see
+# README.md, "Editions"). Without it, this is the standard edition, which is ISC.
+gpl = ["skidbladnir-encode/x265"]
+# Every optional feature: today, the GPL edition.
+full = ["gpl"]
 
 [build-dependencies]
 tauri-build = { workspace = true }

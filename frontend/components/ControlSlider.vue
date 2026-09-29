@@ -10,6 +10,8 @@ defineProps<{
 	step?: number
 	help?: string
 	disabled?: boolean
+	/** Show the value divided by this, to one decimal: a setting held in tenths reads as 1.0, not 10. */
+	divisor?: number
 }>()
 </script>
 
@@ -22,7 +24,7 @@ defineProps<{
 			<span class="min-w-0 flex-1 text-paleday-fg">
 				{{ label }}<span v-if="disabled" class="font-[450] text-paleday-dim"> · not in use</span>
 			</span>
-			<output class="tabular-nums" :class="disabled ? 'text-paleday-dim' : 'text-paleday-accent-text'" aria-live="off">{{ model }}</output>
+			<output class="tabular-nums" :class="disabled ? 'text-paleday-dim' : 'text-paleday-accent-text'" aria-live="off">{{ divisor ? (model / divisor).toFixed(1) : model }}</output>
 		</div>
 		<USlider
 			v-model="model"

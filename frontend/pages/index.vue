@@ -12,13 +12,14 @@
 // Help text is libwebp's own wording from `cwebp -longhelp`. The Electron app was not a
 // source for it: its `-info` spans are live value readouts and it has one tooltip in total.
 import { computed, onMounted, onUnmounted, ref, toRaw, watch } from 'vue'
-import type { AvifSettings, ConversionReport, EncodeJob, Mode, OutputFormat, Preset } from '~/composables/useSettings'
+import type { AvifSettings, ConversionReport, Edition, EncodeJob, HeicSettings, Mode, OutputFormat, Preset } from '~/composables/useSettings'
 import { formatBytes, usesLossyOptions, usesManualFilter } from '~/composables/useSettings'
 import { invokeCommand, isTauri } from '~/composables/useTauri'
 
 const settings = ref<EncodeJob | null>(null)
 const backendVersion = ref('')
 const appVersion = ref('')
+const edition = ref<Edition | null>(null)
 const startupError = ref('')
 
 const inputPaths = ref<string[]>([])
@@ -95,6 +96,45 @@ const ALPHA_MODE_ITEMS = [
 	{ label: 'Premultiplied', value: 'premultiplied', description: 'Store colour premultiplied by alpha.' },
 ] satisfies { label: string, value: AvifSettings['alphaMode'], description: string }[]
 
+const HEIC_CHROMA_ITEMS = [
+	{ label: '4:2:0', value: '420' },
+	{ label: '4:2:2', value: '422' },
+	{ label: '4:4:4', value: '444' },
+] satisfies { label: string, value: HeicSettings['chroma'] }[]
+
+const HEIC_BIT_DEPTH_ITEMS = [
+	{ label: '8-bit', value: 'eight' },
+	{ label: '10-bit', value: 'ten' },
+] satisfies { label: string, value: HeicSettings['bitDepth'] }[]
+
+const HEIC_PRESET_ITEMS = [
+	{ label: 'Ultrafast', value: 'ultrafast' },
+	{ label: 'Superfast', value: 'superfast' },
+	{ label: 'Very fast', value: 'veryfast' },
+	{ label: 'Faster', value: 'faster' },
+	{ label: 'Fast', value: 'fast' },
+	{ label: 'Medium', value: 'medium' },
+	{ label: 'Slow (libheif\'s default)', value: 'slow' },
+	{ label: 'Slower', value: 'slower' },
+	{ label: 'Very slow', value: 'veryslow' },
+	{ label: 'Placebo', value: 'placebo' },
+] satisfies { label: string, value: HeicSettings['preset'] }[]
+
+const HEIC_TUNE_ITEMS = [
+	{ label: 'SSIM', value: 'ssim' },
+	{ label: 'PSNR', value: 'psnr' },
+	{ label: 'Grain', value: 'grain' },
+	{ label: 'Fast decode', value: 'fastdecode' },
+] satisfies { label: string, value: HeicSettings['tune'] }[]
+
+const HEIC_AQ_ITEMS = [
+	{ label: 'Off', value: 'off' },
+	{ label: 'Variance', value: 'variance' },
+	{ label: 'Auto-variance', value: 'autoVariance' },
+	{ label: 'Auto-variance, dark bias', value: 'autoVarianceDark' },
+	{ label: 'Auto-variance, edges', value: 'autoVarianceEdge' },
+] satisfies { label: string, value: HeicSettings['aqMode'] }[]
+
 const MODES: { value: Mode, label: string, description: string }[] = [
 	{ value: 'lossy', label: 'Lossy', description: 'Ordinary WebP. The only mode with the advanced controls.' },
 	{ value: 'lossless', label: 'Lossless', description: 'Exact pixels, larger files. Keeps colour under transparency.' },
@@ -129,6 +169,8 @@ const isWebp = computed(() => settings.value?.format === 'webp')
 const isAvif = computed(() => settings.value?.format === 'avif')
 const isJxl = computed(() => settings.value?.format === 'jxl')
 const isHeic = computed(() => settings.value?.format === 'heic')
+// The GPL edition encodes HEIC with x265, and only it has x265's controls.
+const x265 = computed(() => edition.value?.x265 === true)
 const extension = computed(() => settings.value?.format ?? 'webp')
 const lossy = computed(() => (settings.value && isWebp.value ? usesLossyOptions(settings.value.webp.mode) : false))
 const manualFilter = computed(() => (settings.value ? usesManualFilter(settings.value.webp.filter) : false))
@@ -166,6 +208,7 @@ watch([targetKind, targetSize, targetPsnr], () => {
 onMounted(async () => {
 	try {
 		backendVersion.value = await invokeCommand<string>('encoder_version')
+		edition.value = await invokeCommand<Edition>('edition')
 		const { getVersion } = await import('@tauri-apps/api/app')
 		appVersion.value = await getVersion()
 		// Preferences carry the defaults when there is nothing stored, so this is the only
@@ -622,7 +665,9 @@ function basename(path: string): string {
 
 			<div class="flex-1" />
 			<p v-if="appVersion" class="text-[10px] text-paleday-bright" data-selectable>
-				v{{ appVersion }}
+				v{{ appVersion }}<template v-if="edition?.x265">
+					· GPL edition
+				</template>
 			</p>
 		</aside>
 
@@ -869,11 +914,77 @@ function basename(path: string): string {
 
 						<ControlPanel v-if="isHeic" title="Quality" class="pt-8">
 							<div class="grid grid-cols-3 gap-4">
-								<ControlSlider v-model="settings.heic.quality" label="Quality" :min="0" :max="100" help="quality factor (0: small .. 100: big); 50 is libheif's default" />
+								<ControlSlider v-model="settings.heic.quality" label="Quality" :min="0" :max="100" :help="x265 ? 'quality factor (0: small .. 100: big); x265\'s CRF is (100 − quality) ÷ 2' : 'quality factor (0: small .. 100: big); 50 is libheif\'s default'" :disabled="x265 && settings.heic.lossless" />
+								<ControlToggle v-if="x265" v-model="settings.heic.lossless" label="Lossless" help="Every pixel kept exactly, stored as RGB at 4:4:4. Quality, chroma, bit depth and the rate controls do not apply. Lossless HEIC is rare, and not every reader opens it." />
 							</div>
-							<p class="px-2.5 text-xs text-paleday-dim">
-								HEVC in HEIF, the format iPhones use, encoded by Kvazaar. Kvazaar writes 4:2:0 colour only, so there is no lossless mode.
+							<p v-if="x265" class="px-2.5 text-xs text-paleday-dim">
+								HEVC in HEIF, the format iPhones use, encoded by x265.
 							</p>
+							<p v-else class="px-2.5 text-xs text-paleday-dim">
+								HEVC in HEIF, the format iPhones use, encoded by Kvazaar. Kvazaar writes 8-bit 4:2:0 colour only, so there is no lossless mode. The GPL edition of Skidbladnir encodes with x265 instead, which adds lossless, 4:4:4, 10-bit and x265's own controls.
+							</p>
+						</ControlPanel>
+
+						<ControlPanel v-if="isHeic && x265 && !settings.heic.lossless" title="HEIC">
+							<div class="grid grid-cols-4 gap-3">
+								<div class="col-span-2 flex min-w-0 flex-col gap-2 px-2.5 py-[7px]">
+									<span class="text-xs font-semibold text-paleday-fg">Chroma</span>
+									<ChoiceGroup v-model="settings.heic.chroma" :items="HEIC_CHROMA_ITEMS" aria-label="HEIC chroma subsampling" />
+									<p class="text-xs text-paleday-dim">
+										4:2:0 is what phones write and every reader decodes. 4:4:4 keeps colour at full resolution, so red text and pixel art stay sharp, but not every reader decodes it.
+									</p>
+								</div>
+								<div class="col-span-2 flex min-w-0 flex-col gap-2 px-2.5 py-[7px]">
+									<span class="text-xs font-semibold text-paleday-fg">Bit depth</span>
+									<ChoiceGroup v-model="settings.heic.bitDepth" :items="HEIC_BIT_DEPTH_ITEMS" aria-label="HEIC bit depth" />
+									<p class="text-xs text-paleday-dim">
+										10-bit is HEVC Main 10, as phones write HDR photos. It keeps more precision through the colour conversion, so smooth gradients band less, even from an 8-bit image.
+									</p>
+								</div>
+							</div>
+						</ControlPanel>
+
+						<ControlPanel v-if="isHeic && x265" title="x265">
+							<div class="grid grid-cols-4 gap-3">
+								<div class="flex min-w-0 flex-col gap-2 px-2.5 py-[7px]">
+									<span class="text-xs font-semibold text-paleday-fg">Preset</span>
+									<USelect v-model="settings.heic.preset" :items="HEIC_PRESET_ITEMS" variant="soft" size="sm" aria-label="x265 preset" :ui="{ base: 'bg-paleday-field' }" />
+									<p class="text-xs text-paleday-dim">
+										Slower presets search harder for a smaller file.
+									</p>
+								</div>
+								<div class="col-span-2 flex min-w-0 flex-col gap-2 px-2.5 py-[7px]">
+									<span class="text-xs font-semibold text-paleday-fg">Tune</span>
+									<ChoiceGroup v-model="settings.heic.tune" :items="HEIC_TUNE_ITEMS" aria-label="x265 tune" />
+									<p class="text-xs text-paleday-dim">
+										Sets x265's remaining decisions for a goal. The controls on this panel apply over it.
+									</p>
+								</div>
+								<ControlSlider v-model="settings.heic.tuIntraDepth" label="TU intra depth" :min="1" :max="4" help="how far transform units split; deeper finds finer detail, more slowly (at most 3 under 32 px)" />
+							</div>
+							<template v-if="!settings.heic.lossless">
+								<div class="grid grid-cols-4 gap-3">
+									<div class="flex min-w-0 flex-col gap-2 px-2.5 py-[7px]">
+										<span class="text-xs font-semibold text-paleday-fg">Adaptive quantisation</span>
+										<USelect v-model="settings.heic.aqMode" :items="HEIC_AQ_ITEMS" variant="soft" size="sm" aria-label="x265 adaptive quantisation mode" :ui="{ base: 'bg-paleday-field' }" />
+										<p class="text-xs text-paleday-dim">
+											How bits move between flat and detailed areas.
+										</p>
+									</div>
+									<ControlSlider v-model="settings.heic.aqStrength" label="AQ strength" :min="0" :max="30" :divisor="10" help="0.0 .. 3.0; higher moves more bits into flat areas" :disabled="settings.heic.aqMode === 'off'" />
+									<ControlSlider v-model="settings.heic.psyRd" label="Psy-RD" :min="0" :max="50" :divisor="10" help="0.0 .. 5.0; keeps texture and energy rather than the smoothest match" />
+									<ControlSlider v-model="settings.heic.psyRdoq" label="Psy-RDOQ" :min="0" :max="500" :divisor="10" help="0.0 .. 50.0; keeps detail when quantising" />
+								</div>
+								<div class="grid grid-cols-4 gap-3">
+									<ControlToggle v-model="settings.heic.deblock" label="Deblocking" help="the in-loop filter that smooths block edges" />
+									<ControlSlider v-model="settings.heic.deblockStrength" label="Deblocking strength" :min="-6" :max="6" help="tC offset: higher smooths more" :disabled="!settings.heic.deblock" />
+									<ControlSlider v-model="settings.heic.deblockThreshold" label="Deblocking threshold" :min="-6" :max="6" help="beta offset: higher treats more edges as blocking" :disabled="!settings.heic.deblock" />
+									<ControlToggle v-model="settings.heic.sao" label="SAO" help="sample adaptive offset: smooths ringing around edges" />
+								</div>
+								<p class="px-2.5 text-xs text-paleday-dim">
+									These shape the colour image. libheif encodes transparency separately, with its own values for them.
+								</p>
+							</template>
 						</ControlPanel>
 
 						<ControlPanel title="Resize">

@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "resources": {
+      "../build/libheif/bin/heif.dll": null,
+      "../build/libheif-gpl/bin/heif.dll": "heif.dll"
+    }
+  }
+}

@@ -13,7 +13,9 @@
 #   cargo tauri build --no-bundle     # from src-tauri/
 #   scripts/smoke-test.sh             # from the repo root
 #
-# Pass --app <path> to test a specific binary. Exits non-zero on the first failed check.
+# Pass --app <path> to test a specific binary, and --edition gpl for a build with the `gpl`
+# feature (the default is standard): the edition decides what HEIC it can write. Exits
+# non-zero on the first failed check.
 set -euo pipefail
 
 # The harness ships with the repository, so this check runs anywhere the tools are
@@ -21,9 +23,11 @@ set -euo pipefail
 # SKIDBLADNIR_WEBDRIVER_HARNESS overrides it.
 HARNESS="${SKIDBLADNIR_WEBDRIVER_HARNESS:-$(dirname "$0")/webdriver.sh}"
 APP=""
+EDITION=standard
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--app) APP="$2"; shift 2;;
+		--edition) EDITION="$2"; shift 2;;
 		*) echo "unknown argument: $1" >&2; exit 2;;
 	esac
 done
@@ -205,8 +209,9 @@ check "the webview displays the JPEG XL preview" \
 	 const s=await I.invoke('default_settings'); s.format='jxl'; s.jxl.effort=3;
 	 const p=await I.invoke('preview_encode', { settings: s, input: '$in_png' });
 	 return await new Promise(res => { const i=new Image(); i.onload=()=>res('displays ' + i.naturalWidth + 'x' + i.naturalHeight); i.onerror=()=>res('cannot display'); i.src=p.encoded; })" 'displays 48x48'
-# HEIC: a real conversion through the libheif this app ships (Kvazaar), checked on disk,
-# and the preview, decoded in Rust because only Safari displays HEIC.
+# HEIC: a real conversion through the libheif this app ships (Kvazaar, or x265 in the GPL
+# edition), checked on disk, and the preview, decoded in Rust because only Safari displays
+# HEIC.
 check "converts an image to HEIC end to end" \
 	"const I=window.__TAURI_INTERNALS__;
 	 const s=await I.invoke('default_settings'); s.format='heic';
@@ -223,6 +228,36 @@ check "the webview displays the HEIC preview" \
 	 const s=await I.invoke('default_settings'); s.format='heic';
 	 const p=await I.invoke('preview_encode', { settings: s, input: '$in_png' });
 	 return await new Promise(res => { const i=new Image(); i.onload=()=>res('displays ' + i.naturalWidth + 'x' + i.naturalHeight); i.onerror=()=>res('cannot display'); i.src=p.encoded; })" 'displays 48x48'
+# The edition is the one this was built as, and what only x265 writes follows it: the GPL
+# edition writes lossless and 10-bit HEIC, and the standard edition refuses them.
+if [ "$EDITION" = gpl ]; then
+	check "is the GPL edition" \
+		"const e=await window.__TAURI_INTERNALS__.invoke('edition'); return e.name + ' ' + e.license + ' x265 ' + e.x265" 'gpl GPL-3.0-or-later x265 true'
+	check "the HEIC panel shows x265's controls" \
+		'[...document.querySelectorAll("[aria-label=\"Output format\"] [role=radio]")][3].click(); await new Promise(r => setTimeout(r, 300));
+		 return "headings=" + [...document.querySelectorAll("h2")].map(h => h.textContent.trim()).filter(t => t === "HEIC" || t === "x265").join(",") + " preset=" + !!document.querySelector("[aria-label=\"x265 preset\"]")' 'headings=HEIC,x265 preset=true'
+	mkdir -p "$scratch/x265"
+	check "writes lossless HEIC through x265" \
+		"const I=window.__TAURI_INTERNALS__;
+		 const s=await I.invoke('default_settings'); s.format='heic'; s.heic.lossless=true; s.heic.preset='ultrafast';
+		 const r=await I.invoke('convert_image', { settings: s, input: '$in_png', outputDirectory: '$(app_path "$scratch/x265")' });
+		 return r.outputPath.split(/[\\\\/]/).pop() + ' ' + r.width + 'x' + r.height" 'smoke.heic 48x48'
+	check "the webview displays a 10-bit 4:4:4 HEIC preview" \
+		"const I=window.__TAURI_INTERNALS__;
+		 const s=await I.invoke('default_settings'); s.format='heic'; s.heic.bitDepth='ten'; s.heic.chroma='444';
+		 const p=await I.invoke('preview_encode', { settings: s, input: '$in_png' });
+		 return await new Promise(res => { const i=new Image(); i.onload=()=>res('displays ' + i.naturalWidth + 'x' + i.naturalHeight); i.onerror=()=>res('cannot display'); i.src=p.encoded; })" 'displays 48x48'
+else
+	check "is the standard edition" \
+		"const e=await window.__TAURI_INTERNALS__.invoke('edition'); return e.name + ' ' + e.license + ' x265 ' + e.x265" 'standard ISC x265 false'
+	check "the HEIC panel shows quality alone" \
+		'[...document.querySelectorAll("[aria-label=\"Output format\"] [role=radio]")][3].click(); await new Promise(r => setTimeout(r, 300));
+		 return "headings=" + [...document.querySelectorAll("h2")].map(h => h.textContent.trim()).filter(t => t === "HEIC" || t === "x265").join(",") + " preset=" + !!document.querySelector("[aria-label=\"x265 preset\"]")' 'headings= preset=false'
+	check "refuses HEIC only x265 can write" \
+		"const I=window.__TAURI_INTERNALS__;
+		 const s=await I.invoke('default_settings'); s.format='heic'; s.heic.lossless=true;
+		 try { await I.invoke('validate_settings', { settings: s }); return 'accepted'; } catch (e) { return String(e); }" 'only the GPL edition of Skidbladnir has'
+fi
 # AVIF input: the AVIF written above, converted back to WebP in another folder.
 mkdir -p "$scratch/from-avif"
 check "reads AVIF input" \

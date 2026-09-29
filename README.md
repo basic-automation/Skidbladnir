@@ -26,8 +26,11 @@ without memorising the command line.
 - **JPEG XL**, through libjxl, the reference encoder: quality, effort, lossless, and
   **lossless JPEG recompression** — a JPEG is repacked about 20% smaller without being
   decoded, and the original JPEG can be rebuilt from it bit for bit
-- **HEIC**, the format iPhones use, through libheif with the Kvazaar HEVC encoder:
-  quality, with transparency kept
+- **HEIC**, the format iPhones use, through libheif, with transparency kept. The standard
+  edition encodes with Kvazaar: quality. The [GPL edition](#editions) encodes with x265:
+  quality or **lossless**, 4:2:0, 4:2:2 or **4:4:4** chroma, 8- or **10-bit**, x265's
+  speed presets and tunings, TU intra depth, adaptive quantisation and its strength,
+  psycho-visual RD and RDOQ, deblocking strength and threshold, and SAO
 
 **WebP encoding modes**
 
@@ -60,15 +63,34 @@ without memorising the command line.
 Grab a build from the [releases page](https://github.com/basic-automation/Skidbladnir/releases).
 
 Each release carries a Linux `.deb` and AppImage, a Windows installer, and macOS `.dmg`s
-for Apple Silicon and Intel. Releases are still marked **prerelease**; see Status for
-which builds have actually been run.
+for Apple Silicon and Intel, in two [editions](#editions): `Skidbladnir_*` is the
+standard edition and `Skidbladnir-GPL_*` the GPL edition. Releases are still marked
+**prerelease**; see Status for which builds have actually been run.
 
 Once installed, Skidbladnir checks for a newer release each time it starts and offers it
 in a banner; nothing is downloaded until you click **Install and restart**, and every
 update is verified against the project's signing key before it is installed. A `.deb`
 install updates with a `.deb` (and asks for your password to do it); an AppImage, the
-Windows installer and the macOS app update themselves in place. Releases before 0.8.0
+Windows installer and the macOS app update themselves in place. Each edition updates only
+to the same edition; to switch, install the other one over it. Releases before 0.8.0
 have no updater, so moving off them is a manual download, once.
+
+### Editions
+
+The two editions are the same app except for how they write HEIC, and so for their
+licence:
+
+| | Standard (`Skidbladnir_*`) | GPL (`Skidbladnir-GPL_*`) |
+|---|---|---|
+| HEIC encoder | Kvazaar (BSD-3-Clause) | x265 (GPL-2.0-or-later) |
+| HEIC controls | quality | quality, lossless, chroma, 10-bit, preset, tune and x265's rate controls |
+| Licence of the build | ISC | GPL-3.0-or-later, as a whole |
+
+The GPL edition exists because x265 is the better encoder, and x265 is GPL: an app that
+ships it is distributed under the GPL. Skidbladnir's own source is ISC either way. Each
+release attaches `Skidbladnir-<version>-source.tar.gz`, the complete source with every
+submodule, which is what the GPL edition's licence requires to be offered with it.
+Everything but HEIC — WebP, AVIF, JPEG XL, and HEIC input — is identical in both.
 
 Skidbladnir used to be an Electron app for Windows. That app has been retired: its last
 binary release is [v0.4.3](https://github.com/basic-automation/Skidbladnir/releases/tag/v0.4.3)
@@ -82,8 +104,21 @@ decoder assemble their SIMD code with it (Arch: `nasm`; Debian/Ubuntu: `nasm`; m
 `brew install nasm`; Windows: `choco install nasm`) — and **CMake** with a C++ compiler,
 which build libjxl from source so it is linked statically. HEIC needs libheif, built with
 `scripts/build-libheif.sh` from the pinned sources in `third_party/` (clone with
-`--recurse-submodules`); without that build, the system libheif is linked instead. On Linux you also need
-`webkit2gtk-4.1` and its development headers.
+`--recurse-submodules`) into `build/libheif`; without that build, the system libheif is
+linked instead. On Linux you also need `webkit2gtk-4.1` and its development headers.
+
+The GPL edition is the `gpl` feature (or `full`, every optional feature), with a libheif
+built around x265 into `build/libheif-gpl`. The build refuses to link either edition
+against the other's libheif.
+
+```bash
+scripts/build-libheif.sh --edition gpl
+cd src-tauri && ../frontend/node_modules/.bin/tauri build --features gpl --config tauri.gpl.conf.json
+```
+
+`tauri.gpl.conf.json` (and on Windows `tauri.gpl.windows.conf.json` too) bundles x265's
+libheif, the GPL edition's notices and the GPL text, and points the updater at the GPL
+edition's releases.
 
 Without CMake, the build links the system libjxl (0.11 or newer, with its development
 files) through `pkg-config` instead, and says so. Set `SKIDBLADNIR_LIBJXL=vendored` to
@@ -158,10 +193,11 @@ What it can do:
 - Be driven entirely from the keyboard, with every control labelled for a screen reader.
 - A frameless window with a format rail, a sidebar for the queue, destination and
   presets, and one column of settings with Convert at its head.
-- Write **HEIC** through libheif with Kvazaar, a BSD-licensed HEVC encoder, and read
-  HEIC input with libde265. libheif ships as a separate shared library beside the app,
-  with its codec plugins switched off, so it can never pick up a GPL encoder from your
-  system. Checked by the runner's own libheif (`heif-dec`), a separate build.
+- Write **HEIC** through libheif with Kvazaar, a BSD-licensed HEVC encoder, and in the
+  GPL edition with x265 — lossless, 4:4:4 and 4:2:2, 10-bit, and x265's tuning, each
+  checked against `heif-dec` too — and read HEIC input with libde265. libheif ships as a
+  separate shared library beside the app, with its codec plugins switched off, so the
+  standard edition can never pick up x265 from your system. Checked by the runner's own libheif (`heif-dec`), a separate build.
 - Read PNG, JPEG, TIFF, WebP, **AVIF**, **JPEG XL** and **HEIC** input, identifying the format by its contents
   rather than by its file extension. That includes **CMYK JPEGs** as Photoshop writes
   them, which `cwebp` itself refuses to read. AVIF input is checked against libavif's
@@ -188,11 +224,18 @@ Known gaps:
   until then, most web pages cannot show them. The long-promised JPEG 2000 was dropped
   as a goal; it has no momentum outside medical and archival imaging.
 - HEIC is HEVC, which is covered by patent pools; Skidbladnir ships an open-source HEVC
-  encoder and decoder as GIMP, ImageMagick and ffmpeg do. HEIC is written 4:2:0, so there
-  is no lossless HEIC.
+  encoder and decoder as GIMP, ImageMagick and ffmpeg do. The standard edition writes
+  HEIC 8-bit 4:2:0 only, so it has no lossless HEIC; that takes the GPL edition. Neither
+  writes 12-bit HEIC.
 
 ## License
 
-ISC, as declared in the workspace `Cargo.toml`. The native libraries it ships, and their
-licences, are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), which every
-installer includes.
+Skidbladnir's source is ISC ([LICENSE](LICENSE)), as declared in the workspace
+`Cargo.toml`. The standard edition's builds are ISC too. The GPL edition's builds
+include x265, so each of them is distributed as a whole under the GNU GPL, version 3 or
+later ([LICENSES/GPL-3.0.txt](LICENSES/GPL-3.0.txt)); see [Editions](#editions).
+
+The native libraries each edition ships, and their licences, are listed in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) and
+[THIRD-PARTY-NOTICES-GPL.md](THIRD-PARTY-NOTICES-GPL.md), and every installer carries its
+own edition's copy with its licence texts.

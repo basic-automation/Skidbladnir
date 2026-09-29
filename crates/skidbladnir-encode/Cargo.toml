@@ -1,11 +1,20 @@
 [package]
 name = "skidbladnir-encode"
 version = "0.1.0"
-description = "The encode core for Skidbladnir: the settings model and the WebP, AVIF and JPEG XL encoders behind the GUI."
+description = "The encode core for Skidbladnir: the settings model and the WebP, AVIF, JPEG XL and HEIC encoders behind the GUI."
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+
+[features]
+# HEIC through x265 instead of Kvazaar: lossless, 4:4:4 and 10-bit output, and x265's own
+# tuning. It links the libheif `scripts/build-libheif.sh --edition gpl` builds, which has
+# x265 (GPL-2.0-or-later) inside, so an app built with it is distributed under
+# GPL-3.0-or-later as a whole. See README.md, "Editions".
+x265 = []
+# Every optional feature.
+full = ["x265"]
 
 [dependencies]
 image = { workspace = true }

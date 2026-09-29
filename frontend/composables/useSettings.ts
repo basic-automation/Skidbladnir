@@ -26,9 +26,43 @@ export interface EncodeJob {
 	heic: HeicSettings
 }
 
-/** The HEIC controls, as libheif exposes them for the Kvazaar encoder. */
+/**
+ * The HEIC controls. The standard edition's Kvazaar reads `quality` alone; the rest are
+ * x265's, in the GPL edition. Defaults come from the Rust core, and are what libheif sets
+ * for x265 itself. The fractional x265 options are held in tenths.
+ */
 export interface HeicSettings {
 	quality: number
+	lossless: boolean
+	chroma: HeicChroma
+	bitDepth: 'eight' | 'ten'
+	preset: HeicPreset
+	tune: HeicTune
+	tuIntraDepth: number
+	aqMode: HeicAqMode
+	aqStrength: number
+	psyRd: number
+	psyRdoq: number
+	deblock: boolean
+	deblockStrength: number
+	deblockThreshold: number
+	sao: boolean
+}
+
+export type HeicChroma = '420' | '422' | '444'
+export type HeicPreset = 'ultrafast' | 'superfast' | 'veryfast' | 'faster' | 'fast' | 'medium' | 'slow' | 'slower' | 'veryslow' | 'placebo'
+export type HeicTune = 'psnr' | 'ssim' | 'grain' | 'fastdecode'
+export type HeicAqMode = 'off' | 'variance' | 'autoVariance' | 'autoVarianceDark' | 'autoVarianceEdge'
+
+/**
+ * Which edition this build is: standard (Kvazaar, ISC) or GPL (x265, GPL-3.0-or-later).
+ * Only the GPL edition has x265's HEIC controls.
+ */
+export interface Edition {
+	name: 'standard' | 'gpl'
+	label: string
+	license: string
+	x265: boolean
 }
 
 /** The JPEG XL controls, as libjxl exposes them. Defaults come from the Rust core. */

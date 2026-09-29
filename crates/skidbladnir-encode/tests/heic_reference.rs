@@ -8,6 +8,9 @@
 //! The `heif-dec` on a CI runner is the distribution's libheif, a separate build from the
 //! one this app ships, which is what makes it a check rather than a tautology.
 //!
+//! The GPL edition's x265 writes more than Kvazaar can — lossless, 4:4:4, 10-bit — and each
+//! of those is checked here too when the `x265` feature is on.
+//!
 //! It needs `heif-dec`, found via `SKIDBLADNIR_REFERENCE_HEIFDEC` or on `PATH`. Without one
 //! it prints loudly and returns; with `SKIDBLADNIR_REQUIRE_PARITY=1` (set by CI's parity
 //! step, where `heif-dec` is installed) a missing decoder is a failure instead.
@@ -103,8 +106,8 @@ fn reference_heifdec_reads_our_heic_correctly() {
 		}
 	}
 
-	let low = opaque_psnr(&pixels, &decode(&heifdec, &encode(HeicSettings { quality: 20 }, Resize::default(), &pixels), "q20").2);
-	let high = opaque_psnr(&pixels, &decode(&heifdec, &encode(HeicSettings { quality: 95 }, Resize::default(), &pixels), "q95").2);
+	let low = opaque_psnr(&pixels, &decode(&heifdec, &encode(HeicSettings { quality: 20, ..HeicSettings::default() }, Resize::default(), &pixels), "q20").2);
+	let high = opaque_psnr(&pixels, &decode(&heifdec, &encode(HeicSettings { quality: 95, ..HeicSettings::default() }, Resize::default(), &pixels), "q95").2);
 	assert!(high > low, "quality 95 decodes at {high:.1} dB but quality 20 at {low:.1} dB");
 
 	let (width, height, _) = decode(&heifdec, &encode(HeicSettings::default(), Resize { width: 32, height: 0, no_enlarge: false }, &pixels), "resize");
@@ -117,7 +120,7 @@ fn reference_heifdec_reads_our_heic_correctly() {
 #[test]
 fn our_heic_decoder_agrees_with_heifdec() {
 	let Some(heifdec) = heifdec_or_skip("HEIC input") else { return };
-	let file = encode(HeicSettings { quality: 80 }, Resize::default(), &fixture());
+	let file = encode(HeicSettings { quality: 80, ..HeicSettings::default() }, Resize::default(), &fixture());
 	let (_, _, reference) = decode(&heifdec, &file, "agree");
 	let (width, height, ours) = heic::decode(&file).expect("our decoder reads our own file");
 	assert_eq!((width, height), (WIDTH, HEIGHT));
@@ -126,4 +129,28 @@ fn our_heic_decoder_agrees_with_heifdec() {
 	assert!(agreement > 40.0, "our decode and heif-dec's agree at only {agreement:.1} dB");
 	assert!(worst_alpha <= 2, "alpha differs from heif-dec's by up to {worst_alpha}");
 	eprintln!("HEIC DECODE OK: agreement {agreement:.1} dB, alpha within {worst_alpha}.");
+}
+
+/// The GPL edition's own output: lossless must come back exact, and 4:4:4 and 10-bit must
+/// read back at least as well as the default.
+#[cfg(feature = "x265")]
+#[test]
+fn reference_heifdec_reads_what_only_x265_writes() {
+	use skidbladnir_encode::settings::{HeicBitDepth, HeicChroma};
+
+	let Some(heifdec) = heifdec_or_skip("x265's lossless, 4:4:4 and 10-bit HEIC") else { return };
+	let pixels = fixture();
+
+	let (_, _, lossless) = decode(&heifdec, &encode(HeicSettings { lossless: true, ..HeicSettings::default() }, Resize::default(), &pixels), "lossless");
+	let differs = pixels.as_chunks::<4>().0.iter().zip(lossless.as_chunks::<4>().0).filter(|(s, d)| s[3] == 255 && s != d).count();
+	assert_eq!(differs, 0, "heif-dec decoded {differs} opaque pixels of our lossless HEIC differently");
+
+	let default = opaque_psnr(&pixels, &decode(&heifdec, &encode(HeicSettings { quality: 80, ..HeicSettings::default() }, Resize::default(), &pixels), "x265-default").2);
+	for (name, settings) in [("444", HeicSettings { quality: 80, chroma: HeicChroma::Yuv444, ..HeicSettings::default() }), ("422", HeicSettings { quality: 80, chroma: HeicChroma::Yuv422, ..HeicSettings::default() }), ("10bit", HeicSettings { quality: 80, bit_depth: HeicBitDepth::Ten, ..HeicSettings::default() })] {
+		let (width, height, rgba) = decode(&heifdec, &encode(settings, Resize::default(), &pixels), name);
+		assert_eq!((width, height), (WIDTH, HEIGHT));
+		let psnr = opaque_psnr(&pixels, &rgba);
+		assert!(psnr > default - 1.0, "{name} decodes at {psnr:.1} dB, below the 4:2:0 8-bit {default:.1} dB");
+	}
+	eprintln!("HEIC X265 REFERENCE OK: heif-dec read lossless exactly, and 4:4:4, 4:2:2 and 10-bit (4:2:0 8-bit at {default:.1} dB).");
 }

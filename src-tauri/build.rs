@@ -8,14 +8,16 @@
 //! - macOS: the bundle's `Frameworks` — `@executable_path/../Frameworks`.
 //! - Windows: beside the `.exe`, which the loader searches first; nothing to set.
 //!
-//! A debug build also looks in `build/libheif` itself, so `tauri dev` runs straight from the
-//! tree. A release binary never carries that absolute path.
+//! A debug build also looks in `build/libheif` itself (`build/libheif-gpl` with the `gpl`
+//! feature), so `tauri dev` runs straight from the tree. A release binary never carries
+//! that absolute path.
 
 use std::{env, fs, path::PathBuf};
 
 fn main() {
 	let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"));
-	let prefix = env::var_os("SKIDBLADNIR_LIBHEIF_DIR").map_or_else(|| manifest.join("../build/libheif"), PathBuf::from);
+	let default = if env::var_os("CARGO_FEATURE_GPL").is_some() { "../build/libheif-gpl" } else { "../build/libheif" };
+	let prefix = env::var_os("SKIDBLADNIR_LIBHEIF_DIR").map_or_else(|| manifest.join(default), PathBuf::from);
 	let debug = env::var("PROFILE").as_deref() == Ok("debug");
 	println!("cargo:rerun-if-env-changed=SKIDBLADNIR_LIBHEIF_DIR");
 

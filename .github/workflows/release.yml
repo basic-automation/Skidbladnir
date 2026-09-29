@@ -1,6 +1,12 @@
 # Builds the Tauri app on all three platforms for a tagged release and attaches the
 # installers to the GitHub release for that tag.
 #
+# Every platform is built twice, once per edition. The standard edition (Skidbladnir_*)
+# encodes HEIC with Kvazaar and is ISC; the GPL edition (Skidbladnir-GPL_*, the `gpl`
+# feature) encodes it with x265 and is distributed under GPL-3.0-or-later, so every release
+# also carries its complete source (Skidbladnir-<version>-source.tar.gz, with the
+# submodules) beside the GPL installers. Each edition updates from its own manifest.
+#
 # The dev host can only build Linux, so Windows and macOS artifacts exist *only* because
 # this workflow produces them. A release cut without a successful run here has Linux
 # artifacts and nothing else, and its notes must say so.
@@ -30,25 +36,27 @@ env:
 
 jobs:
   bundle:
-    name: bundle / ${{ matrix.name }}
+    name: bundle / ${{ matrix.platform }}${{ matrix.edition == 'gpl' && ' / gpl' || '' }}
     runs-on: ${{ matrix.os }}
     strategy:
       # One platform failing must not deny the release the artifacts the others produced.
       fail-fast: false
       matrix:
+        platform: [linux, windows, macos-arm64, macos-x64]
+        edition: [standard, gpl]
         include:
-          - { name: linux, os: ubuntu-latest, target: "" }
-          - { name: windows, os: windows-latest, target: "" }
+          - { platform: linux, os: ubuntu-latest, target: "" }
+          - { platform: windows, os: windows-latest, target: "" }
           # macos-latest is Apple Silicon, so its native build is aarch64 only. Intel Macs
           # get their own .dmg, cross-built on the same runner.
-          - { name: macos-arm64, os: macos-latest, target: "" }
-          - { name: macos-x64, os: macos-latest, target: x86_64-apple-darwin }
+          - { platform: macos-arm64, os: macos-latest, target: "" }
+          - { platform: macos-x64, os: macos-latest, target: x86_64-apple-darwin }
 
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ (inputs.dry_run && github.ref) || inputs.tag || github.ref }}
-          # libheif, Kvazaar and libde265 are pinned submodules under third_party/.
+          # libheif, Kvazaar, x265 and libde265 are pinned submodules under third_party/.
           submodules: true
 
       - name: Install the Linux system dependencies Tauri needs
@@ -68,14 +76,16 @@ jobs:
 
       - name: Install nasm
         # The AV1 encoder (rav1e) and decoder (rav1d) assemble their SIMD with nasm; their
-        # build scripts fail outright without it.
+        # build scripts fail outright without it. So does x265's, in the GPL edition.
         uses: ilammy/setup-nasm@v1
 
-      - name: Build libheif (Kvazaar + libde265)
-        # Every installer ships this libheif beside the app (tauri.<platform>.conf.json).
-        # The Intel Mac build is a cross build on an Apple Silicon runner.
+      - name: Build libheif (${{ matrix.edition }} edition)
+        # Every installer ships this libheif beside the app (tauri.<platform>.conf.json,
+        # and tauri.gpl*.conf.json for the GPL edition's). The Intel Mac build is a cross
+        # build on an Apple Silicon runner.
         uses: ./.github/actions/libheif
         with:
+          edition: ${{ matrix.edition }}
           target-arch: ${{ matrix.target == 'x86_64-apple-darwin' && 'x86_64' || '' }}
 
       - uses: dtolnay/rust-toolchain@stable
@@ -83,6 +93,8 @@ jobs:
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.edition }}
 
       - name: Build the frontend
         run: |
@@ -121,10 +133,16 @@ jobs:
           if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
             args+=(--config '{"bundle":{"createUpdaterArtifacts":true}}')
           else
-            echo "::warning::TAURI_SIGNING_PRIVATE_KEY is not set, so ${{ matrix.name }} is built without updater signatures and will not be offered as an update"
+            echo "::warning::TAURI_SIGNING_PRIVATE_KEY is not set, so ${{ matrix.platform }} (${{ matrix.edition }}) is built without updater signatures and will not be offered as an update"
           fi
           if [ -n "${{ matrix.target }}" ]; then
             args+=(--target "${{ matrix.target }}")
+          fi
+          # The GPL edition: x265's libheif, its own notices and licence, and its own
+          # updater manifest, so a GPL install only ever updates to a GPL build.
+          if [ "${{ matrix.edition }}" = gpl ]; then
+            args+=(--features gpl --config tauri.gpl.conf.json)
+            if [ "$RUNNER_OS" = Windows ]; then args+=(--config tauri.gpl.windows.conf.json); fi
           fi
           cd src-tauri
           "../$cli" build "${args[@]}"
@@ -143,20 +161,27 @@ jobs:
           archive=$(find target -path '*/release/bundle/macos/*' -type f -name '*.app.tar.gz' | head -1)
           if [ -n "$archive" ]; then
             version=$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)
-            case "${{ matrix.name }}" in macos-x64) arch=x64 ;; *) arch=aarch64 ;; esac
+            case "${{ matrix.platform }}" in macos-x64) arch=x64 ;; *) arch=aarch64 ;; esac
             cp "$archive" "dist-artifacts/Skidbladnir_${version}_${arch}.app.tar.gz"
             rm -f dist-artifacts/*.app.tar.gz.sig
             cp "$archive.sig" "dist-artifacts/Skidbladnir_${version}_${arch}.app.tar.gz.sig"
           fi
+          # Both editions' installers land on one release, so the GPL edition's say so in
+          # their names: Skidbladnir-GPL_<version>_... A signature does not cover the name.
+          if [ "${{ matrix.edition }}" = gpl ]; then
+            for file in dist-artifacts/Skidbladnir_*; do
+              mv "$file" "dist-artifacts/Skidbladnir-GPL_${file#dist-artifacts/Skidbladnir_}"
+            done
+          fi
           ls -la dist-artifacts
           if [ -z "$(ls -A dist-artifacts)" ]; then
-            echo "::error::No installers were produced for ${{ matrix.name }}"
+            echo "::error::No installers were produced for ${{ matrix.platform }} (${{ matrix.edition }})"
             exit 1
           fi
 
       - uses: actions/upload-artifact@v7
         with:
-          name: skidbladnir-${{ matrix.name }}
+          name: skidbladnir-${{ matrix.platform }}-${{ matrix.edition }}
           path: dist-artifacts/*
           if-no-files-found: error
 
@@ -183,12 +208,64 @@ jobs:
           fi
           gh release upload "$TAG" dist-artifacts/* --clobber
 
-  # The updater manifest. Runs after every platform has finished, whatever they did, and
-  # lists the ones that produced signed installers (scripts/updater-manifest.py).
+  # The complete corresponding source, which the GPL edition's licence requires to travel
+  # with its installers: the repository at this tag WITH its submodules (x265, libheif,
+  # libde265, Kvazaar), which GitHub's own "Source code" downloads leave out. Its notices
+  # file names this asset.
+  source:
+    name: source archive
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ (inputs.dry_run && github.ref) || inputs.tag || github.ref }}
+          submodules: true
+
+      - name: Archive the source with its submodules
+        id: archive
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)
+          export name="Skidbladnir-$version"
+          git archive --format=tar --prefix="$name/" HEAD > "$RUNNER_TEMP/source.tar"
+          git submodule foreach --quiet 'git archive --format=tar --prefix="$name/$sm_path/" HEAD > "$RUNNER_TEMP/submodule-$(basename "$sm_path").tar"'
+          for part in "$RUNNER_TEMP"/submodule-*.tar; do tar --concatenate --file="$RUNNER_TEMP/source.tar" "$part"; done
+          gzip -9 < "$RUNNER_TEMP/source.tar" > "$name-source.tar.gz"
+          # Every submodule must be in it; an empty or missing one would be a source
+          # archive that cannot build what was shipped.
+          for module in libheif libde265 kvazaar x265; do
+            tar -tzf "$name-source.tar.gz" | grep -q "^$name/third_party/$module/." || { echo "::error::third_party/$module is missing from the archive"; exit 1; }
+          done
+          ls -la "$name-source.tar.gz"
+          echo "file=$name-source.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: source-archive
+          path: ${{ steps.archive.outputs.file }}
+          if-no-files-found: error
+
+      - name: Attach to the release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -z "${{ inputs.tag }}" ]; then
+            echo "::error::a manual run needs a tag, or dry_run"
+            exit 1
+          fi
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --prerelease --title "$TAG" --notes "Artifacts attached by CI. Notes pending."
+          fi
+          gh release upload "$TAG" "${{ steps.archive.outputs.file }}" --clobber
+
+  # The updater manifests. Runs after every platform has finished, whatever they did, and
+  # lists the ones that produced signed installers (scripts/updater-manifest.py): one per
+  # edition, latest.json for the standard edition and latest-gpl.json for the GPL one.
   #
   # The installed app reads it from the `updater` branch, not from the release:
   # `releases/latest` skips prereleases, and every release is a prerelease for now. The
-  # branch holds only latest.json, and only this job writes to it.
+  # branch holds only the manifests, and only this job writes to it.
   manifest:
     name: updater manifest
     needs: bundle
@@ -207,7 +284,7 @@ jobs:
           path: dist-artifacts
           merge-multiple: true
 
-      - name: Write latest.json
+      - name: Write latest.json and latest-gpl.json
         id: write
         env:
           GH_TOKEN: ${{ github.token }}
@@ -231,8 +308,21 @@ jobs:
             echo "publish=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          scripts/updater-manifest.py --dir dist-artifacts --version "$version" --tag "$tag" --repo "${{ github.repository }}" --notes-file notes.md --out latest.json
-          cat latest.json
+          manifests=()
+          for edition in standard gpl; do
+            case "$edition" in standard) prefix=Skidbladnir_; out=latest.json ;; gpl) prefix=Skidbladnir-GPL_; out=latest-gpl.json ;; esac
+            if scripts/updater-manifest.py --dir dist-artifacts --prefix "$prefix" --version "$version" --tag "$tag" --repo "${{ github.repository }}" --notes-file notes.md --out "$out"; then
+              cat "$out"
+              manifests+=("$out")
+            else
+              echo "::warning::no signed $edition-edition installers; $out is not published and its installed copies will not be offered $tag"
+            fi
+          done
+          if [ ${#manifests[@]} -eq 0 ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "manifests=${manifests[*]}" >> "$GITHUB_OUTPUT"
           echo "publish=true" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -241,7 +331,7 @@ jobs:
         if: steps.write.outputs.publish == 'true'
         with:
           name: updater-manifest
-          path: latest.json
+          path: latest*.json
 
       - name: Publish to the release and the updater branch
         if: ${{ steps.write.outputs.publish == 'true' && !inputs.dry_run }}
@@ -249,28 +339,31 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.write.outputs.tag }}
           VERSION: ${{ steps.write.outputs.version }}
+          MANIFESTS: ${{ steps.write.outputs.manifests }}
         run: |
-          gh release upload "$TAG" latest.json --clobber
+          gh release upload "$TAG" $MANIFESTS --clobber
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           branch="$RUNNER_TEMP/updater"
           if git fetch --depth 1 origin updater 2>/dev/null; then
             git worktree add "$branch" FETCH_HEAD
-            # Re-running an older tag's release must not roll every client back to it.
-            current=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$branch/latest.json" 2>/dev/null || echo 0)
-            newest=$(printf '%s\n%s\n' "$current" "$VERSION" | sort -V | tail -1)
-            if [ "$newest" != "$VERSION" ]; then
-              echo "the updater branch already offers $current, newer than $VERSION; leaving it"
-              exit 0
-            fi
           else
             git worktree add --detach "$branch"
             git -C "$branch" checkout --orphan updater
             git -C "$branch" rm -rf --quiet .
           fi
-          cp latest.json "$branch/latest.json"
-          git -C "$branch" add latest.json
+          for manifest in $MANIFESTS; do
+            # Re-running an older tag's release must not roll every client back to it.
+            current=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$branch/$manifest" 2>/dev/null || echo 0)
+            newest=$(printf '%s\n%s\n' "$current" "$VERSION" | sort -V | tail -1)
+            if [ "$newest" != "$VERSION" ]; then
+              echo "the updater branch already offers $current in $manifest, newer than $VERSION; leaving it"
+              continue
+            fi
+            cp "$manifest" "$branch/$manifest"
+            git -C "$branch" add "$manifest"
+          done
           if git -C "$branch" diff --cached --quiet; then
             echo "latest.json is unchanged"
             exit 0

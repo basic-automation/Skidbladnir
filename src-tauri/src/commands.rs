@@ -12,7 +12,7 @@ use std::{
 
 use serde::Serialize;
 use skidbladnir_encode::{
-	encoder::{linked_decoder_version, linked_encoder_version}, settings::EncodeJob, source::{Conversion, FoundImage, PathInspection, encode_file_with_progress, inspect_paths, mirrored_output_path, output_path_in, scan_directory}
+	encoder::{linked_decoder_version, linked_encoder_version}, settings::{EncodeJob, HEIC_X265}, source::{Conversion, FoundImage, PathInspection, encode_file_with_progress, inspect_paths, mirrored_output_path, output_path_in, scan_directory}
 };
 use tauri::{Emitter as _, Manager as _};
 
@@ -31,7 +31,33 @@ pub fn encoder_version() -> String {
 	let (emajor, eminor, erevision) = linked_encoder_version();
 	let (dmajor, dminor, drevision) = linked_decoder_version();
 	let (jmajor, jminor, jpatch) = skidbladnir_encode::jxl::linked_version();
-	format!("Skidbladnir {} · libwebp encoder {emajor}.{eminor}.{erevision} · decoder {dmajor}.{dminor}.{drevision} · libjxl {jmajor}.{jminor}.{jpatch} · libheif {}", env!("CARGO_PKG_VERSION"), skidbladnir_encode::heic::linked_version())
+	format!("Skidbladnir {}{} · libwebp encoder {emajor}.{eminor}.{erevision} · decoder {dmajor}.{dminor}.{drevision} · libjxl {jmajor}.{jminor}.{jpatch} · libheif {} with {}", env!("CARGO_PKG_VERSION"), edition().label, skidbladnir_encode::heic::linked_version(), skidbladnir_encode::heic::encoder_name())
+}
+
+/// Which edition this build is.
+///
+/// The two differ only in HEIC's encoder, and with it the licence the build is distributed
+/// under: the standard edition encodes with Kvazaar and is ISC, the GPL edition (the `gpl`
+/// feature) with x265 and is GPL-3.0-or-later. The window reads it to decide which HEIC
+/// controls exist.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Edition {
+	/// `standard` or `gpl`.
+	pub name: &'static str,
+	/// How the version line names it: nothing for the standard edition.
+	pub label: &'static str,
+	/// The licence this build is distributed under, as an SPDX expression.
+	pub license: &'static str,
+	/// Whether HEIC is written by x265, and so has lossless, 4:4:4, 10-bit and x265's tuning.
+	pub x265: bool,
+}
+
+/// This build's edition. See [`Edition`].
+#[tauri::command]
+#[must_use]
+pub fn edition() -> Edition {
+	if HEIC_X265 { Edition { name: "gpl", label: " (GPL edition)", license: "GPL-3.0-or-later", x265: true } } else { Edition { name: "standard", label: "", license: "ISC", x265: false } }
 }
 
 /// The settings a freshly opened window starts from.
@@ -333,7 +359,7 @@ mod tests {
 		settings::{EncodeJob, Mode, WebpSettings}, source::Conversion
 	};
 
-	use super::{ConversionReport, convert_one, default_settings, encoder_version, inspect_dropped_paths, validate_settings};
+	use super::{ConversionReport, convert_one, default_settings, edition, encoder_version, inspect_dropped_paths, validate_settings};
 
 	/// The version string is shown to users, so it must actually contain versions rather
 	/// than a placeholder.
@@ -342,6 +368,17 @@ mod tests {
 		let reported = encoder_version();
 		assert!(reported.contains("libwebp encoder 1."), "got {reported}");
 		assert!(reported.contains("decoder 1."), "got {reported}");
+	}
+
+	/// The edition the window is told is the one whose encoder is linked, and the version
+	/// line names that encoder.
+	#[test]
+	fn the_edition_is_the_linked_encoders() {
+		let edition = edition();
+		assert_eq!(edition.x265, cfg!(feature = "gpl"));
+		assert_eq!(edition.license, if edition.x265 { "GPL-3.0-or-later" } else { "ISC" });
+		let reported = encoder_version().to_lowercase();
+		assert!(reported.contains(if edition.x265 { "with x265" } else { "with kvazaar" }), "got {reported}");
 	}
 
 	/// The defaults the frontend receives must be the core's, not a second copy.

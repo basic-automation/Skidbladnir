@@ -738,6 +738,33 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
         offer anyone who wants HEIF.
       - *Carry over from HEIC:* EXIF orientation (iPhone photos rely on it) and the
         embedded colour profile. Check whether the AVIF path already honours either.
+- [x] **The GPL edition: HEIC through x265** (done 2026-09-28; the owner changed their
+      mind about x265 and asked for two builds rather than one). The `gpl` cargo feature
+      (and `full`, every optional feature) builds the app against a libheif that
+      `scripts/build-libheif.sh --edition gpl` builds around **x265 4.2** (GPL-2.0-or-later,
+      a Bitbucket submodule) with its 8- and 10-bit encoders linked together, in place of
+      Kvazaar. That build is distributed under GPL-3.0-or-later as a whole; the source
+      stays ISC, and the standard edition stays ISC and unchanged. **Guard:** each libheif
+      build records its edition in `EDITION` beside it, `build.rs` refuses to link the
+      other edition's, and a test asserts the linked libheif has this edition's encoder and
+      not the other's. **Controls:** lossless (RGB kept as RGB at 4:4:4), 4:2:0/4:2:2/4:4:4,
+      8- or 10-bit (Main 10, fed 10-bit RGB so the colour conversion runs at 10 bits),
+      x265's ten presets and four tunings, TU intra depth, and through libheif's `x265:`
+      pass-through: adaptive quantisation mode and strength, psy-RD, psy-RDOQ, deblocking
+      on/off with its tC and beta offsets, and SAO. Settings a standard edition cannot
+      write are refused there and reset to Kvazaar's when a preset or preferences file
+      from the GPL edition is read. **Found on the way:** libheif encodes transparency with
+      a *fresh* encoder that gets only its listed parameters, not `x265:` ones, so those
+      shape the colour image only; and x265 refuses placebo's TU inter depth in the 16-px
+      CTUs libheif uses under 32 px, which is refused up front for transparent images.
+      Opaque images now carry no alpha image in either edition. **Gate:** unit tests for
+      every chroma, bit depth, preset, tune and AQ mode at every CTU size; lossless exact;
+      and `heif-dec` reads lossless exactly and 4:4:4, 4:2:2 and 10-bit. **Distribution:**
+      each release builds both editions (`Skidbladnir-GPL_*` for the GPL one), attaches
+      `Skidbladnir-<version>-source.tar.gz` with every submodule, and gives each edition its
+      own updater manifest (`latest.json`, `latest-gpl.json`). Notices are per edition,
+      and the GPL edition bundles the GPL text as `COPYING`. **Not yet:** 12-bit (Main 12),
+      and HEVC's patent pools, exactly as for Kvazaar.
 - [x] **JPEG XL output and input** (done 2026-09-28, ahead of Chrome at the owner's
       request, so libraries can be converted in anticipation). libjxl 0.12 is bound
       directly in `src/jxl.rs` — `jpegxl-rs`/`jpegxl-sys` are GPL-3.0 and cannot be linked

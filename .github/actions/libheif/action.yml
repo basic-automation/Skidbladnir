@@ -1,12 +1,17 @@
-# Build (or restore) the libheif Skidbladnir ships — libheif with the Kvazaar encoder and
-# the libde265 decoder built in — and make it findable for the rest of the job.
+# Build (or restore) the libheif Skidbladnir ships — libheif with the edition's HEVC encoder
+# (Kvazaar for the standard edition, x265 for the GPL one) and the libde265 decoder built
+# in — and make it findable for the rest of the job.
 #
 # Needs the third_party/ submodules checked out. The result is cached on the pinned
-# submodule commits and the build script, so a routine run does not rebuild three C/C++
-# libraries. See scripts/build-libheif.sh for what is built and why.
+# submodule commits, the edition and the build script, so a routine run does not rebuild
+# three C/C++ libraries. See scripts/build-libheif.sh for what is built and why.
 name: libheif
-description: Build or restore libheif with Kvazaar and libde265, and put it on the library path.
+description: Build or restore libheif with the edition's HEVC encoder and libde265, and put it on the library path.
 inputs:
+  edition:
+    description: standard (Kvazaar, the ISC app) or gpl (x265, the GPL-3.0-or-later app built with the `gpl` feature).
+    required: false
+    default: standard
   target-arch:
     description: Set for a cross build (x86_64 on an Apple Silicon runner).
     required: false
@@ -17,13 +22,20 @@ runs:
     - name: libheif cache key
       id: key
       shell: bash
-      run: echo "key=libheif-${{ runner.os }}-${{ inputs.target-arch }}-$(git submodule status third_party | awk '{print $1}' | tr -d '+-' | tr '\n' '-')${{ hashFiles('scripts/build-libheif.sh') }}" >> "$GITHUB_OUTPUT"
+      run: |
+        case "${{ inputs.edition }}" in
+          standard) dir=build/libheif ;;
+          gpl) dir=build/libheif-gpl ;;
+          *) echo "::error::unknown edition ${{ inputs.edition }}"; exit 1 ;;
+        esac
+        echo "dir=$dir" >> "$GITHUB_OUTPUT"
+        echo "key=libheif-${{ inputs.edition }}-${{ runner.os }}-${{ inputs.target-arch }}-$(git submodule status third_party | awk '{print $1}' | tr -d '+-' | tr '\n' '-')${{ hashFiles('scripts/build-libheif.sh') }}" >> "$GITHUB_OUTPUT"
 
     - name: Restore libheif
       id: cache
       uses: actions/cache@v6
       with:
-        path: build/libheif
+        path: ${{ steps.key.outputs.dir }}
         key: ${{ steps.key.outputs.key }}
 
     - name: Build libheif
@@ -31,17 +43,20 @@ runs:
       shell: bash
       env:
         SKIDBLADNIR_TARGET_ARCH: ${{ inputs.target-arch }}
-      run: scripts/build-libheif.sh
+      run: scripts/build-libheif.sh --edition "${{ inputs.edition }}"
 
     - name: Put libheif on the library path
       shell: bash
       run: |
         # The app is linked against this build and must never fall back to a system libheif.
+        # Its build scripts find it by the edition's feature; the path is set here too so
+        # nothing in the job can link the other edition's.
         echo "SKIDBLADNIR_LIBHEIF=vendored" >> "$GITHUB_ENV"
+        echo "SKIDBLADNIR_LIBHEIF_DIR=$GITHUB_WORKSPACE/${{ steps.key.outputs.dir }}" >> "$GITHUB_ENV"
         case "$RUNNER_OS" in
           # For the release binary run from target/ and for AppImage bundling, which
           # resolves the app's libraries with ldd.
-          Linux) echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/build/libheif/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV" ;;
+          Linux) echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/${{ steps.key.outputs.dir }}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV" ;;
           # Test binaries in target/*/deps load heif.dll from PATH.
-          Windows) echo "$GITHUB_WORKSPACE/build/libheif/bin" >> "$GITHUB_PATH" ;;
+          Windows) echo "$GITHUB_WORKSPACE/${{ steps.key.outputs.dir }}/bin" >> "$GITHUB_PATH" ;;
         esac
