@@ -555,12 +555,26 @@ prettier subset.
          the modes driven over WebDriver (including that A and B stay registered at 32x),
          axe-clean, and screenshots re-captured. Designed in the Nanna design (Figma and
          Nuxt UI components) before it is built.
+- [x] **Keep metadata in JPEG XL output** (2026-09-28). The same `metadata` choice: an ICC
+      profile *labels* the pixels (`JxlEncoderSetICCProfile` in place of the sRGB colour
+      encoding — the decoded pixels are in the source's space, so tagging them sRGB was
+      wrong whenever a profile existed), EXIF becomes an `Exif` box (after its 4-byte
+      TIFF-header offset) and XMP an `xml ` box, as `cjxl` writes them. A JPEG recompressed
+      losslessly already keeps its own metadata (libjxl stores it for the bit-exact rebuild),
+      whatever the setting. **Gate:** `keeps_metadata_in_jpeg_xl` in `tests/metadata.rs`,
+      run by libjxl's `djxl`: lossless keeps a Display P3 profile verbatim and decodes to the
+      source's pixels in it; lossy (XYB) keeps its primaries (libjxl regenerates the profile
+      from its compact colour encoding, as `cjxl` output does); both boxes byte for byte;
+      nothing when nothing is kept. Mutation-tested: ignoring the profile, dropping the
+      boxes and omitting the `Exif` offset each fail it.
+      Found on the way: the WebP gate's `-metadata all` cases had kept nothing on our side
+      *or* `cwebp`'s (a test helper misread "all"); fixed, and all 84 still match.
 - [ ] Keep metadata in **animated** WebP output (`gif2webp -metadata` keeps ICC and XMP
-      from a GIF's application extensions), and in AVIF, JPEG XL and HEIC output, which
-      each carry ICC and EXIF in their own way. Only still WebP output keeps it today.
-
-## Phase 5 — Tri-platform packaging and release
-
+      from a GIF's application extensions), and in **AVIF** and **HEIC** output. `ravif`
+      0.13 embeds EXIF (`with_exif`) but has no ICC setter, so AVIF's profile needs another
+      route <https://docs.rs/ravif/latest/ravif/struct.Encoder.html>; libheif takes an ICC
+      profile per image (`heif_image_set_raw_color_profile`)
+      <https://raw.githubusercontent.com/strukturag/libheif/master/libheif/api/libheif/heif_color.h>.
 - [x] `cargo tauri build` green on **Linux** for `.deb` — **this was not actually blocked
       on `patchelf`.** Only the AppImage target needs it; `cargo tauri build --bundles deb`
       produces a valid 3.8 MB `Skidbladnir_<version>_amd64.deb` on the dev host today,

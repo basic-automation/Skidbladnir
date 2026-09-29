@@ -35,6 +35,13 @@ pub struct Metadata {
 }
 
 impl Metadata {
+	/// Only what `keep` asks for, and nothing empty.
+	#[must_use]
+	pub fn kept(self, keep: KeepMetadata) -> Self {
+		let pick = |wanted: bool, payload: Option<Vec<u8>>| payload.filter(|bytes| wanted && !bytes.is_empty());
+		Self { icc: pick(keep.icc, self.icc), exif: pick(keep.exif, self.exif), xmp: pick(keep.xmp, self.xmp) }
+	}
+
 	/// Whether there is nothing to keep.
 	#[must_use]
 	pub const fn is_empty(&self) -> bool {

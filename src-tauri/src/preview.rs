@@ -79,11 +79,8 @@ pub fn preview(settings: &EncodeJob, input: &Path) -> Result<Preview, String> {
 	let bytes = std::fs::read(input).map_err(|error| format!("could not read `{}`: {error}", input.display()))?;
 	let encoded = match source::transcode_jpeg(settings, &bytes, &mut |_| true).map_err(|error| error.to_string())? {
 		Some(encoded) => encoded,
-		None => source::encode_decoded(settings, &bytes, &image, &mut |_| true).map_err(|error| error.to_string())?,
+		None => source::encode_decoded(settings, input, &bytes, &image, &mut |_| true).map_err(|error| error.to_string())?,
 	};
-	// With the metadata the conversion would keep, so the size shown is the size written
-	// and an ICC profile is shown as the webview colour-manages it.
-	let encoded = skidbladnir_encode::metadata::keep(settings, &bytes, encoded).map_err(|detail| SourceError::Metadata { path: input.to_path_buf(), detail }.to_string())?;
 
 	// The original is shown at the same dimensions as the encoded side when a resize is in
 	// play, so the comparison is like for like rather than a big image next to a small one.

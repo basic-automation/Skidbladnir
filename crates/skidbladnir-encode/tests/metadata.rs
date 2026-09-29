@@ -146,8 +146,10 @@ fn tiff_with_icc() -> Vec<u8> {
 	out.into_inner()
 }
 
+/// `cwebp -metadata`'s spelling: a comma-separated list of `icc`, `exif`, `xmp`, or `all`.
 fn keep(names: &str) -> KeepMetadata {
-	KeepMetadata { icc: names.contains("icc"), exif: names.contains("exif"), xmp: names.contains("xmp") }
+	let has = |kind: &str| names.split(',').any(|name| name == kind || name == "all");
+	KeepMetadata { icc: has("icc"), exif: has("exif"), xmp: has("xmp") }
 }
 
 /// Our file and `cwebp`'s for the same job, or a note of why one refused.
@@ -247,4 +249,181 @@ fn keeps_metadata_exactly_as_cwebp_does() {
 	let _ = fs::remove_dir_all(&dir);
 	assert!(failures.is_empty(), "METADATA FAILED ({} of {compared}):\n{}", failures.len(), failures.join("\n"));
 	eprintln!("METADATA OK: {compared} conversions ({} sources x 2 modes x {} -metadata choices) match cwebp byte for byte; malformed ICC refused as cwebp refuses it", sources.len(), kinds.len());
+}
+
+/// A real, parseable ICC v2 display profile: Display P3 primaries (adapted to the D50 PCS),
+/// a D50 white point and a 2.2 gamma, with `desc` and `cprt`. libjxl parses and uses the
+/// profile it is given, so the placeholder above will not do there.
+fn display_p3_profile() -> Vec<u8> {
+	// s15.16 fixed point, i.e. value * 65536.
+	let xyz = |x: i32, y: i32, z: i32| [&b"XYZ \0\0\0\0"[..], &x.to_be_bytes(), &y.to_be_bytes(), &z.to_be_bytes()].concat();
+	let mut desc = b"desc\0\0\0\0".to_vec();
+	let name = b"Skidbladnir test Display P3\0";
+	desc.extend_from_slice(&u32::try_from(name.len()).expect("short").to_be_bytes());
+	desc.extend_from_slice(name);
+	desc.extend_from_slice(&[0; 4 + 4 + 2 + 1 + 67]);
+	// XYZ values in s15.16 (value x 65536): the D50 white 0.9642, 1.0, 0.8249, and the P3
+	// primaries adapted to D50 — red 0.5151, 0.2412, -0.0011; green 0.2920, 0.6922, 0.0419;
+	// blue 0.1571, 0.0666, 0.7841. The curves are gamma 2.2 (u8.8 0x0233).
+	let curve = b"curv\0\0\0\0\0\0\0\x01\x02\x33".to_vec();
+	let tags: Vec<(&[u8; 4], Vec<u8>)> = vec![(b"desc", desc), (b"cprt", [&b"text\0\0\0\0"[..], b"No copyright, test data\0"].concat()), (b"wtpt", xyz(63190, 65536, 54061)), (b"rXYZ", xyz(33758, 15807, -72)), (b"gXYZ", xyz(19137, 45364, 2746)), (b"bXYZ", xyz(10296, 4365, 51387)), (b"rTRC", curve.clone()), (b"gTRC", curve.clone()), (b"bTRC", curve)];
+	let mut body = Vec::new();
+	let mut table = u32::try_from(tags.len()).expect("few").to_be_bytes().to_vec();
+	let data_start = 128 + 4 + 12 * tags.len();
+	for (signature, data) in &tags {
+		while body.len() % 4 != 0 {
+			body.push(0);
+		}
+		table.extend_from_slice(*signature);
+		table.extend_from_slice(&u32::try_from(data_start + body.len()).expect("small").to_be_bytes());
+		table.extend_from_slice(&u32::try_from(data.len()).expect("small").to_be_bytes());
+		body.extend_from_slice(data);
+	}
+	while body.len() % 4 != 0 {
+		body.push(0);
+	}
+	let mut icc = icc_profile(128);
+	icc.extend(table);
+	icc.extend(body);
+	let length = u32::try_from(icc.len()).expect("small").to_be_bytes();
+	icc[0..4].copy_from_slice(&length);
+	icc
+}
+
+/// An ICC profile's `rXYZ`, `gXYZ` and `bXYZ` values, if it has them.
+fn primaries(icc: &[u8]) -> Option<Vec<f64>> {
+	let count = u32::from_be_bytes(icc.get(128..132)?.try_into().ok()?) as usize;
+	let mut out = Vec::new();
+	for tag in [b"rXYZ", b"gXYZ", b"bXYZ"] {
+		let entry = (0..count).map(|i| 132 + 12 * i).find(|&at| icc.get(at..at + 4) == Some(&tag[..]))?;
+		let offset = u32::from_be_bytes(icc.get(entry + 4..entry + 8)?.try_into().ok()?) as usize;
+		for component in 0..3 {
+			let at = offset + 8 + 4 * component;
+			out.push(f64::from(i32::from_be_bytes(icc.get(at..at + 4)?.try_into().ok()?)) / 65536.0);
+		}
+	}
+	Some(out)
+}
+
+/// Whether two profiles have the same primaries, to within profile rounding.
+fn same_primaries(a: &[u8], b: &[u8]) -> bool {
+	matches!((primaries(a), primaries(b)), (Some(a), Some(b)) if a.iter().zip(&b).all(|(x, y)| (x - y).abs() < 0.003))
+}
+
+/// The top-level boxes of an ISO-BMFF file (a JPEG XL container), as `(type, payload)`.
+fn bmff_boxes(file: &[u8]) -> Vec<([u8; 4], &[u8])> {
+	let mut out = Vec::new();
+	// A bare codestream (`FF 0A`) has no boxes at all.
+	if !file.starts_with(b"\0\0\0\x0cJXL \r\n\x87\n") {
+		return out;
+	}
+	let mut at = 0;
+	while let Some(header) = file.get(at..at + 8) {
+		let size = u32::from_be_bytes(header[..4].try_into().expect("four")) as usize;
+		let kind: [u8; 4] = header[4..8].try_into().expect("four");
+		let (start, end) = match size {
+			0 => (at + 8, file.len()),
+			1 => (at + 16, at + usize::try_from(u64::from_be_bytes(file[at + 8..at + 16].try_into().expect("eight"))).expect("fits")),
+			_ => (at + 8, at + size),
+		};
+		out.push((kind, &file[start..end]));
+		at = end;
+	}
+	out
+}
+
+/// Keeping metadata in **JPEG XL** output, checked by libjxl's own decoder: `djxl` must
+/// report the source's ICC profile as the image's (`--icc_out`) — verbatim for lossless,
+/// with the same primaries for lossy — and decode a lossless file to the source's pixels — so the profile *labels* them rather than being carried
+/// beside sRGB. EXIF and XMP must be the container's `Exif` (after its 4-byte TIFF-header
+/// offset) and `xml ` boxes, byte for byte. With nothing kept, none of the three appears.
+#[test]
+fn keeps_metadata_in_jpeg_xl() {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let djxl = env::var_os("SKIDBLADNIR_REFERENCE_DJXL").map(PathBuf::from).filter(|path| path.is_file()).or_else(|| Command::new("djxl").arg("--version").output().ok().filter(|out| out.status.success()).map(|_| PathBuf::from("djxl")));
+	let Some(djxl) = djxl else {
+		let message = "JPEG XL METADATA NOT CHECKED: no djxl (set SKIDBLADNIR_REFERENCE_DJXL).";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+	let dir = env::temp_dir().join(format!("skidbladnir-jxl-metadata-{}", std::process::id()));
+	let _ = fs::remove_dir_all(&dir);
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+
+	let icc = display_p3_profile();
+	let (exif, xmp) = (exif_block(), xmp_packet());
+	let img = pixels(true);
+	let source = dir.join("source.png");
+	{
+		let mut out = Vec::new();
+		let mut info = png::Info::with_size(img.width(), img.height());
+		info.color_type = png::ColorType::Rgba;
+		info.bit_depth = png::BitDepth::Eight;
+		info.icc_profile = Some(std::borrow::Cow::Owned(icc.clone()));
+		info.exif_metadata = Some(std::borrow::Cow::Owned(exif.clone()));
+		let mut encoder = png::Encoder::with_info(&mut out, info).expect("a valid header");
+		encoder.add_itxt_chunk("XML:com.adobe.xmp".to_owned(), xmp.clone()).expect("add iTXt");
+		let mut writer = encoder.write_header().expect("write the header");
+		writer.write_image_data(img.as_raw()).expect("write the pixels");
+		drop(writer);
+		fs::write(&source, out).expect("write");
+	}
+	let found = metadata::extract(&fs::read(&source).expect("read")).expect("well formed");
+	assert_eq!((found.icc.as_deref(), found.exif.as_deref(), found.xmp.as_deref()), (Some(&icc[..]), Some(&exif[..]), Some(xmp.as_bytes())), "the fixture must carry all three");
+
+	let mut failures = Vec::new();
+	for (mode, lossless) in [("lossless", true), ("lossy", false)] {
+		for kind in ["all", "none"] {
+			let case = format!("{mode}, keep {kind}");
+			let mut job = EncodeJob { format: skidbladnir_encode::OutputFormat::Jxl, metadata: keep(kind), ..EncodeJob::default() };
+			job.jxl.lossless = lossless;
+			job.jxl.effort = 3;
+			let output = dir.join(format!("{mode}-{kind}.jxl"));
+			if let Err(error) = encode_file(&job, &source, &output) {
+				failures.push(format!("{case}: {error}"));
+				continue;
+			}
+			let written = fs::read(&output).expect("read");
+			let (icc_out, png_out) = (dir.join(format!("{mode}-{kind}.icc")), dir.join(format!("{mode}-{kind}.png")));
+			let run = Command::new(&djxl).arg(&output).arg(&png_out).arg(format!("--icc_out={}", icc_out.display())).output().expect("run djxl");
+			if !run.status.success() {
+				failures.push(format!("{case}: djxl refused it: {}", String::from_utf8_lossy(&run.stderr)));
+				continue;
+			}
+			let reported = fs::read(&icc_out).unwrap_or_default();
+			let boxes = bmff_boxes(&written);
+			let find = |kind: &[u8; 4]| boxes.iter().find(|(k, _)| k == kind).map(|(_, body)| body.to_vec());
+			if kind == "all" {
+				// Lossless keeps the profile verbatim. Lossy (XYB) stores the colour space in
+				// JPEG XL's compact form, as `cjxl` does, and the decoder regenerates a profile:
+				// there the primaries must be the source's, which sRGB's are far from.
+				if lossless && reported != icc {
+					failures.push(format!("{case}: djxl reports a {}-byte profile, not the source's {}", reported.len(), icc.len()));
+				}
+				if !lossless && !same_primaries(&reported, &icc) {
+					failures.push(format!("{case}: djxl's profile does not have the source's primaries"));
+				}
+				if find(b"Exif") != Some([&[0_u8; 4][..], &exif].concat()) {
+					failures.push(format!("{case}: no Exif box with the source's EXIF"));
+				}
+				if find(b"xml ").as_deref() != Some(xmp.as_bytes()) {
+					failures.push(format!("{case}: no xml box with the source's XMP"));
+				}
+				if lossless {
+					let decoded = image::open(&png_out).expect("read djxl's PNG").into_rgba8();
+					if decoded.as_raw() != img.as_raw() {
+						failures.push(format!("{case}: djxl does not decode the source's pixels in the source's profile"));
+					}
+				}
+			} else if reported == icc || find(b"Exif").is_some() || find(b"xml ").is_some() {
+				failures.push(format!("{case}: metadata was kept when none was asked for"));
+			}
+		}
+	}
+	if env::var_os("SKIDBLADNIR_KEEP_SCRATCH").is_none() {
+		let _ = fs::remove_dir_all(&dir);
+	}
+	assert!(failures.is_empty(), "JPEG XL METADATA FAILED:\n{}", failures.join("\n"));
+	eprintln!("JPEG XL METADATA OK: djxl reads the kept ICC profile as the image's, lossless pixels decode exactly in it, EXIF and XMP are the container's boxes; nothing is kept when nothing is asked for");
 }

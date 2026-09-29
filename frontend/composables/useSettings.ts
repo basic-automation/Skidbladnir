@@ -24,7 +24,7 @@ export interface EncodeJob {
 	avif: AvifSettings
 	jxl: JxlSettings
 	heic: HeicSettings
-	/** Which of the source's metadata to keep (`cwebp -metadata`). WebP output only, so far. */
+	/** Which of the source's metadata to keep (`cwebp -metadata`). WebP and JPEG XL output, so far. */
 	metadata: KeepMetadata
 }
 
