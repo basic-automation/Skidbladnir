@@ -112,8 +112,10 @@ check "IPC returns the linked encoder version" \
 	'const I=window.__TAURI_INTERNALS__; return await I.invoke("encoder_version")' 'libwebp encoder'
 check "IPC returns the core defaults" \
 	'const I=window.__TAURI_INTERNALS__; const s=await I.invoke("default_settings"); return s.format+" "+String(s.webp.quality)+"/"+String(s.webp.method)' 'webp 75/4'
-check "the lossy controls are present" \
-	'return String(document.querySelectorAll("[role=slider]").length)' '9'
+# cwebp's sliders in the default (lossy) state: quality, method, alpha quality, and the
+# nine lossy tuning ones.
+check "the WebP controls are present" \
+	'return String(document.querySelectorAll("[role=slider]").length)' '12'
 check "every focusable control has a name" \
 	'const f=[...document.querySelectorAll("button,input,[role=slider],[role=radio],[role=checkbox]")];
 	 const n=e=>e.getAttribute("aria-label")||e.closest("label")?.textContent?.trim()||e.textContent?.trim()||null;
@@ -172,7 +174,7 @@ check "refuses to overwrite the source" \
 check "switches to AVIF" \
 	'[...document.querySelectorAll("[aria-label=\"Output format\"] [role=radio]")][1].click();
 	 await new Promise(r => setTimeout(r, 300));
-	 return String(document.querySelectorAll("[role=slider]").length) + " " + String(!!document.querySelector("[aria-label=\"Encoding mode\"]"))' '3 false'
+	 return String(document.querySelectorAll("[role=slider]").length) + " " + String(!!document.querySelector("[aria-label=\"libwebp preset\"]"))' '1 false'
 check "converts an image to AVIF end to end" \
 	"const I=window.__TAURI_INTERNALS__;
 	 const s=await I.invoke('default_settings'); s.format='avif'; s.avif.speed=10;
@@ -229,13 +231,13 @@ check "the webview displays the HEIC preview" \
 	 const p=await I.invoke('preview_encode', { settings: s, input: '$in_png' });
 	 return await new Promise(res => { const i=new Image(); i.onload=()=>res('displays ' + i.naturalWidth + 'x' + i.naturalHeight); i.onerror=()=>res('cannot display'); i.src=p.encoded; })" 'displays 48x48'
 # The edition is the one this was built as, and what only x265 writes follows it: the GPL
-# edition writes lossless and 10-bit HEIC, and the standard edition refuses them.
+# edition writes -L lossless and 10-bit HEIC, and the standard edition refuses 10-bit.
 if [ "$EDITION" = gpl ]; then
 	check "is the GPL edition" \
 		"const e=await window.__TAURI_INTERNALS__.invoke('edition'); return e.name + ' ' + e.license + ' x265 ' + e.x265" 'gpl GPL-3.0-or-later x265 true'
 	check "the HEIC panel shows x265's controls" \
 		'[...document.querySelectorAll("[aria-label=\"Output format\"] [role=radio]")][3].click(); await new Promise(r => setTimeout(r, 300));
-		 return "headings=" + [...document.querySelectorAll("h2")].map(h => h.textContent.trim()).filter(t => t === "HEIC" || t === "x265").join(",") + " preset=" + !!document.querySelector("[aria-label=\"x265 preset\"]")' 'headings=HEIC,x265 preset=true'
+		 return "headings=" + [...document.querySelectorAll("h2")].map(h => h.textContent.trim()).filter(t => t === "x265").join(",") + " aq=" + !!document.querySelector("[aria-label=\"Adaptive quantisation\"]")' 'headings=x265 aq=true'
 	mkdir -p "$scratch/x265"
 	check "writes lossless HEIC through x265" \
 		"const I=window.__TAURI_INTERNALS__;
@@ -250,12 +252,12 @@ if [ "$EDITION" = gpl ]; then
 else
 	check "is the standard edition" \
 		"const e=await window.__TAURI_INTERNALS__.invoke('edition'); return e.name + ' ' + e.license + ' x265 ' + e.x265" 'standard ISC x265 false'
-	check "the HEIC panel shows quality alone" \
+	check "the HEIC panel has no x265 controls" \
 		'[...document.querySelectorAll("[aria-label=\"Output format\"] [role=radio]")][3].click(); await new Promise(r => setTimeout(r, 300));
-		 return "headings=" + [...document.querySelectorAll("h2")].map(h => h.textContent.trim()).filter(t => t === "HEIC" || t === "x265").join(",") + " preset=" + !!document.querySelector("[aria-label=\"x265 preset\"]")' 'headings= preset=false'
+		 return "headings=" + [...document.querySelectorAll("h2")].map(h => h.textContent.trim()).filter(t => t === "x265").join(",") + " aq=" + !!document.querySelector("[aria-label=\"Adaptive quantisation\"]")' 'headings= aq=false'
 	check "refuses HEIC only x265 can write" \
 		"const I=window.__TAURI_INTERNALS__;
-		 const s=await I.invoke('default_settings'); s.format='heic'; s.heic.lossless=true;
+		 const s=await I.invoke('default_settings'); s.format='heic'; s.heic.bitDepth='ten';
 		 try { await I.invoke('validate_settings', { settings: s }); return 'accepted'; } catch (e) { return String(e); }" 'only the GPL edition of Skidbladnir has'
 fi
 # AVIF input: the AVIF written above, converted back to WebP in another folder.

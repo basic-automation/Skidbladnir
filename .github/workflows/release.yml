@@ -31,8 +31,11 @@ permissions:
   contents: write
 
 env:
-  # Every installer carries its own static libjxl, built from source; never the runner's.
+  # Every installer carries its own static libjxl, libavif with libaom, and libjpeg-turbo,
+  # built from source; never the runner's.
   SKIDBLADNIR_LIBJXL: vendored
+  SKIDBLADNIR_LIBAVIF: vendored
+  SKIDBLADNIR_LIBJPEG: vendored
 
 jobs:
   bundle:
@@ -75,8 +78,9 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install nasm
-        # The AV1 encoder (rav1e) and decoder (rav1d) assemble their SIMD with nasm; their
-        # build scripts fail outright without it. So does x265's, in the GPL edition.
+        # libaom, libjpeg-turbo and the AV1 decoder (rav1d) assemble their SIMD with nasm;
+        # rav1d's and libaom's builds fail outright without it. So does x265's, in the GPL
+        # edition.
         uses: ilammy/setup-nasm@v1
 
       - name: Build libheif (${{ matrix.edition }} edition)
@@ -210,7 +214,8 @@ jobs:
 
   # The complete corresponding source, which the GPL edition's licence requires to travel
   # with its installers: the repository at this tag WITH its submodules (x265, libheif,
-  # libde265, Kvazaar), which GitHub's own "Source code" downloads leave out. Its notices
+  # libde265, Kvazaar, libavif, libaom, libwebp, libjpeg-turbo), which GitHub's own
+  # "Source code" downloads leave out. Its notices
   # file names this asset.
   source:
     name: source archive
@@ -234,7 +239,7 @@ jobs:
           # Every submodule must be in it; an empty or missing one would be a source
           # archive that cannot build what was shipped.
           tar -tzf "$archive_root-source.tar.gz" > "$RUNNER_TEMP/contents"
-          for module in libheif libde265 kvazaar x265; do
+          for module in libheif libde265 kvazaar x265 libavif aom libwebp libjpeg-turbo; do
             grep -q "^$archive_root/third_party/$module/." "$RUNNER_TEMP/contents" || { echo "::error::third_party/$module is missing from the archive"; exit 1; }
           done
           ls -la "$archive_root-source.tar.gz"

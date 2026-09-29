@@ -20,7 +20,7 @@ use std::{
 
 use gif::{DisposalMethod, Encoder, Repeat};
 use skidbladnir_encode::{
-	animation::{self, Keyframes}, gif_input, settings::{AlphaFiltering, FilterType, Mode, Resize, WebpSettings}
+	animation::{self, Keyframes}, gif_input, settings::{Resize, WebpSettings}
 };
 
 const WIDTH: u16 = 40;
@@ -140,20 +140,20 @@ fn reference_version(tool: &Path) -> Option<(i32, i32, i32)> {
 }
 
 /// Our settings and the `gif2webp` flags for the same per-frame config. As in
-/// `tests/animation.rs`, the lossy cases pin the filter, pass count and alpha filtering to
-/// libwebp's defaults, which `gif2webp` has no flags for. Alpha filtering is the one that
+/// `tests/animation.rs`, the lossy cases start from libwebp's defaults, since `gif2webp` has
+/// no flags for the filter, pass count and alpha filtering the app sets differently. Alpha filtering is the one that
 /// showed: the app's default ("best") left mostly transparent lossy frames 2 bytes off.
 fn cases() -> Vec<(&'static str, WebpSettings, Vec<&'static str>)> {
-	let lossy = WebpSettings { filter: FilterType::Strong, filter_strength: 60, passes: 1, alpha_filtering: Some(AlphaFiltering::Fast), ..Default::default() };
+	let lossy = WebpSettings { multi_threading: true, ..WebpSettings::libwebp_defaults() };
 	let mut cases = Vec::new();
 	let mut add = |name: &'static str, settings: WebpSettings, flags: Vec<&'static str>| cases.push((name, settings, flags));
-	add("lossless (the default)", WebpSettings { mode: Mode::Lossless, ..Default::default() }, vec![]);
-	add("lossless q100 m6", WebpSettings { mode: Mode::Lossless, quality: 100, method: 6, ..Default::default() }, vec!["-q", "100", "-m", "6"]);
+	add("lossless (the default)", WebpSettings { lossless: true, exact: true, ..Default::default() }, vec![]);
+	add("lossless q100 m6", WebpSettings { lossless: true, exact: true, quality: 100.0, method: 6, ..Default::default() }, vec!["-q", "100", "-m", "6"]);
 	add("lossy q75", lossy.clone(), vec!["-lossy"]);
-	add("lossy q30 m6", WebpSettings { quality: 30, method: 6, ..lossy.clone() }, vec!["-lossy", "-q", "30", "-m", "6"]);
+	add("lossy q30 m6", WebpSettings { quality: 30.0, method: 6, ..lossy.clone() }, vec!["-lossy", "-q", "30", "-m", "6"]);
 	add("lossy filter 25", WebpSettings { filter_strength: 25, ..lossy.clone() }, vec!["-lossy", "-f", "25"]);
 	add("lossy sharp yuv", WebpSettings { sharp_yuv: true, ..lossy }, vec!["-lossy", "-sharp_yuv"]);
-	add("near-lossless 40", WebpSettings { mode: Mode::NearLossless, quality: 40, ..Default::default() }, vec!["-near_lossless", "40"]);
+	add("near-lossless 40", WebpSettings { lossless: true, near_lossless: 40, ..Default::default() }, vec!["-near_lossless", "40"]);
 	cases
 }
 

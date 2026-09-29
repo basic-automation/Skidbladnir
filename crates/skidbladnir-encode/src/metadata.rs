@@ -1,346 +1,439 @@
-//! Keeping a source image's ICC profile, EXIF and XMP in the WebP written from it —
-//! `cwebp -metadata`, reproduced byte for byte.
+//! The metadata a source image carries: its ICC profile, Exif and XMP.
 //!
-//! Without this every conversion drops them, which is `cwebp`'s default and the Electron
-//! app's only behaviour. Dropping the ICC profile is the one that shows: a Display P3 or
-//! Adobe RGB photo converted without it is read as sRGB and its colours shift.
-//!
-//! Both halves follow libwebp 1.6.0 rule for rule, because `cwebp` is the reference:
-//!
-//! - **Reading** is `imageio`'s. JPEG: the first `APP1` `Exif` and XMP segments, and the ICC
-//!   profile reassembled from its `APP2` segments by sequence number, refusing a profile
-//!   whose segments are missing, duplicated or inconsistent (`cwebp` then refuses the
-//!   whole file). PNG: `iCCP` (inflated), `eXIf`, the `XML:com.adobe.xmp` text chunk and
-//!   `ImageMagick`'s hex "Raw profile type" text chunks. TIFF: the ICC profile and XMP tags
-//!   (`cwebp` reads no EXIF from TIFF). WebP: the `ICCP`, `EXIF` and `XMP ` chunks its
-//!   `VP8X` header declares. Other inputs carry nothing `cwebp` could read.
-//! - **Writing** is `WriteWebPWithMetadata`'s: `RIFF`, a `VP8X` header (created, or the
-//!   encoder's own with the flags added), `ICCP`, the image chunks, `EXIF`, `XMP `.
-//!
-//! The gate is `tests/metadata.rs`: files written this way are byte-identical to
-//! `cwebp -metadata ...` on fixtures carrying each kind of metadata.
+//! Each reference tool reads these out of its input with its own rules, and those rules
+//! decide the bytes it writes, so they are reproduced here per tool rather than
+//! approximated once. [`Metadata::read_like_cwebp`] is `cwebp`'s: the readers in libwebp's
+//! `imageio/` directory, whose results `cwebp -metadata` copies into the WebP.
 
-use crate::{settings::KeepMetadata, source::SourceFormat};
+use std::io::Read as _;
 
-/// The metadata found in a source image. `None` where the file has none (or none that
-/// `cwebp` would read).
+use crate::source::SourceFormat;
+
+/// The metadata payloads of an image, as a tool extracted them.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Metadata {
 	/// The ICC colour profile.
 	pub icc: Option<Vec<u8>>,
-	/// The EXIF block, as the TIFF-structured bytes after JPEG's `Exif\0\0` header.
+	/// Exif, in the form the tool keeps it (for `cwebp`, starting at the TIFF header).
 	pub exif: Option<Vec<u8>>,
-	/// The XMP packet.
+	/// XMP, as the packet's bytes.
 	pub xmp: Option<Vec<u8>>,
 }
 
 impl Metadata {
-	/// Only what `keep` asks for, and nothing empty.
+	/// Read metadata the way `cwebp` does for this input format. Malformed metadata is
+	/// skipped rather than failing the read; where `cwebp -metadata` would refuse the file
+	/// instead, [`Self::cwebp_refusal`] says so, and the WebP path refuses too.
 	#[must_use]
-	pub fn kept(self, keep: KeepMetadata) -> Self {
-		let pick = |wanted: bool, payload: Option<Vec<u8>>| payload.filter(|bytes| wanted && !bytes.is_empty());
-		Self { icc: pick(keep.icc, self.icc), exif: pick(keep.exif, self.exif), xmp: pick(keep.xmp, self.xmp) }
+	pub fn read_like_cwebp(bytes: &[u8], format: SourceFormat) -> Self {
+		match format {
+			SourceFormat::Png => png_like_cwebp(bytes),
+			SourceFormat::Jpeg => jpeg_like_cwebp(bytes),
+			SourceFormat::Tiff => tiff_like_cwebp(bytes),
+			SourceFormat::Webp => webp_chunks(bytes),
+			// `cwebp` cannot read these at all. Their decoders' own metadata is used. (A GIF
+			// goes to WebP through the animation encoder, as `gif2webp`, never through here.)
+			SourceFormat::Avif | SourceFormat::Jxl | SourceFormat::Heic | SourceFormat::Gif => Self::default(),
+		}
 	}
 
-	/// Whether there is nothing to keep.
+	/// Why `cwebp -metadata` would refuse this file, if it would: its readers extract every
+	/// kind of metadata whenever any is asked for, and fail the whole read on an ICC profile
+	/// split inconsistently across JPEG segments (`StoreICCP`) or a PNG "raw profile" text
+	/// chunk that is not valid hex (`ProcessRawProfile`). Converting anyway would silently
+	/// drop what was asked for, so the WebP path refuses too, by name.
 	#[must_use]
-	pub const fn is_empty(&self) -> bool {
-		self.icc.is_none() && self.exif.is_none() && self.xmp.is_none()
+	pub fn cwebp_refusal(bytes: &[u8], format: SourceFormat) -> Option<&'static str> {
+		match format {
+			SourceFormat::Jpeg => {
+				let markers = jpeg_markers(bytes);
+				let segments = markers.iter().any(|(marker, data)| *marker == 0xe2 && data.len() > JPEG_ICC_SIGNATURE.len() + 2 && data.starts_with(JPEG_ICC_SIGNATURE));
+				(segments && jpeg_icc(&markers).is_none()).then_some("its ICC profile is split across JPEG segments inconsistently, which cwebp refuses too")
+			}
+			SourceFormat::Png => png_read(bytes).1.then_some("a PNG raw-profile text chunk is not valid hex, which cwebp refuses too"),
+			_ => None,
+		}
 	}
 }
 
-/// Read the metadata of the image file in `bytes`, as `cwebp`'s readers do.
-///
-/// # Errors
-///
-/// A description of the malformed metadata, where `cwebp` would refuse the file for it:
-/// an ICC profile split inconsistently across JPEG segments, or a PNG raw profile that is
-/// not the hex it claims to be.
-pub fn extract(bytes: &[u8]) -> Result<Metadata, String> {
-	match SourceFormat::sniff(bytes) {
-		Some(SourceFormat::Jpeg) => from_jpeg(bytes),
-		Some(SourceFormat::Png) => from_png(bytes),
-		Some(SourceFormat::Tiff) => Ok(from_tiff(bytes)),
-		Some(SourceFormat::Webp) => Ok(from_webp(bytes)),
-		_ => Ok(Metadata::default()),
-	}
+/// `imageio/pngdec.c`, `ExtractMetadataFromPNG`: the chunks before the image data first,
+/// then those after it. Within each: `eXIf`; then the text chunks `cwebp` recognises, the
+/// first of a kind winning; then `iCCP`.
+fn png_like_cwebp(bytes: &[u8]) -> Metadata {
+	png_read(bytes).0
 }
 
-/// JPEG, as `imageio/jpegdec.c` reads it: markers up to the start of scan.
-fn from_jpeg(bytes: &[u8]) -> Result<Metadata, String> {
-	const APP1: u8 = 0xe1;
-	const APP2: u8 = 0xe2;
-	const EXIF: &[u8] = b"Exif\0\0";
-	const XMP: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
-	const ICC: &[u8] = b"ICC_PROFILE\0";
-
+/// [`png_like_cwebp`], and whether a raw profile it tried to read was malformed, which
+/// fails `cwebp`'s read.
+fn png_read(bytes: &[u8]) -> (Metadata, bool) {
 	let mut metadata = Metadata::default();
-	// (sequence number, bytes) for each ICC segment, and the count they all declare.
-	let mut icc_segments: Vec<(u8, &[u8])> = Vec::new();
-	let mut icc_count = 0;
-	for (marker, data) in jpeg_segments(bytes) {
-		// A signature alone, with nothing after it, is not a payload (`data_length >
-		// signature_length`).
-		if marker == APP1 && data.len() > EXIF.len() && data.starts_with(EXIF) {
-			metadata.exif.get_or_insert_with(|| data[EXIF.len()..].to_vec());
-		} else if marker == APP1 && data.len() > XMP.len() && data.starts_with(XMP) {
-			metadata.xmp.get_or_insert_with(|| data[XMP.len()..].to_vec());
-		} else if marker == APP2 && data.len() > ICC.len() + 2 && data.starts_with(ICC) {
-			let (sequence, count, segment) = (data[ICC.len()], data[ICC.len() + 1], &data[ICC.len() + 2..]);
-			if sequence == 0 || count == 0 {
-				return Err("its ICC profile has a segment numbered or counted 0".to_owned());
+	let mut malformed = false;
+	let Some(chunks) = png_chunks(bytes) else { return (metadata, malformed) };
+	let (head, tail): (Vec<_>, Vec<_>) = {
+		let split = chunks.iter().position(|(kind, _)| kind == b"IDAT").unwrap_or(chunks.len());
+		(chunks[..split].to_vec(), chunks[split..].to_vec())
+	};
+	for part in [head, tail] {
+		if let Some((_, exif)) = part.iter().find(|(kind, _)| kind == b"eXIf") {
+			metadata.exif = Some(exif.to_vec());
+		}
+		for (keyword, text) in part.iter().filter_map(|(kind, data)| png_text(*kind, data)) {
+			let (slot, raw_profile) = match keyword.as_str() {
+				"Raw profile type exif" | "Raw profile type APP1" | "Raw profile type app1" => (&mut metadata.exif, true),
+				"Raw profile type xmp" => (&mut metadata.xmp, true),
+				"XML:com.adobe.xmp" => (&mut metadata.xmp, false),
+				_ => continue,
+			};
+			if slot.is_some() {
+				continue;
 			}
-			if icc_count == 0 {
-				icc_count = count;
-			} else if icc_count != count {
-				return Err("its ICC profile's segments disagree on how many there are".to_owned());
-			}
-			if icc_segments.iter().any(|&(seen, _)| seen == sequence) {
-				return Err(format!("its ICC profile has segment {sequence} twice"));
-			}
-			icc_segments.push((sequence, segment));
+			*slot = if raw_profile { raw_profile_bytes(&text) } else { Some(text) };
+			malformed |= slot.is_none();
+		}
+		if let Some((_, iccp)) = part.iter().find(|(kind, _)| kind == b"iCCP")
+			&& let Some(profile) = libpng_iccp(iccp, png_is_colour(&chunks))
+		{
+			metadata.icc = Some(profile);
 		}
 	}
-	if !icc_segments.is_empty() {
-		let highest = icc_segments.iter().map(|&(sequence, _)| sequence).max().unwrap_or(0);
-		if usize::from(highest) != icc_segments.len() || usize::from(icc_count) != icc_segments.len() {
-			return Err("its ICC profile is missing segments".to_owned());
-		}
-		icc_segments.sort_by_key(|&(sequence, _)| sequence);
-		metadata.icc = Some(icc_segments.into_iter().flat_map(|(_, segment)| segment.iter().copied()).collect());
-	}
-	Ok(metadata)
+	(metadata, malformed)
 }
 
-/// The `(marker, payload)` of each segment of a JPEG before its first scan — the markers
-/// libjpeg has saved by the time `jpeg_read_header` returns.
-fn jpeg_segments(bytes: &[u8]) -> impl Iterator<Item = (u8, &[u8])> {
-	let mut at = 2; // past SOI
-	std::iter::from_fn(move || {
-		loop {
-			// Any number of 0xFF fill bytes may precede a marker.
-			while bytes.get(at) == Some(&0xff) && bytes.get(at + 1) == Some(&0xff) {
-				at += 1;
-			}
-			if bytes.get(at) != Some(&0xff) {
-				return None;
-			}
-			let marker = *bytes.get(at + 1)?;
-			match marker {
-				// Start of scan, end of image: the header is over.
-				0xda | 0xd9 => return None,
-				// Standalone markers carry no length.
-				0x01 | 0xd0..=0xd7 => at += 2,
-				_ => {
-					let length = usize::from(u16::from_be_bytes([*bytes.get(at + 2)?, *bytes.get(at + 3)?]));
-					let data = bytes.get(at + 4..(at + 2).checked_add(length)?)?;
-					at += 2 + length;
-					return Some((marker, data));
-				}
-			}
-		}
-	})
+/// Whether a PNG's colour type is a colour one (RGB, palette or RGBA) rather than gray.
+pub(crate) fn png_is_colour(chunks: &[([u8; 4], &[u8])]) -> bool {
+	chunks.iter().find(|(kind, _)| kind == b"IHDR").and_then(|(_, data)| data.get(9)).is_some_and(|colour_type| colour_type & 2 != 0)
 }
 
-/// PNG, as `imageio/pngdec.c` reads it from the chunks before the image data.
-fn from_png(bytes: &[u8]) -> Result<Metadata, String> {
-	let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
-	let Ok(reader) = decoder.read_info() else { return Ok(Metadata::default()) };
-	let info = reader.info();
-	let mut metadata = Metadata { icc: info.icc_profile.as_ref().map(|icc| icc.to_vec()), exif: info.exif_metadata.as_ref().map(|exif| exif.to_vec()), xmp: None };
-
-	// The text chunks, whichever of the three kinds each is. `cwebp` takes the first of
-	// each name; eXIf, where present, wins over a raw EXIF profile.
-	let mut texts: Vec<(String, String)> = info.uncompressed_latin1_text.iter().map(|chunk| (chunk.keyword.clone(), chunk.text.clone())).collect();
-	for chunk in &info.compressed_latin1_text {
-		texts.push((chunk.keyword.clone(), chunk.get_text().map_err(|error| format!("a compressed text chunk is damaged: {error}"))?));
+/// The ICC profile in an `iCCP` chunk, if libpng 1.6 would hand it to its caller.
+///
+/// Every reference tool reads PNG through libpng, and libpng drops a profile it does not
+/// like with only a warning, so the tool then writes no profile at all. These are its
+/// checks, in `png_handle_iCCP`'s order: the chunk must be at least 92 bytes (81 read for
+/// the keyword, then at least an LZ77 stream's minimum), the keyword 1..=79 bytes and the
+/// compression method 0; then `png_icc_check_length`, `png_icc_check_header` (declared
+/// length, tag count, rendering intent, `acsp` signature, a colour space that matches the
+/// image, the device class, the PCS) and `png_icc_check_tag_table`; and the profile must
+/// inflate to at least its declared length. Warnings are not failures.
+pub(crate) fn libpng_iccp(chunk: &[u8], colour: bool) -> Option<Vec<u8>> {
+	const LZ77_MIN: usize = 2 + 5 + 4;
+	if chunk.len() < 81 + LZ77_MIN {
+		return None;
 	}
-	for chunk in &info.utf8_text {
-		texts.push((chunk.keyword.clone(), chunk.get_text().map_err(|error| format!("a compressed text chunk is damaged: {error}"))?));
+	let keyword = chunk.iter().take(80).position(|&b| b == 0)?;
+	if !(1..=79).contains(&keyword) || chunk.get(keyword + 1) != Some(&0) {
+		return None;
 	}
-	let had_exif = metadata.exif.is_some();
-	let (mut raw_exif, mut xmp) = (None, None);
-	for (keyword, text) in &texts {
-		match keyword.as_str() {
-			"Raw profile type exif" | "Raw profile type APP1" | "Raw profile type app1" if raw_exif.is_none() => raw_exif = Some(raw_profile(text).ok_or_else(|| format!("its \"{keyword}\" text is not a raw profile"))?),
-			"Raw profile type xmp" if xmp.is_none() => xmp = Some(raw_profile(text).ok_or_else(|| format!("its \"{keyword}\" text is not a raw profile"))?),
-			"XML:com.adobe.xmp" if xmp.is_none() && !text.is_empty() => xmp = Some(text.clone().into_bytes()),
-			_ => {}
+	let profile = inflate(&chunk[keyword + 2..])?;
+	let be32 = |at: usize| profile.get(at..at + 4).map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]));
+	let length = be32(0)?;
+	let declared = usize::try_from(length).ok()?;
+	if declared < 132 || profile.len() < declared {
+		return None;
+	}
+	let tag_count = be32(128)?;
+	let major_version = profile[8];
+	let colour_space = be32(16)?;
+	let class = be32(12)?;
+	let pcs = be32(20)?;
+	let valid_header = !(major_version > 3 && length & 3 != 0)
+		&& tag_count <= 357_913_930
+		&& u64::from(length) >= 132 + 12 * u64::from(tag_count)
+		&& be32(64)? < 0xffff
+		&& be32(36)? == u32::from_be_bytes(*b"acsp")
+		&& match &colour_space.to_be_bytes() {
+			b"RGB " => colour,
+			b"GRAY" => !colour,
+			_ => false,
+		}
+		&& !matches!(&class.to_be_bytes(), b"abst" | b"link")
+		&& matches!(&pcs.to_be_bytes(), b"XYZ " | b"Lab ");
+	if !valid_header {
+		return None;
+	}
+	for tag in 0..tag_count as usize {
+		let start = be32(132 + tag * 12 + 4)?;
+		let tag_length = be32(132 + tag * 12 + 8)?;
+		if start > length || tag_length > length - start {
+			return None;
 		}
 	}
-	if !had_exif {
-		metadata.exif = raw_exif;
-	}
-	metadata.xmp = xmp;
-	Ok(metadata)
+	Some(profile[..declared].to_vec())
 }
 
-/// An `ImageMagick` "raw profile": `\n<name>\n<length>\n<hex, broken by newlines>`, read as
-/// `ProcessRawProfile` reads it.
-fn raw_profile(text: &str) -> Option<Vec<u8>> {
-	let rest = text.strip_prefix('\n')?;
-	let (_name, rest) = rest.split_once('\n')?;
-	let rest = rest.trim_start_matches([' ', '\t']);
-	let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
-	let length: usize = rest[..digits].parse().ok()?;
-	let hex = rest[digits..].strip_prefix('\n')?;
+/// Every chunk of a PNG, as `(type, data)`, or `None` if it is not a PNG.
+pub(crate) fn png_chunks(bytes: &[u8]) -> Option<Vec<([u8; 4], &[u8])>> {
+	let mut rest = bytes.strip_prefix(b"\x89PNG\r\n\x1a\n")?;
+	let mut chunks = Vec::new();
+	while rest.len() >= 12 {
+		let length = u32::from_be_bytes(rest[0..4].try_into().ok()?) as usize;
+		let kind: [u8; 4] = rest[4..8].try_into().ok()?;
+		let data = rest.get(8..8 + length)?;
+		chunks.push((kind, data));
+		rest = rest.get(12 + length..)?;
+		if &kind == b"IEND" {
+			break;
+		}
+	}
+	Some(chunks)
+}
+
+/// A PNG text chunk's keyword and text, decompressed if it was compressed. `tEXt` and
+/// `zTXt` are Latin-1 and `iTXt` UTF-8; the text is kept as bytes either way, which is what
+/// libpng hands `cwebp`.
+pub(crate) fn png_text(kind: [u8; 4], data: &[u8]) -> Option<(String, Vec<u8>)> {
+	let nul = data.iter().position(|&b| b == 0)?;
+	let keyword = String::from_utf8_lossy(&data[..nul]).into_owned();
+	let body = &data[nul + 1..];
+	let text = match &kind {
+		b"tEXt" => body.to_vec(),
+		// Compression method, then zlib data.
+		b"zTXt" => inflate(body.get(1..)?)?,
+		b"iTXt" => {
+			// Compression flag, compression method, language tag NUL, translated keyword NUL.
+			let (&flag, rest) = body.split_first()?;
+			let rest = rest.get(1..)?;
+			let rest = &rest[rest.iter().position(|&b| b == 0)? + 1..];
+			let rest = &rest[rest.iter().position(|&b| b == 0)? + 1..];
+			if flag == 1 { inflate(rest)? } else { rest.to_vec() }
+		}
+		_ => return None,
+	};
+	Some((keyword, text))
+}
+
+/// Decompress a zlib stream.
+fn inflate(data: &[u8]) -> Option<Vec<u8>> {
+	let mut out = Vec::new();
+	flate2::read::ZlibDecoder::new(data).read_to_end(&mut out).ok()?;
+	Some(out)
+}
+
+/// `ImageMagick`'s "raw profile" text: `\n<name>\n<length>\n<hex, wrapped>`.
+/// `imageio/pngdec.c`, `ProcessRawProfile` and `HexStringToBytes`.
+pub(crate) fn raw_profile_bytes(text: &[u8]) -> Option<Vec<u8>> {
+	let rest = text.strip_prefix(b"\n")?;
+	let rest = &rest[rest.iter().position(|&b| b == b'\n')? + 1..];
+	// strtol: skip leading whitespace, read digits; the next character must be the newline.
+	let start = rest.iter().position(|b| !b.is_ascii_whitespace())?;
+	let digits = rest[start..].iter().take_while(|b| b.is_ascii_digit()).count();
+	let length: usize = std::str::from_utf8(&rest[start..start + digits]).ok()?.parse().ok()?;
+	let hex = rest.get(start + digits..)?.strip_prefix(b"\n")?;
+	// Newlines in the hex are skipped; any other non-hex character is an error.
 	let mut out = Vec::with_capacity(length);
-	let mut chars = hex.bytes().filter(|&c| c != b'\n');
+	let mut nibbles = hex.iter().filter(|&&b| b != b'\n');
 	while out.len() < length {
-		let pair = [chars.next()?, chars.next()?];
-		out.push(u8::from_str_radix(std::str::from_utf8(&pair).ok()?, 16).ok()?);
+		let (high, low) = (nibbles.next()?, nibbles.next()?);
+		let value = |b: u8| (b as char).to_digit(16);
+		out.push(u8::try_from(value(*high)? * 16 + value(*low)?).ok()?);
 	}
 	Some(out)
 }
 
-/// TIFF, as `imageio/tiffdec.c` reads it: the ICC profile and XMP tags. (`cwebp` warns
-/// that it cannot extract EXIF from a TIFF and keeps none.)
-fn from_tiff(bytes: &[u8]) -> Metadata {
-	use image::ImageDecoder;
-	let Ok(mut decoder) = image::codecs::tiff::TiffDecoder::new(std::io::Cursor::new(bytes)) else { return Metadata::default() };
-	let non_empty = |value: Option<Vec<u8>>| value.filter(|bytes| !bytes.is_empty());
-	Metadata { icc: non_empty(decoder.icc_profile().ok().flatten()), exif: None, xmp: non_empty(decoder.xmp_metadata().ok().flatten()) }
+/// The `APPn` markers of a JPEG, in file order, up to the start of scan: `(marker, data)`.
+pub(crate) fn jpeg_markers(bytes: &[u8]) -> Vec<(u8, &[u8])> {
+	let mut markers = Vec::new();
+	let Some(mut rest) = bytes.strip_prefix(&[0xff, 0xd8]) else { return markers };
+	// Fill bytes: any number of 0xFF before the marker code.
+	while let Some(skip) = rest.iter().position(|&b| b != 0xff) {
+		if skip == 0 {
+			break;
+		}
+		let marker = rest[skip];
+		rest = &rest[skip + 1..];
+		// Markers without a length.
+		if marker == 0x01 || (0xd0..=0xd7).contains(&marker) {
+			continue;
+		}
+		if marker == 0xd9 || marker == 0xda {
+			break;
+		}
+		let Some(length) = rest.get(0..2).map(|l| usize::from(u16::from_be_bytes([l[0], l[1]]))) else { break };
+		let Some(data) = rest.get(2..length.max(2)) else { break };
+		markers.push((marker, data));
+		rest = &rest[length.max(2)..];
+	}
+	markers
 }
 
-/// WebP, as `imageio/webpdec.c` reads it: each chunk the `VP8X` flags declare, the first
-/// of each kind.
-fn from_webp(bytes: &[u8]) -> Metadata {
-	let mut metadata = Metadata::default();
-	let Some(vp8x) = webp_chunks(bytes).find(|(fourcc, _)| fourcc == b"VP8X") else { return metadata };
-	let flags = vp8x.1.first().copied().unwrap_or(0);
-	for (fourcc, body) in webp_chunks(bytes) {
-		let slot = match &fourcc {
-			b"ICCP" if flags & ICCP_FLAG != 0 => &mut metadata.icc,
-			b"EXIF" if flags & EXIF_FLAG != 0 => &mut metadata.exif,
-			b"XMP " if flags & XMP_FLAG != 0 => &mut metadata.xmp,
-			_ => continue,
-		};
-		slot.get_or_insert_with(|| body.to_vec());
+/// `imageio/jpegdec.c`, `ExtractMetadataFromJPEG`: the ICC profile reassembled from its
+/// APP2 segments; Exif and XMP from the first APP1 of each kind, without their signatures.
+fn jpeg_like_cwebp(bytes: &[u8]) -> Metadata {
+	let markers = jpeg_markers(bytes);
+	let mut metadata = Metadata { icc: jpeg_icc(&markers), ..Metadata::default() };
+	for (marker, data) in &markers {
+		if *marker != 0xe1 {
+			continue;
+		}
+		// The signatures `cwebp` matches, and how many bytes of each it strips.
+		for (signature, slot) in [(&b"Exif\0\0"[..], &mut metadata.exif), (&b"http://ns.adobe.com/xap/1.0/\0"[..], &mut metadata.xmp)] {
+			if slot.is_none() && data.len() > signature.len() && data.starts_with(signature) {
+				*slot = Some(data[signature.len()..].to_vec());
+			}
+		}
 	}
 	metadata
 }
 
-/// The `(fourcc, payload)` of each top-level chunk in a WebP file.
-fn webp_chunks(bytes: &[u8]) -> impl Iterator<Item = ([u8; 4], &[u8])> {
-	let mut at = 12;
-	std::iter::from_fn(move || {
-		let fourcc: [u8; 4] = bytes.get(at..at + 4)?.try_into().ok()?;
-		let size = usize::try_from(u32::from_le_bytes(bytes.get(at + 4..at + 8)?.try_into().ok()?)).ok()?;
-		let body = bytes.get(at + 8..(at + 8).checked_add(size)?)?;
-		at += 8 + size + (size & 1);
-		Some((fourcc, body))
-	})
+/// What starts an ICC profile's `APP2` segment.
+const JPEG_ICC_SIGNATURE: &[u8] = b"ICC_PROFILE\0";
+
+/// An ICC profile split across `ICC_PROFILE` APP2 segments, put back together in sequence
+/// order. `None` if there is none, or the segments are inconsistent (`StoreICCP`'s checks).
+pub(crate) fn jpeg_icc(markers: &[(u8, &[u8])]) -> Option<Vec<u8>> {
+	const SIGNATURE: &[u8] = JPEG_ICC_SIGNATURE;
+	let mut segments: Vec<(u8, &[u8])> = Vec::new();
+	let mut expected_count = 0;
+	for (marker, data) in markers {
+		if *marker != 0xe2 || data.len() <= SIGNATURE.len() + 2 || !data.starts_with(SIGNATURE) {
+			continue;
+		}
+		let (seq, count) = (data[SIGNATURE.len()], data[SIGNATURE.len() + 1]);
+		if seq == 0 || count == 0 || (expected_count != 0 && expected_count != count) || segments.iter().any(|(s, _)| *s == seq) {
+			return None;
+		}
+		expected_count = count;
+		segments.push((seq, &data[SIGNATURE.len() + 2..]));
+	}
+	if segments.is_empty() || segments.len() != usize::from(expected_count) {
+		return None;
+	}
+	segments.sort_by_key(|(seq, _)| *seq);
+	if segments.iter().enumerate().any(|(i, (seq, _))| usize::from(*seq) != i + 1) {
+		return None;
+	}
+	Some(segments.into_iter().flat_map(|(_, data)| data.iter().copied()).collect())
 }
 
-/// The still-image WebP `encoded` from the image file `source` under `job`, with the
-/// metadata `job` asks to keep added. Unchanged unless the job writes WebP and keeps
-/// something — which is also every default job, so the parity gate is untouched.
-///
-/// # Errors
-///
-/// When the source's metadata is malformed where `cwebp` would refuse it, or the
-/// metadata cannot be added (see [`extract`] and [`attach`]).
-pub fn keep(job: &crate::EncodeJob, source: &[u8], encoded: Vec<u8>) -> Result<Vec<u8>, String> {
-	if job.format != crate::OutputFormat::Webp || !job.metadata.any() {
-		return Ok(encoded);
-	}
-	let metadata = extract(source)?;
-	if metadata.is_empty() {
-		return Ok(encoded);
-	}
-	let info = crate::inspect::inspect_webp(&encoded).ok_or("the encoder's output is not a WebP file")?;
-	attach(encoded, info.width, info.height, &metadata, job.metadata)
+/// `imageio/tiffdec.c`: the ICC profile and XMP packet tags. `cwebp` does not read Exif
+/// out of a TIFF.
+fn tiff_like_cwebp(bytes: &[u8]) -> Metadata {
+	use tiff::{decoder::Decoder, tags::Tag};
+	let Ok(mut decoder) = Decoder::new(std::io::Cursor::new(bytes)) else { return Metadata::default() };
+	let mut tag = |code: u16| decoder.get_tag_u8_vec(Tag::Unknown(code)).ok().filter(|v| !v.is_empty());
+	Metadata { icc: tag(34675), exif: None, xmp: tag(700) }
 }
 
-const ICCP_FLAG: u8 = 0x20;
-const ALPHA_FLAG: u8 = 0x10;
-const EXIF_FLAG: u8 = 0x08;
-const XMP_FLAG: u8 = 0x04;
-
-/// Add the metadata `keep` asks for, where `metadata` has it, to the encoded WebP `webp`
-/// of a `width` × `height` image, exactly as `cwebp`'s `WriteWebPWithMetadata` does.
-/// Returns `webp` unchanged when there is nothing to add.
-///
-/// # Errors
-///
-/// When `webp` is not a WebP file, or the metadata would take it past the container's
-/// 4 GiB limit.
-pub fn attach(webp: Vec<u8>, width: u32, height: u32, metadata: &Metadata, keep: KeepMetadata) -> Result<Vec<u8>, String> {
-	let (icc, exif, xmp) = (pick(keep.icc, metadata.icc.as_deref()), pick(keep.exif, metadata.exif.as_deref()), pick(keep.xmp, metadata.xmp.as_deref()));
-	let chunk_size = |payload: Option<&[u8]>| payload.map_or(0, |bytes| 8 + bytes.len() + (bytes.len() & 1));
-	let metadata_size = chunk_size(icc) + chunk_size(exif) + chunk_size(xmp);
-	if metadata_size == 0 {
-		return Ok(webp);
+/// The `ICCP`, `EXIF` and `XMP ` chunks of a WebP, which is what `imageio/webpdec.c` reads
+/// through the demuxer.
+pub(crate) fn webp_chunks(bytes: &[u8]) -> Metadata {
+	let mut metadata = Metadata::default();
+	let Some(mut rest) = bytes.get(12..).filter(|_| bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP")) else { return metadata };
+	while rest.len() >= 8 {
+		let kind = &rest[0..4];
+		let size = u32::from_le_bytes([rest[4], rest[5], rest[6], rest[7]]) as usize;
+		let Some(data) = rest.get(8..8 + size) else { break };
+		match kind {
+			b"ICCP" => metadata.icc = Some(data.to_vec()),
+			b"EXIF" => metadata.exif = Some(data.to_vec()),
+			b"XMP " => metadata.xmp = Some(data.to_vec()),
+			_ => {}
+		}
+		rest = rest.get(8 + size + (size & 1)..).unwrap_or_default();
 	}
-	if webp.len() < 20 || &webp[0..4] != b"RIFF" || &webp[8..12] != b"WEBP" {
-		return Err("the encoder's output is not a WebP file".to_owned());
-	}
-	let flags = (if icc.is_some() { ICCP_FLAG } else { 0 }) | (if exif.is_some() { EXIF_FLAG } else { 0 }) | (if xmp.is_some() { XMP_FLAG } else { 0 });
-
-	let has_vp8x = &webp[12..16] == b"VP8X";
-	let riff_size = u32::try_from(webp.len() - 8 + if has_vp8x { 0 } else { 18 } + metadata_size).map_err(|_| "adding the metadata would exceed the WebP size limit".to_owned())?;
-	let mut out = Vec::with_capacity(webp.len() + 18 + metadata_size);
-	out.extend_from_slice(b"RIFF");
-	out.extend_from_slice(&riff_size.to_le_bytes());
-	out.extend_from_slice(b"WEBP");
-	let image = if has_vp8x {
-		let mut vp8x = webp.get(12..30).ok_or("the encoder's VP8X header is truncated")?.to_vec();
-		vp8x[8] |= flags;
-		out.extend_from_slice(&vp8x);
-		&webp[30..]
-	} else {
-		// A simple-format file: its alpha, if any, is only in the VP8L header (bit 28 of
-		// the 32 bits after the signature byte), and VP8X must now declare it.
-		let alpha = &webp[12..16] == b"VP8L" && webp.get(24).is_some_and(|byte| byte & 0x10 != 0);
-		out.extend_from_slice(b"VP8X\x0a\0\0\0");
-		out.extend_from_slice(&u32::from(flags | if alpha { ALPHA_FLAG } else { 0 }).to_le_bytes());
-		out.extend_from_slice(&(width - 1).to_le_bytes()[..3]);
-		out.extend_from_slice(&(height - 1).to_le_bytes()[..3]);
-		&webp[12..]
-	};
-	push_chunk(&mut out, *b"ICCP", icc);
-	out.extend_from_slice(image);
-	push_chunk(&mut out, *b"EXIF", exif);
-	push_chunk(&mut out, *b"XMP ", xmp);
-	Ok(out)
-}
-
-/// `payload` if it is wanted and not empty (`UpdateFlagsAndSize`'s test).
-fn pick(wanted: bool, payload: Option<&[u8]>) -> Option<&[u8]> {
-	payload.filter(|bytes| wanted && !bytes.is_empty())
-}
-
-/// Append a metadata chunk, padded to an even length as RIFF requires; nothing for `None`.
-fn push_chunk(out: &mut Vec<u8>, fourcc: [u8; 4], payload: Option<&[u8]>) {
-	let Some(payload) = payload else { return };
-	out.extend_from_slice(&fourcc);
-	out.extend_from_slice(&u32::try_from(payload.len()).unwrap_or(u32::MAX).to_le_bytes());
-	out.extend_from_slice(payload);
-	if payload.len() & 1 == 1 {
-		out.push(0);
-	}
+	metadata
 }
 
 #[cfg(test)]
-mod tests {
-	use super::{extract, raw_profile};
+pub(crate) mod tests {
+	use super::*;
 
-	/// `ImageMagick`'s layout, including its space-padded length and line breaks.
-	#[test]
-	fn raw_profiles_decode_as_imagemagick_writes_them() {
-		assert_eq!(raw_profile("\nexif\n       3\n0aff\n10\n"), Some(vec![0x0a, 0xff, 0x10]));
-		assert_eq!(raw_profile("\nexif\n4\n0aff10\n"), None, "shorter than it claims");
-		assert_eq!(raw_profile("exif\n1\n00\n"), None, "must start with a newline");
-		assert_eq!(raw_profile("\nexif\n1\nzz\n"), None, "not hex");
+	fn chunk(kind: [u8; 4], data: &[u8]) -> Vec<u8> {
+		let mut out = u32::try_from(data.len()).expect("small").to_be_bytes().to_vec();
+		out.extend_from_slice(&kind);
+		out.extend_from_slice(data);
+		out.extend_from_slice(&[0; 4]);
+		out
 	}
 
-	/// Files with no metadata, or that are not images at all, have none — never an error.
+	fn zlib(data: &[u8]) -> Vec<u8> {
+		use std::io::Write as _;
+		let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+		encoder.write_all(data).expect("compress");
+		encoder.finish().expect("compress")
+	}
+
+	/// An RGB or GRAY display profile with one tag and enough incompressible data that its
+	/// `iCCP` chunk clears libpng's minimum size.
+	pub(crate) fn test_icc(colour_space: [u8; 4]) -> Vec<u8> {
+		let mut icc = vec![0_u8; 132 + 12 + 200];
+		icc[0..4].copy_from_slice(&344_u32.to_be_bytes());
+		icc[8..12].copy_from_slice(&0x0210_0000_u32.to_be_bytes());
+		icc[12..16].copy_from_slice(b"mntr");
+		icc[16..20].copy_from_slice(&colour_space);
+		icc[20..24].copy_from_slice(b"XYZ ");
+		icc[36..40].copy_from_slice(b"acsp");
+		icc[68..80].copy_from_slice(&[0, 0, 0xf6, 0xd6, 0, 1, 0, 0, 0, 0, 0xd3, 0x2d]);
+		icc[128..132].copy_from_slice(&1_u32.to_be_bytes());
+		icc[132..136].copy_from_slice(b"desc");
+		icc[136..140].copy_from_slice(&144_u32.to_be_bytes());
+		icc[140..144].copy_from_slice(&200_u32.to_be_bytes());
+		let mut state = 0x1234_5678_u32;
+		for byte in &mut icc[144..] {
+			state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+			*byte = state.to_be_bytes()[0];
+		}
+		icc
+	}
+
 	#[test]
-	fn nothing_to_find_is_not_an_error() {
-		assert!(extract(b"").expect("empty").is_empty());
-		assert!(extract(b"\xff\xd8\xff\xd9").expect("a bare JPEG").is_empty());
-		assert!(extract(b"\xff\xd8\xff\xe1\xff\xff").expect("a truncated segment").is_empty());
-		assert!(extract(b"RIFF\0\0\0\0WEBPVP8X").expect("a truncated WebP").is_empty());
-		assert!(extract(b"GIF89a").expect("a GIF").is_empty());
+	fn libpng_icc_rules() {
+		let chunk = |profile: &[u8]| [b"icc".as_slice(), &[0, 0], &zlib(profile)].concat();
+		assert!(libpng_iccp(&chunk(&test_icc(*b"RGB ")), true).is_some());
+		assert!(libpng_iccp(&chunk(&test_icc(*b"RGB ")), false).is_none(), "an RGB profile on a gray PNG");
+		assert!(libpng_iccp(&chunk(&test_icc(*b"GRAY")), false).is_some());
+		assert!(libpng_iccp(&chunk(&test_icc(*b"CMYK")), true).is_none());
+		let mut bad = test_icc(*b"RGB ");
+		bad[36] = b'x';
+		assert!(libpng_iccp(&chunk(&bad), true).is_none(), "no acsp signature");
+		assert!(libpng_iccp(&chunk(&[0; 132]), true).is_none(), "a tiny chunk is too short for libpng");
+	}
+
+	#[test]
+	fn raw_profiles_decode_like_imagemagick_writes_them() {
+		assert_eq!(raw_profile_bytes(b"\nexif\n       4\n4578\n6966\n").as_deref(), Some(&b"Exif"[..]));
+		assert_eq!(raw_profile_bytes(b"exif\n4\n45786966"), None, "must start with a newline");
+		assert_eq!(raw_profile_bytes(b"\nexif\n4\n4578zz66"), None, "non-hex is an error");
+	}
+
+	#[test]
+	fn png_metadata_follows_cwebp_precedence() {
+		let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+		png.extend(chunk(*b"IHDR", &[0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0]));
+		png.extend(chunk(*b"iCCP", &[b"icc".as_slice(), &[0, 0], &zlib(&test_icc(*b"RGB "))].concat()));
+		png.extend(chunk(*b"eXIf", b"MM\0*exif"));
+		png.extend(chunk(*b"tEXt", b"Raw profile type exif\0\nexif\n2\nabcd\n"));
+		png.extend(chunk(*b"iTXt", &[b"XML:com.adobe.xmp\0".as_slice(), &[0, 0, 0, 0], b"<x:xmpmeta/>"].concat()));
+		png.extend(chunk(*b"IDAT", &[]));
+		png.extend(chunk(*b"tEXt", b"Raw profile type xmp\0\nxmp\n2\nbeef\n"));
+		png.extend(chunk(*b"IEND", &[]));
+		let metadata = Metadata::read_like_cwebp(&png, SourceFormat::Png);
+		assert_eq!(metadata.icc, Some(test_icc(*b"RGB ")));
+		assert_eq!(metadata.exif.as_deref(), Some(&b"MM\0*exif"[..]), "eXIf beats the raw profile");
+		assert_eq!(metadata.xmp.as_deref(), Some(&b"<x:xmpmeta/>"[..]), "the head's XMP beats the tail's");
+	}
+
+	#[test]
+	fn jpeg_metadata_strips_the_signatures_and_reassembles_icc() {
+		let segment = |marker: u8, data: &[u8]| [&[0xff, marker][..], &u16::try_from(data.len() + 2).expect("small").to_be_bytes(), data].concat();
+		let jpeg = [&[0xff, 0xd8][..], &segment(0xe1, b"Exif\0\0II*\0"), &segment(0xe2, b"ICC_PROFILE\0\x02\x02WORLD"), &segment(0xe2, b"ICC_PROFILE\0\x01\x02HELLO"), &segment(0xe1, b"http://ns.adobe.com/xap/1.0/\0<xmp/>"), &[0xff, 0xda, 0, 2]].concat();
+		let metadata = Metadata::read_like_cwebp(&jpeg, SourceFormat::Jpeg);
+		assert_eq!(metadata.exif.as_deref(), Some(&b"II*\0"[..]));
+		assert_eq!(metadata.icc.as_deref(), Some(&b"HELLOWORLD"[..]));
+		assert_eq!(metadata.xmp.as_deref(), Some(&b"<xmp/>"[..]));
+	}
+
+	#[test]
+	fn webp_chunks_are_read() {
+		let mut webp = b"RIFF\0\0\0\0WEBP".to_vec();
+		for (kind, data) in [(b"VP8X", &b"0123456789"[..]), (b"ICCP", b"icc"), (b"VP8L", b"x"), (b"EXIF", b"exif"), (b"XMP ", b"xmp")] {
+			webp.extend_from_slice(kind);
+			webp.extend_from_slice(&u32::try_from(data.len()).expect("small").to_le_bytes());
+			webp.extend_from_slice(data);
+			if data.len() % 2 == 1 {
+				webp.push(0);
+			}
+		}
+		let metadata = Metadata::read_like_cwebp(&webp, SourceFormat::Webp);
+		assert_eq!((metadata.icc.as_deref(), metadata.exif.as_deref(), metadata.xmp.as_deref()), (Some(&b"icc"[..]), Some(&b"exif"[..]), Some(&b"xmp"[..])));
 	}
 }

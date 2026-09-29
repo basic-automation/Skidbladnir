@@ -52,10 +52,12 @@
 
 use std::ffi::c_int;
 
-use libwebp_sys::{VP8StatusCode, WEBP_CSP_MODE, WEBP_DECODER_ABI_VERSION, WEBP_ENCODER_ABI_VERSION, WebPConfig, WebPConfigInitInternal, WebPDecode, WebPDecoderConfig, WebPEncCSP, WebPEncode, WebPFreeDecBuffer, WebPGetFeaturesInternal, WebPInitDecoderConfigInternal, WebPMemoryWrite, WebPMemoryWriter, WebPMemoryWriterClear, WebPMemoryWriterInit, WebPPicture, WebPPictureAlloc, WebPPictureCopy, WebPPictureFree, WebPPictureImportRGBA, WebPPictureInitInternal, WebPPictureRescale, WebPPreset, WebPValidateConfig, WebPYUVABuffer};
+use libwebp_sys::{VP8StatusCode, WEBP_CSP_MODE, WEBP_DECODER_ABI_VERSION, WEBP_ENCODER_ABI_VERSION, WebPBlendAlpha, WebPConfig, WebPConfigInitInternal, WebPDecode, WebPDecoderConfig, WebPEncCSP, WebPEncode, WebPFreeDecBuffer, WebPGetFeaturesInternal, WebPInitDecoderConfigInternal, WebPMemoryWrite, WebPMemoryWriter, WebPMemoryWriterClear, WebPMemoryWriterInit, WebPPicture, WebPPictureAlloc, WebPPictureCopy, WebPPictureFree, WebPPictureImportRGBA, WebPPictureImportRGBX, WebPPictureInitInternal, WebPPictureRescale, WebPPictureView, WebPPreset, WebPValidateConfig, WebPYUVABuffer};
 use thiserror::Error;
 
-use crate::settings::{AlphaFiltering, EncodeJob, FilterType, Mode, OutputFormat, Preset, Resize, TargetMetric, WebpSettings};
+use crate::{
+	metadata::Metadata, settings::{Crop, EncodeJob, FilterType, OutputFormat, Resize, TargetMetric, WebpMetadata, WebpSettings}, source::{SourceFormat, SourceImage}
+};
 
 /// An 8-bit RGBA source image, borrowed.
 ///
@@ -74,7 +76,7 @@ pub struct RgbaImage<'a> {
 }
 
 /// Why an encode did not produce a file.
-#[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[derive(Clone, Debug, Error, PartialEq)]
 pub enum EncodeError {
 	/// The settings themselves are not encodable.
 	#[error("invalid settings: {0}")]
@@ -126,15 +128,38 @@ pub enum EncodeError {
 	/// libheif failed.
 	#[error("HEIC encoding failed: {0}")]
 	Heic(String),
+	/// The crop rectangle does not lie inside the image.
+	#[error("the crop {crop_width}x{crop_height} at ({x}, {y}) does not fit inside the {width}x{height} image")]
+	CropOutside {
+		/// Left edge of the crop.
+		x: u32,
+		/// Top edge of the crop.
+		y: u32,
+		/// Width of the crop.
+		crop_width: u32,
+		/// Height of the crop.
+		crop_height: u32,
+		/// Width of the image.
+		width: u32,
+		/// Height of the image.
+		height: u32,
+	},
+	/// The metadata was asked to be kept but is malformed, in a way `cwebp -metadata` also
+	/// refuses (see [`Metadata::cwebp_refusal`]).
+	#[error("could not keep the metadata: {0}")]
+	Metadata(&'static str),
+	/// Adding the metadata would take the file past the 4 GiB RIFF limit.
+	#[error("adding the metadata would exceed the WebP container's size limit")]
+	MetadataTooLarge,
 }
 
-/// Translate settings into a libwebp `WebPConfig`.
+/// Translate settings into a libwebp `WebPConfig`, as `cwebp.c` would for the equivalent
+/// command line.
 ///
-/// The order of assignment matters and is deliberately the order the flags appear on the
-/// `cwebp` command line, because `-preset` is not a field but a *re-initialisation*:
-/// `WebPConfigPreset` resets the whole config to the preset's values, keeping only the
-/// quality. Applying it first, as the Electron app's command line does, means the
-/// explicit controls that follow win — which is the behaviour a user of the old app saw.
+/// Every field is written, not only the ones that differ from the default, so the config
+/// is fully determined by the settings. The one piece of `cwebp.c` logic that is not a
+/// plain assignment is kept: a size or PSNR target with a single pass forces six passes.
+/// Animations (`crate::animation`) build each frame's config here too.
 pub(crate) fn build_config(settings: &WebpSettings) -> Result<WebPConfig, EncodeError> {
 	settings.validate()?;
 
@@ -145,90 +170,48 @@ pub(crate) fn build_config(settings: &WebpSettings) -> Result<WebPConfig, Encode
 		return Err(EncodeError::Libwebp("WebPConfigInit"));
 	}
 
-	match settings.mode {
-		Mode::Preset => {
-			if let Some(preset) = settings.preset {
-				// WebPConfigPreset(&config, preset, config.quality).
-				let quality = config.quality;
-				if unsafe { WebPConfigInitInternal(&raw mut config, webp_preset(preset), quality, abi_version()) } == 0 {
-					return Err(EncodeError::Libwebp("WebPConfigPreset"));
-				}
-			}
-		}
-		Mode::NearLossless => {
-			config.near_lossless = i32::from(settings.quality);
-			// cwebp.c: "use near-lossless only with lossless". Without this the encode
-			// silently becomes an ordinary lossy one.
-			config.lossless = 1;
-		}
-		Mode::JpegLike => config.emulate_jpeg_size = 1,
-		Mode::Lossless => {
-			config.lossless = 1;
-			config.exact = 1;
-		}
-		Mode::Lossy => {}
+	config.lossless = c_int::from(settings.lossless);
+	config.near_lossless = c_int::from(settings.near_lossless);
+	config.exact = c_int::from(settings.exact);
+	config.quality = settings.quality;
+	config.alpha_quality = c_int::from(settings.alpha_quality);
+	config.alpha_compression = c_int::from(settings.alpha_compression);
+	config.alpha_filtering = settings.alpha_filtering.as_config();
+	config.method = c_int::from(settings.method);
+	config.image_hint = match settings.image_hint.as_config() {
+		1 => libwebp_sys::WebPImageHint::WEBP_HINT_PICTURE,
+		2 => libwebp_sys::WebPImageHint::WEBP_HINT_PHOTO,
+		3 => libwebp_sys::WebPImageHint::WEBP_HINT_GRAPH,
+		_ => libwebp_sys::WebPImageHint::WEBP_HINT_DEFAULT,
+	};
+	match settings.target {
+		Some(TargetMetric::Size(bytes)) => config.target_size = c_int::try_from(bytes).unwrap_or(c_int::MAX),
+		Some(TargetMetric::Psnr(psnr)) => config.target_PSNR = psnr,
+		None => {}
 	}
+	config.segments = c_int::from(settings.segments);
+	config.sns_strength = c_int::from(settings.sns);
+	config.filter_strength = c_int::from(settings.filter_strength);
+	config.filter_sharpness = c_int::from(settings.filter_sharpness);
+	config.filter_type = match settings.filter_type {
+		FilterType::Simple => 0,
+		FilterType::Strong => 1,
+	};
+	config.autofilter = c_int::from(settings.autofilter);
+	config.pass = c_int::from(settings.passes);
+	config.qmin = c_int::from(settings.qmin);
+	config.qmax = c_int::from(settings.qmax);
+	config.preprocessing = c_int::from(settings.preprocessing);
+	config.partition_limit = c_int::from(settings.partition_limit);
+	config.emulate_jpeg_size = c_int::from(settings.jpeg_like);
+	config.use_sharp_yuv = c_int::from(settings.sharp_yuv);
+	config.low_memory = c_int::from(settings.low_memory);
+	config.thread_level = c_int::from(settings.multi_threading);
 
-	if settings.mode.uses_lossy_options() {
-		match settings.filter {
-			FilterType::Auto => config.autofilter = 1,
-			FilterType::Simple => config.filter_type = 0,
-			FilterType::Strong => config.filter_type = 1,
-		}
-	}
-
-	if settings.multi_threading {
-		config.thread_level = 1;
-	}
-
-	if settings.mode.uses_lossy_options() && settings.filter.uses_manual_strength() {
-		config.filter_strength = i32::from(settings.filter_strength);
-		config.filter_sharpness = i32::from(settings.filter_sharpness);
-	}
-
-	if settings.mode.uses_lossy_options() && settings.sharp_yuv {
-		config.use_sharp_yuv = 1;
-	}
-
-	if settings.mode != Mode::Preset
-		&& let Some(alpha_filtering) = settings.alpha_filtering
-	{
-		config.alpha_filtering = match alpha_filtering {
-			AlphaFiltering::Off => 0,
-			AlphaFiltering::Fast => 1,
-			AlphaFiltering::Best => 2,
-		};
-	}
-
-	if settings.mode != Mode::NearLossless {
-		config.quality = f32::from(settings.quality);
-	}
-
-	if matches!(settings.mode, Mode::Lossy | Mode::Lossless | Mode::JpegLike) {
-		config.alpha_quality = i32::from(settings.alpha_quality);
-		config.method = i32::from(settings.method);
-	}
-
-	if settings.mode.uses_lossy_options() {
-		if settings.low_memory {
-			config.low_memory = 1;
-		}
-		config.segments = i32::from(settings.segments);
-		config.partition_limit = i32::from(settings.partition_limit);
-
-		match settings.target {
-			Some(TargetMetric::Size(bytes)) => config.target_size = bytes.cast_signed(),
-			Some(TargetMetric::Psnr(psnr)) => {
-				// The Electron app asks for -print_psnr alongside -psnr, and cwebp sets
-				// show_compressed for it. Matched so the config is identical.
-				config.show_compressed = 1;
-				config.target_PSNR = f32::from(u16::try_from(psnr).unwrap_or(u16::MAX));
-			}
-			None => {}
-		}
-
-		config.pass = i32::from(settings.passes);
-		config.sns_strength = i32::from(settings.sns);
+	// cwebp.c: "If a target size or PSNR was given, but somehow the -pass option was
+	// omitted, force a reasonable value."
+	if (config.target_size > 0 || config.target_PSNR > 0.0) && config.pass == 1 {
+		config.pass = 6;
 	}
 
 	if unsafe { WebPValidateConfig(&raw const config) } == 0 {
@@ -268,18 +251,6 @@ const fn unpack_version(packed: c_int) -> (i32, i32, i32) {
 /// silently pass a differently-shaped struct to another.
 pub(crate) const fn abi_version() -> c_int {
 	WEBP_ENCODER_ABI_VERSION.cast_signed()
-}
-
-/// Map our preset enum onto libwebp's.
-const fn webp_preset(preset: Preset) -> WebPPreset {
-	match preset {
-		Preset::Default => WebPPreset::WEBP_PRESET_DEFAULT,
-		Preset::Photo => WebPPreset::WEBP_PRESET_PHOTO,
-		Preset::Picture => WebPPreset::WEBP_PRESET_PICTURE,
-		Preset::Drawing => WebPPreset::WEBP_PRESET_DRAWING,
-		Preset::Icon => WebPPreset::WEBP_PRESET_ICON,
-		Preset::Text => WebPPreset::WEBP_PRESET_TEXT,
-	}
 }
 
 /// Owns a `WebPPicture` so its buffers are released even if an encode step fails.
@@ -342,11 +313,24 @@ pub fn encode_rgba(job: &EncodeJob, image: &RgbaImage<'_>) -> Result<Vec<u8>, En
 
 /// Encode an RGBA image, reporting progress and allowing the caller to stop.
 ///
-/// `on_progress` is called by libwebp with a percentage from 0 to 100. Returning `false`
-/// aborts the encode, which is how cancellation works: there is no way to interrupt
-/// `WebPEncode` from another thread, so stopping has to come from inside its own progress
-/// callback. A cancelled encode returns [`EncodeError::Cancelled`] rather than a failure,
-/// because the user asked for it.
+/// The pixels stand alone: there is no file behind them, so no metadata, and an alpha
+/// channel only if some pixel is not opaque. See [`encode_source_with_progress`].
+///
+/// # Errors
+///
+/// As [`encode_rgba`], plus [`EncodeError::Cancelled`] if `on_progress` returned `false`.
+pub fn encode_rgba_with_progress(job: &EncodeJob, image: &RgbaImage<'_>, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
+	checked_dimensions(image)?;
+	encode_source_with_progress(job, &SourceImage::from_rgba(image), on_progress)
+}
+
+/// Encode a decoded source image, reporting progress and allowing the caller to stop.
+///
+/// `on_progress` is called with a percentage from 0 to 100. Returning `false` aborts the
+/// encode, which is how cancellation works: there is no way to interrupt `WebPEncode` from
+/// another thread, so stopping has to come from inside its own progress callback. A
+/// cancelled encode returns [`EncodeError::Cancelled`] rather than a failure, because the
+/// user asked for it.
 ///
 /// Two things about libwebp's reporting that a progress bar has to allow for, both
 /// observed rather than assumed: it does not call the hook at a fixed cadence, and **it
@@ -356,17 +340,72 @@ pub fn encode_rgba(job: &EncodeJob, image: &RgbaImage<'_>) -> Result<Vec<u8>, En
 ///
 /// # Errors
 ///
-/// As [`encode_rgba`], plus [`EncodeError::Cancelled`] if `on_progress` returned `false`.
-pub fn encode_rgba_with_progress(job: &EncodeJob, image: &RgbaImage<'_>, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
-	// "Do not enlarge" depends on the source, so it is resolved here, once, for every format.
-	let resize = job.resize.for_source(image.width, image.height);
-	match job.format {
-		OutputFormat::Webp if resize == job.resize => encode_webp(job, image, on_progress),
-		OutputFormat::Webp => encode_webp(&EncodeJob { resize, ..job.clone() }, image, on_progress),
-		OutputFormat::Avif => crate::avif::encode(&job.avif, resize, image, on_progress),
-		OutputFormat::Jxl => crate::jxl::encode(&job.jxl, resize, image, on_progress),
-		OutputFormat::Heic => crate::heic::encode(&job.heic, resize, image, on_progress),
+/// Returns [`EncodeError`] if the settings are invalid, the crop does not fit, the encoder
+/// fails, or the encode was cancelled.
+pub fn encode_source_with_progress(job: &EncodeJob, source: &SourceImage, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
+	job.validate()?;
+	if let Some(crop) = job.crop
+		&& !crop.fits(source.width, source.height)
+	{
+		return Err(EncodeError::CropOutside { x: crop.x, y: crop.y, crop_width: crop.width, crop_height: crop.height, width: source.width, height: source.height });
 	}
+	match job.format {
+		OutputFormat::Webp => encode_webp(job, source, on_progress),
+		OutputFormat::Jxl => crate::jxl::encode(job, source, on_progress),
+		OutputFormat::Avif => crate::avif::encode(job, source, on_progress),
+		OutputFormat::Heic => crate::heic::encode(job, source, on_progress),
+	}
+}
+
+/// The source after the job's crop and resize, with every sample depth it carries.
+///
+/// The 8-bit pixels go through libwebp's rescaler, as they always have, so a resize gives
+/// the same dimensions and filtering whichever format is chosen. 16-bit samples cannot go
+/// through it without losing their depth, so they are resampled by the `image` crate's
+/// triangle filter instead, to the dimensions libwebp chose. Neither reference tool other
+/// than `cwebp` resizes at all, so there is nothing else to match.
+///
+/// # Errors
+///
+/// Returns [`EncodeError`] if the crop does not fit or the rescale fails.
+pub(crate) fn transformed(source: &SourceImage, crop: Option<Crop>, resize: Resize) -> Result<std::borrow::Cow<'_, SourceImage>, EncodeError> {
+	let resize_after_crop = resize.for_source(crop.map_or(source.width, |c| c.width), crop.map_or(source.height, |c| c.height));
+	if crop.is_none() && resize_after_crop.is_noop() {
+		return Ok(std::borrow::Cow::Borrowed(source));
+	}
+	let (width, height, pixels) = crop_and_rescale_rgba(&source.as_rgba(), crop, resize)?;
+	let deep = match &source.deep {
+		None => None,
+		Some(samples) => {
+			let full = image::ImageBuffer::<image::Rgba<u16>, Vec<u16>>::from_raw(source.width, source.height, samples.clone()).ok_or(EncodeError::MalformedImage { width: source.width, height: source.height, actual: samples.len(), expected: source.width as usize * source.height as usize * 4 })?;
+			let cropped = match crop {
+				Some(c) => image::imageops::crop_imm(&full, c.x, c.y, c.width, c.height).to_image(),
+				None => full,
+			};
+			let resized = if (cropped.width(), cropped.height()) == (width, height) { cropped } else { image::imageops::resize(&cropped, width, height, image::imageops::FilterType::Triangle) };
+			Some(resized.into_raw())
+		}
+	};
+	Ok(std::borrow::Cow::Owned(SourceImage { width, height, pixels, deep, gray: source.gray, has_alpha: source.has_alpha, format: source.format, bytes: source.bytes.clone() }))
+}
+
+/// Crop and then resize RGBA pixels, the order `cwebp` applies them in. The resize's mode
+/// is judged against the cropped size.
+///
+/// # Errors
+///
+/// Returns [`EncodeError`] if the buffer does not match its dimensions, the crop does not
+/// fit, or libwebp fails.
+pub fn crop_and_rescale_rgba(image: &RgbaImage<'_>, crop: Option<Crop>, resize: Resize) -> Result<(u32, u32, Vec<u8>), EncodeError> {
+	checked_dimensions(image)?;
+	let Some(crop) = crop else { return rescale_rgba(image, resize.for_source(image.width, image.height)) };
+	if !crop.fits(image.width, image.height) {
+		return Err(EncodeError::CropOutside { x: crop.x, y: crop.y, crop_width: crop.width, crop_height: crop.height, width: image.width, height: image.height });
+	}
+	let row = image.width as usize * 4;
+	let pixels: Vec<u8> = image.pixels.chunks_exact(row).skip(crop.y as usize).take(crop.height as usize).flat_map(|line| &line[crop.x as usize * 4..(crop.x + crop.width) as usize * 4]).copied().collect();
+	let cropped = RgbaImage { width: crop.width, height: crop.height, pixels: &pixels };
+	rescale_rgba(&cropped, resize.for_source(crop.width, crop.height))
 }
 
 /// Check that an image's buffer matches its dimensions and that libwebp can address it,
@@ -443,72 +482,92 @@ pub fn rescale_rgba(image: &RgbaImage<'_>, resize: Resize) -> Result<(u32, u32, 
 	Ok((width, height, pixels))
 }
 
-/// The WebP encode, which is the parity-gated path.
-fn encode_webp(job: &EncodeJob, image: &RgbaImage<'_>, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
-	let config = build_config(&job.webp)?;
-	let (width, height) = checked_dimensions(image)?;
+/// The WebP encode, which is the parity-gated path: `cwebp.c`'s `main` from reading the
+/// picture to writing the file, step for step.
+fn encode_webp(job: &EncodeJob, source: &SourceImage, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
+	let settings = &job.webp;
+	let config = build_config(settings)?;
+	if settings.metadata.any()
+		&& let Some(reason) = Metadata::cwebp_refusal(&source.bytes, source.format)
+	{
+		return Err(EncodeError::Metadata(reason));
+	}
+	// cwebp's PNG reader has libpng correct a PNG's gamma to a 2.2 display.
+	let corrected = crate::png_gamma::like_cwebp(source);
+	let image = corrected.as_deref().map_or_else(|| source.as_rgba(), |pixels| RgbaImage { width: source.width, height: source.height, pixels });
+	let (width, height) = checked_dimensions(&image)?;
 
-	let mut picture = Picture(unsafe {
-		let mut picture = std::mem::zeroed::<WebPPicture>();
-		if WebPPictureInitInternal(&raw mut picture, abi_version()) == 0 {
-			return Err(EncodeError::Libwebp("WebPPictureInit"));
+	// cwebp.c decides the colour path *before* reading the input, because it changes which
+	// conversion the samples go through. It looks at the resize as given, before
+	// `-resize_mode` has had a chance to decline it. Matching it is a parity requirement,
+	// not an optimisation.
+	let use_argb = config.lossless == 1 || config.use_sharp_yuv == 1 || config.preprocessing > 0 || job.crop.is_some() || !job.resize.is_noop();
+	let mut picture = if !use_argb && source.format == SourceFormat::Webp && !source.bytes.is_empty() {
+		// A WebP source off the ARGB path is decoded straight into YUV 4:2:0, never RGB.
+		yuv_picture(&source.bytes, settings.keep_alpha)?
+	} else {
+		let mut picture = Picture(unsafe {
+			let mut picture = std::mem::zeroed::<WebPPicture>();
+			if WebPPictureInitInternal(&raw mut picture, abi_version()) == 0 {
+				return Err(EncodeError::Libwebp("WebPPictureInit"));
+			}
+			picture
+		});
+		picture.0.use_argb = c_int::from(use_argb);
+		picture.0.width = width;
+		picture.0.height = height;
+
+		// 4 bytes per pixel, tightly packed, so the stride is the row length.
+		let stride = width.checked_mul(4).ok_or(EncodeError::ImageTooLarge { width: image.width, height: image.height })?;
+		// `-noalpha` makes cwebp's readers drop the alpha channel, keeping the colour under
+		// it as it is. Importing RGBX is exactly that. An opaque RGBA import is identical to
+		// an RGB one, which is what cwebp's readers do for a source with no alpha.
+		// SAFETY: beyond the module-wide invariants, this one depends on the buffer actually
+		// being as large as the dimensions claim — libwebp reads `height * stride` bytes
+		// from it. That was checked above: `pixels.len()` is exactly `width * height * 4`.
+		let imported = unsafe { if settings.keep_alpha { WebPPictureImportRGBA(&raw mut picture.0, image.pixels.as_ptr(), stride) } else { WebPPictureImportRGBX(&raw mut picture.0, image.pixels.as_ptr(), stride) } };
+		if imported == 0 {
+			return Err(EncodeError::Libwebp("WebPPictureImportRGBA"));
 		}
 		picture
-	});
+	};
 
-	// cwebp.c decides the colour path *before* reading the input, because it changes
-	// which conversion the samples go through. Matching it is a parity requirement, not
-	// an optimisation.
-	let resizing = !job.resize.is_noop();
-	picture.0.use_argb = c_int::from(config.lossless == 1 || config.use_sharp_yuv == 1 || config.preprocessing > 0 || resizing);
-	picture.0.width = width;
-	picture.0.height = height;
-
-	// 4 bytes per pixel, tightly packed, so the stride is the row length.
-	let stride = width.checked_mul(4).ok_or(EncodeError::ImageTooLarge { width: image.width, height: image.height })?;
-	// SAFETY: beyond the module-wide invariants, this one depends on the buffer actually
-	// being as large as the dimensions claim — libwebp reads `height * stride` bytes from
-	// it. That was checked above: `pixels.len()` is exactly `width * height * 4`.
-	if unsafe { WebPPictureImportRGBA(&raw mut picture.0, image.pixels.as_ptr(), stride) } == 0 {
-		return Err(EncodeError::Libwebp("WebPPictureImportRGBA"));
+	if let Some(colour) = settings.blend_alpha {
+		// SAFETY: the picture was imported above; the call reads and writes its own planes.
+		unsafe { WebPBlendAlpha(&raw mut picture.0, colour & 0x00ff_ffff) };
 	}
 
-	if resizing {
-		resize_picture(&mut picture, job.resize, &config)?;
+	if let Some(crop) = job.crop {
+		let (Ok(x), Ok(y), Ok(w), Ok(h)) = (c_int::try_from(crop.x), c_int::try_from(crop.y), c_int::try_from(crop.width), c_int::try_from(crop.height)) else {
+			return Err(EncodeError::CropOutside { x: crop.x, y: crop.y, crop_width: crop.width, crop_height: crop.height, width: image.width, height: image.height });
+		};
+		// Self-cropping with a view, as cwebp does. The view keeps pointing into the
+		// picture's own allocation, which the picture still owns.
+		let view: *mut WebPPicture = &raw mut picture.0;
+		// SAFETY: libwebp documents `src == dst` as valid for WebPPictureView.
+		if unsafe { WebPPictureView(view, x, y, w, h, view) } == 0 {
+			return Err(EncodeError::CropOutside { x: crop.x, y: crop.y, crop_width: crop.width, crop_height: crop.height, width: image.width, height: image.height });
+		}
 	}
 
-	encode_picture(&config, picture, on_progress)
-}
+	let resize = job.resize.for_source(u32::try_from(picture.0.width).unwrap_or(0), u32::try_from(picture.0.height).unwrap_or(0));
+	if !resize.is_noop() {
+		resize_picture(&mut picture, resize, &config)?;
+	}
 
-/// Encode a WebP file's image to WebP the way `cwebp` does — which, for a WebP source,
-/// is not always the RGBA path [`encode_rgba_with_progress`] takes.
-///
-/// When the encode will not be on the ARGB path (lossy, no resize, no sharp YUV —
-/// `cwebp.c`'s `use_argb` decision), `cwebp` has libwebp decode the source **straight into
-/// a YUV 4:2:0 picture** (`imageio/webpdec.c`), skipping RGB entirely, so the encoder
-/// never converts it. Decoding to RGBA and converting back lands a few bytes away. This
-/// takes `cwebp`'s route; every other case, and any other output format, is the ordinary
-/// encode of `image`, which must be `webp` decoded.
-///
-/// # Errors
-///
-/// As [`encode_rgba_with_progress`], plus [`EncodeError::Libwebp`] if `webp` does not
-/// decode.
-pub fn encode_webp_source_with_progress(job: &EncodeJob, webp: &[u8], image: &RgbaImage<'_>, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
-	if job.format != OutputFormat::Webp {
-		return encode_rgba_with_progress(job, image, on_progress);
+	let dimensions = (picture.0.width, picture.0.height);
+	let bytes = encode_picture(&config, picture, on_progress)?;
+	if !settings.metadata.any() {
+		return Ok(bytes);
 	}
-	let config = build_config(&job.webp)?;
-	let resizing = !job.resize.for_source(image.width, image.height).is_noop();
-	if config.lossless == 1 || config.use_sharp_yuv == 1 || config.preprocessing > 0 || resizing {
-		return encode_rgba_with_progress(job, image, on_progress);
-	}
-	encode_picture(&config, yuv_picture(webp)?, on_progress)
+	let metadata = Metadata::read_like_cwebp(&source.bytes, source.format);
+	with_metadata(bytes, &metadata, settings.metadata, dimensions)
 }
 
 /// Decode a WebP file into a fresh YUV 4:2:0 `WebPPicture` (with an alpha plane if the
-/// file has alpha), exactly as `cwebp`'s `ReadWebP` does when `use_argb` is off.
-fn yuv_picture(webp: &[u8]) -> Result<Picture, EncodeError> {
+/// file has alpha and it is kept), exactly as `cwebp`'s `ReadWebP` (`imageio/webpdec.c`)
+/// does when `use_argb` is off. Decoding to RGBA and converting back lands a few bytes away.
+fn yuv_picture(webp: &[u8], keep_alpha: bool) -> Result<Picture, EncodeError> {
 	let decode_failed = EncodeError::Libwebp("WebPDecode");
 	let mut decoder = unsafe {
 		let mut config = std::mem::zeroed::<WebPDecoderConfig>();
@@ -521,7 +580,7 @@ fn yuv_picture(webp: &[u8]) -> Result<Picture, EncodeError> {
 	if unsafe { WebPGetFeaturesInternal(webp.as_ptr(), webp.len(), &raw mut decoder.input, WEBP_DECODER_ABI_VERSION.cast_signed()) } != VP8StatusCode::VP8_STATUS_OK {
 		return Err(decode_failed);
 	}
-	let has_alpha = decoder.input.has_alpha != 0;
+	let has_alpha = keep_alpha && decoder.input.has_alpha != 0;
 
 	let mut picture = Picture(unsafe {
 		let mut picture = std::mem::zeroed::<WebPPicture>();
@@ -589,8 +648,81 @@ fn encode_picture(config: &WebPConfig, mut picture: Picture, on_progress: &mut d
 	// SAFETY: on success WebPMemoryWrite has filled `mem` with exactly `size` bytes; the
 	// null check covers the case where the encode produced nothing. The slice is copied
 	// before `writer` is dropped and frees it.
-	let bytes = if writer.0.mem.is_null() { Vec::new() } else { unsafe { std::slice::from_raw_parts(writer.0.mem, writer.0.size) }.to_vec() };
-	Ok(bytes)
+	Ok(if writer.0.mem.is_null() { Vec::new() } else { unsafe { std::slice::from_raw_parts(writer.0.mem, writer.0.size) }.to_vec() })
+}
+
+/// Add the source's metadata to an encoded WebP: `cwebp.c`'s `WriteWebPWithMetadata`.
+///
+/// A simple WebP has no room for metadata, so a `VP8X` header is added (or an existing
+/// one's flags updated), the `ICCP` chunk goes before the image data and `EXIF` and `XMP `
+/// after it, each padded to an even size, and the RIFF size is rewritten to cover them.
+/// Metadata the source does not have is simply not written.
+fn with_metadata(webp: Vec<u8>, metadata: &Metadata, keep: WebpMetadata, (width, height): (c_int, c_int)) -> Result<Vec<u8>, EncodeError> {
+	const CHUNK_HEADER: usize = 8;
+	const RIFF_HEADER: usize = 12;
+	const VP8X_CHUNK: usize = 18;
+	fn chosen(wanted: bool, payload: Option<&[u8]>) -> Option<&[u8]> {
+		payload.filter(|bytes| wanted && !bytes.is_empty())
+	}
+	let (exif, icc, xmp) = (chosen(keep.exif, metadata.exif.as_deref()), chosen(keep.icc, metadata.icc.as_deref()), chosen(keep.xmp, metadata.xmp.as_deref()));
+	let chunk_size = |payload: &[u8]| CHUNK_HEADER + payload.len() + (payload.len() & 1);
+	let metadata_size: usize = [exif, icc, xmp].into_iter().flatten().map(chunk_size).sum();
+	if metadata_size == 0 || webp.len() < RIFF_HEADER + CHUNK_HEADER {
+		return Ok(webp);
+	}
+	let flags = (u32::from(exif.is_some()) * 0x08) | (u32::from(icc.is_some()) * 0x20) | (u32::from(xmp.is_some()) * 0x04);
+
+	let has_vp8x = &webp[RIFF_HEADER..RIFF_HEADER + 4] == b"VP8X";
+	let riff_size = webp.len() - CHUNK_HEADER + if has_vp8x { 0 } else { VP8X_CHUNK } + metadata_size;
+	let riff_size = u32::try_from(riff_size).map_err(|_| EncodeError::MetadataTooLarge)?;
+	let mut out = Vec::with_capacity(webp.len() + VP8X_CHUNK + metadata_size);
+	out.extend_from_slice(b"RIFF");
+	out.extend_from_slice(&riff_size.to_le_bytes());
+	out.extend_from_slice(b"WEBP");
+	let mut image = &webp[RIFF_HEADER..];
+	if has_vp8x {
+		let mut vp8x = image[..VP8X_CHUNK].to_vec();
+		vp8x[CHUNK_HEADER] |= u8::try_from(flags & 0xff).unwrap_or(0);
+		out.extend_from_slice(&vp8x);
+		image = &image[VP8X_CHUNK..];
+	} else {
+		// A lossless bitstream records whether it has alpha in the 29th bit after its
+		// signature; a lossy one without VP8X has none.
+		let alpha = &image[..4] == b"VP8L" && image.get(CHUNK_HEADER + 4).is_some_and(|byte| byte & (1 << 4) != 0);
+		let flags = flags | if alpha { 0x10 } else { 0 };
+		let le24 = |value: c_int| u32::try_from(value - 1).unwrap_or(0).to_le_bytes()[..3].to_vec();
+		out.extend_from_slice(b"VP8X\x0a\x00\x00\x00");
+		out.extend_from_slice(&flags.to_le_bytes());
+		out.extend_from_slice(&le24(width));
+		out.extend_from_slice(&le24(height));
+	}
+	let mut chunk = |fourcc: &[u8; 4], payload: &[u8]| {
+		out.extend_from_slice(fourcc);
+		out.extend_from_slice(&u32::try_from(payload.len()).unwrap_or(u32::MAX).to_le_bytes());
+		out.extend_from_slice(payload);
+		if payload.len() & 1 == 1 {
+			out.push(0);
+		}
+	};
+	if let Some(icc) = icc {
+		chunk(b"ICCP", icc);
+	}
+	out.extend_from_slice(image);
+	let mut chunk = |fourcc: &[u8; 4], payload: &[u8]| {
+		out.extend_from_slice(fourcc);
+		out.extend_from_slice(&u32::try_from(payload.len()).unwrap_or(u32::MAX).to_le_bytes());
+		out.extend_from_slice(payload);
+		if payload.len() & 1 == 1 {
+			out.push(0);
+		}
+	};
+	if let Some(exif) = exif {
+		chunk(b"EXIF", exif);
+	}
+	if let Some(xmp) = xmp {
+		chunk(b"XMP ", xmp);
+	}
+	Ok(out)
 }
 
 /// Rescale the picture the way `cwebp` does, including its `-exact` special case.
@@ -676,7 +808,9 @@ fn for_each_argb_row(picture: &mut Picture, mut f: impl FnMut(&mut [u32])) {
 #[cfg(test)]
 mod tests {
 	use super::{EncodeError, RgbaImage, build_config, encode_rgba};
-	use crate::settings::{AlphaFiltering, EncodeJob, FilterType, Mode, Preset, Resize, TargetMetric, WebpSettings};
+	use crate::{
+		metadata::Metadata, settings::{AlphaFiltering, Crop, EncodeJob, FilterType, ImageHint, Resize, ResizeMode, TargetMetric, WebpMetadata, WebpSettings}, source::{SourceFormat, SourceImage}
+	};
 
 	/// A small RGBA test image with real colour variation and a real alpha ramp, so the
 	/// alpha controls have something to act on.
@@ -698,101 +832,45 @@ mod tests {
 		encode_rgba(settings, &RgbaImage { width: 48, height: 32, pixels: &pixels })
 	}
 
-	/// Every control must reach the corresponding `WebPConfig` field. This is the parity
-	/// claim at the config level; `tests/parity.rs` is the claim at the byte level.
-	#[test]
-	fn every_lossy_control_reaches_webpconfig() {
-		let settings = WebpSettings { mode: Mode::Lossy, quality: 42, alpha_quality: 33, alpha_filtering: Some(AlphaFiltering::Best), method: 5, segments: 2, partition_limit: 17, sns: 81, passes: 9, filter: FilterType::Strong, filter_strength: 64, filter_sharpness: 6, target: Some(TargetMetric::Size(12_345)), sharp_yuv: true, low_memory: true, multi_threading: true, ..Default::default() };
-		let config = build_config(&settings).expect("config builds");
-		assert!((config.quality - 42.0).abs() < f32::EPSILON);
-		assert_eq!(config.alpha_quality, 33);
-		assert_eq!(config.alpha_filtering, 2);
-		assert_eq!(config.method, 5);
-		assert_eq!(config.segments, 2);
-		assert_eq!(config.partition_limit, 17);
-		assert_eq!(config.sns_strength, 81);
-		assert_eq!(config.pass, 9);
-		assert_eq!(config.filter_type, 1, "strong filtering");
-		assert_eq!(config.filter_strength, 64);
-		assert_eq!(config.filter_sharpness, 6);
-		assert_eq!(config.target_size, 12_345);
-		assert_eq!(config.use_sharp_yuv, 1);
-		assert_eq!(config.low_memory, 1);
-		assert_eq!(config.thread_level, 1);
-		assert_eq!(config.lossless, 0);
-		assert_eq!(config.autofilter, 0, "an explicit filter type replaces autofilter");
+	fn decode(bytes: &[u8]) -> (i32, i32, Vec<u8>) {
+		let mut width = 0;
+		let mut height = 0;
+		let decoded = unsafe { libwebp_sys::WebPDecodeRGBA(bytes.as_ptr(), bytes.len(), &raw mut width, &raw mut height) };
+		assert!(!decoded.is_null(), "the output must decode");
+		let pixels = unsafe { std::slice::from_raw_parts(decoded, usize::try_from(width * height * 4).expect("positive")) }.to_vec();
+		unsafe { libwebp_sys::WebPFree(decoded.cast()) };
+		(width, height, pixels)
 	}
 
-	#[test]
-	fn auto_filter_sets_autofilter_and_leaves_strength_alone() {
-		let config = build_config(&WebpSettings { filter: FilterType::Auto, filter_strength: 99, ..Default::default() }).expect("config builds");
-		assert_eq!(config.autofilter, 1);
-		assert_ne!(config.filter_strength, 99, "auto filtering must not adopt the manual strength");
+	fn dimensions(bytes: &[u8]) -> (i32, i32) {
+		let mut width = 0;
+		let mut height = 0;
+		assert_ne!(unsafe { libwebp_sys::WebPGetInfo(bytes.as_ptr(), bytes.len(), &raw mut width, &raw mut height) }, 0);
+		(width, height)
 	}
 
+	/// Every setting must reach its `WebPConfig` field. This is the parity claim at the
+	/// config level; `tests/parity.rs` is the claim at the byte level.
 	#[test]
-	fn simple_filter_selects_filter_type_zero() {
-		let config = build_config(&WebpSettings { filter: FilterType::Simple, ..Default::default() }).expect("config builds");
-		assert_eq!(config.filter_type, 0);
-		assert_eq!(config.autofilter, 0);
+	fn every_setting_reaches_webpconfig() {
+		let settings = WebpSettings { lossless: true, near_lossless: 40, exact: true, quality: 42.5, alpha_quality: 33, alpha_compression: false, alpha_filtering: AlphaFiltering::Off, method: 5, image_hint: ImageHint::Graph, target: Some(TargetMetric::Size(12_345)), segments: 2, sns: 81, filter_strength: 64, filter_sharpness: 6, filter_type: FilterType::Simple, autofilter: false, passes: 9, qmin: 11, qmax: 88, preprocessing: 5, partition_limit: 17, jpeg_like: true, sharp_yuv: true, low_memory: true, multi_threading: true, ..WebpSettings::default() };
+		let c = build_config(&settings).expect("config builds");
+		assert_eq!((c.lossless, c.near_lossless, c.exact), (1, 40, 1));
+		assert!((c.quality - 42.5).abs() < f32::EPSILON);
+		assert_eq!((c.alpha_quality, c.alpha_compression, c.alpha_filtering, c.method), (33, 0, 0, 5));
+		assert_eq!(c.image_hint, libwebp_sys::WebPImageHint::WEBP_HINT_GRAPH);
+		assert_eq!(c.target_size, 12_345);
+		assert_eq!((c.segments, c.sns_strength, c.filter_strength, c.filter_sharpness, c.filter_type, c.autofilter), (2, 81, 64, 6, 0, 0));
+		assert_eq!((c.pass, c.qmin, c.qmax, c.preprocessing, c.partition_limit), (9, 11, 88, 5, 17));
+		assert_eq!((c.emulate_jpeg_size, c.use_sharp_yuv, c.low_memory, c.thread_level), (1, 1, 1, 1));
 	}
 
-	/// The mapping that is invisible from the Electron app: `-near_lossless` implies
-	/// `lossless = 1` in cwebp.c, and without it the encode is an ordinary lossy one.
+	/// cwebp.c forces six passes for a size or PSNR target left at one pass.
 	#[test]
-	fn near_lossless_implies_lossless() {
-		let config = build_config(&WebpSettings { mode: Mode::NearLossless, quality: 60, ..Default::default() }).expect("config builds");
-		assert_eq!(config.near_lossless, 60);
-		assert_eq!(config.lossless, 1, "cwebp.c: use near-lossless only with lossless");
-	}
-
-	#[test]
-	fn lossless_sets_exact() {
-		let config = build_config(&WebpSettings { mode: Mode::Lossless, ..Default::default() }).expect("config builds");
-		assert_eq!(config.lossless, 1);
-		assert_eq!(config.exact, 1);
-	}
-
-	#[test]
-	fn jpeg_like_sets_emulate_jpeg_size() {
-		assert_eq!(build_config(&WebpSettings { mode: Mode::JpegLike, ..Default::default() }).expect("config builds").emulate_jpeg_size, 1);
-	}
-
-	/// A preset is a re-initialisation, so this pins libwebp's actual preset table
-	/// (`config_enc.c`) rather than asserting that "something changed". Getting one of
-	/// these wrong silently encodes a user's `-preset photo` as something else.
-	#[test]
-	fn presets_match_libwebps_own_table() {
-		// (preset, sns_strength, filter_strength, filter_sharpness, segments)
-		let expected = [(Preset::Default, 50, 60, 0, 4), (Preset::Picture, 80, 35, 4, 4), (Preset::Photo, 80, 30, 3, 4), (Preset::Drawing, 25, 10, 6, 4), (Preset::Icon, 0, 0, 0, 4), (Preset::Text, 0, 0, 0, 2)];
-		for (preset, sns, strength, sharpness, segments) in expected {
-			let config = build_config(&WebpSettings { mode: Mode::Preset, preset: Some(preset), ..Default::default() }).expect("config builds");
-			assert_eq!((config.sns_strength, config.filter_strength, config.filter_sharpness, config.segments), (sns, strength, sharpness, segments), "{preset:?}");
-		}
-	}
-
-	/// `-q` follows `-preset` on the command line, so it must survive the
-	/// re-initialisation the preset performs.
-	#[test]
-	fn quality_after_a_preset_still_wins() {
-		let config = build_config(&WebpSettings { mode: Mode::Preset, preset: Some(Preset::Icon), quality: 30, ..Default::default() }).expect("config builds");
-		assert!((config.quality - 30.0).abs() < f32::EPSILON);
-	}
-
-	/// A preset must not have the Electron app's `-alpha_filter best` forced onto it: the
-	/// app deliberately clears that flag in preset mode, leaving libwebp's default of 1.
-	#[test]
-	fn preset_mode_keeps_libwebps_alpha_filtering() {
-		let config = build_config(&WebpSettings { mode: Mode::Preset, preset: Some(Preset::Photo), alpha_filtering: Some(AlphaFiltering::Best), ..Default::default() }).expect("config builds");
-		assert_eq!(config.alpha_filtering, 1, "preset mode must not override the preset's alpha filtering");
-	}
-
-	#[test]
-	fn psnr_target_sets_show_compressed_like_cwebp() {
-		let config = build_config(&WebpSettings { target: Some(TargetMetric::Psnr(41)), ..Default::default() }).expect("config builds");
-		assert!((config.target_PSNR - 41.0).abs() < f32::EPSILON);
-		assert_eq!(config.show_compressed, 1, "cwebp sets show_compressed for -print_psnr");
-		assert_eq!(config.target_size, 0);
+	fn a_target_with_one_pass_gets_six() {
+		let c = build_config(&WebpSettings { passes: 1, target: Some(TargetMetric::Psnr(40.0)), ..WebpSettings::default() }).expect("config builds");
+		assert_eq!(c.pass, 6);
+		assert_eq!(build_config(&WebpSettings { passes: 1, ..WebpSettings::default() }).expect("config builds").pass, 1);
 	}
 
 	#[test]
@@ -811,6 +889,28 @@ mod tests {
 		}
 	}
 
+	/// libavif and libheif are compiled against the sharpyuv headers in `third_party/libwebp`
+	/// but linked with the sharpyuv `libwebp-sys` compiles, so the submodule has to be the
+	/// libwebp `libwebp-sys` vendors. Bumping one without the other fails here.
+	#[test]
+	fn the_libwebp_submodule_matches_the_linked_libwebp() {
+		unsafe extern "C" {
+			fn SharpYuvGetVersion() -> std::ffi::c_int;
+		}
+		let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+		let gitmodules = std::fs::read_to_string(root.join(".gitmodules")).expect("read .gitmodules");
+		let pinned = gitmodules.split("[submodule ").find(|section| section.starts_with("\"third_party/libwebp\"")).and_then(|section| section.lines().find_map(|line| line.trim().strip_prefix("version = v"))).expect("third_party/libwebp has a version in .gitmodules");
+		let (major, minor, revision) = super::linked_encoder_version();
+		assert_eq!(pinned, format!("{major}.{minor}.{revision}"), "third_party/libwebp is pinned to {pinned}, libwebp-sys links {major}.{minor}.{revision}");
+
+		let Ok(header) = std::fs::read_to_string(root.join("third_party/libwebp/sharpyuv/sharpyuv.h")) else { return };
+		let part = |name: &str| header.lines().find_map(|line| line.strip_prefix(&format!("#define SHARPYUV_VERSION_{name} "))).and_then(|value| value.trim().parse::<i32>().ok()).unwrap_or_else(|| panic!("SHARPYUV_VERSION_{name} in sharpyuv.h"));
+		let headers = (part("MAJOR") << 24) | (part("MINOR") << 16) | part("PATCH");
+		// SAFETY: takes no arguments and returns a constant.
+		let linked = unsafe { SharpYuvGetVersion() };
+		assert_eq!(headers, linked, "the sharpyuv headers are {headers:#x}, the linked sharpyuv is {linked:#x}");
+	}
+
 	#[test]
 	fn a_default_encode_produces_a_webp() {
 		let bytes = encode(&EncodeJob::default()).expect("default settings encode");
@@ -819,66 +919,120 @@ mod tests {
 		assert_eq!(&bytes[8..12], b"WEBP");
 	}
 
+	/// Lossless with `-exact` must decode back to the exact input, which is the only
+	/// end-to-end check that the pixels actually survived the import path.
 	#[test]
-	fn every_mode_encodes() {
-		for mode in [Mode::Lossy, Mode::Lossless, Mode::NearLossless, Mode::JpegLike, Mode::Preset] {
-			let settings = EncodeJob::from(WebpSettings { mode, preset: Some(Preset::Photo), ..Default::default() });
-			let bytes = encode(&settings).unwrap_or_else(|e| panic!("{mode:?} failed to encode: {e}"));
-			assert_eq!(&bytes[0..4], b"RIFF", "{mode:?} did not produce a RIFF container");
+	fn lossless_exact_round_trips_the_pixels() {
+		let pixels = fixture(48, 32);
+		let bytes = encode_rgba(&EncodeJob::from(WebpSettings { lossless: true, exact: true, ..Default::default() }), &RgbaImage { width: 48, height: 32, pixels: &pixels }).expect("lossless encodes");
+		assert_eq!(decode(&bytes), (48, 32, pixels), "lossless + exact must preserve every byte, including RGB under transparent pixels");
+	}
+
+	/// Without `-exact`, libwebp may recolour fully transparent pixels.
+	#[test]
+	fn lossless_without_exact_may_recolour_the_invisible() {
+		let pixels = fixture(48, 32);
+		let (.., decoded) = decode(&encode_rgba(&EncodeJob::from(WebpSettings { lossless: true, exact: false, ..Default::default() }), &RgbaImage { width: 48, height: 32, pixels: &pixels }).expect("encodes"));
+		for (got, want) in decoded.as_chunks::<4>().0.iter().zip(pixels.as_chunks::<4>().0) {
+			if want[3] == 255 {
+				assert_eq!(got, want, "visible pixels are still exact");
+			}
+		}
+		assert_ne!(decoded, pixels, "some invisible colour was cleaned up");
+	}
+
+	/// `-noalpha` drops the alpha channel and keeps the colour that was under it.
+	#[test]
+	fn no_alpha_drops_the_channel() {
+		let pixels = fixture(48, 32);
+		let (.., decoded) = decode(&encode_rgba(&EncodeJob::from(WebpSettings { lossless: true, exact: true, keep_alpha: false, ..Default::default() }), &RgbaImage { width: 48, height: 32, pixels: &pixels }).expect("encodes"));
+		for (got, want) in decoded.as_chunks::<4>().0.iter().zip(pixels.as_chunks::<4>().0) {
+			assert_eq!(got, &[want[0], want[1], want[2], 255]);
 		}
 	}
 
-	/// Lossless output must decode back to the exact input, which is the only end-to-end
-	/// check that the pixels actually survived the import path.
+	/// `-blend_alpha` flattens onto the background colour, leaving the image opaque.
 	#[test]
-	fn lossless_round_trips_the_pixels() {
+	fn blend_alpha_flattens_onto_the_background() {
 		let pixels = fixture(48, 32);
-		let bytes = encode_rgba(&EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() }), &RgbaImage { width: 48, height: 32, pixels: &pixels }).expect("lossless encodes");
-		let mut width = 0;
-		let mut height = 0;
-		let decoded = unsafe { libwebp_sys::WebPDecodeRGBA(bytes.as_ptr(), bytes.len(), &raw mut width, &raw mut height) };
-		assert!(!decoded.is_null(), "lossless output must decode");
-		assert_eq!((width, height), (48, 32));
-		let round_tripped = unsafe { std::slice::from_raw_parts(decoded, pixels.len()) }.to_vec();
-		unsafe { libwebp_sys::WebPFree(decoded.cast()) };
-		assert_eq!(round_tripped, pixels, "lossless + exact must preserve every byte, including RGB under transparent pixels");
+		let (.., decoded) = decode(&encode_rgba(&EncodeJob::from(WebpSettings { lossless: true, exact: true, blend_alpha: Some(0x00ff_0000), ..Default::default() }), &RgbaImage { width: 48, height: 32, pixels: &pixels }).expect("encodes"));
+		for (got, want) in decoded.as_chunks::<4>().0.iter().zip(pixels.as_chunks::<4>().0) {
+			assert_eq!(got[3], 255, "the result is opaque");
+			if want[3] == 0 {
+				assert_eq!(&got[..3], &[255, 0, 0], "fully transparent pixels become the background colour");
+			}
+		}
+	}
+
+	#[test]
+	fn crop_then_resize() {
+		let pixels = fixture(48, 32);
+		let image = RgbaImage { width: 48, height: 32, pixels: &pixels };
+		let crop = Some(Crop { x: 8, y: 4, width: 20, height: 10 });
+		let (width, height, decoded) = decode(&encode_rgba(&EncodeJob { crop, webp: WebpSettings { lossless: true, exact: true, ..Default::default() }, ..Default::default() }, &image).expect("encodes"));
+		assert_eq!((width, height), (20, 10));
+		assert_eq!(&decoded[..4], &pixels[(4 * 48 + 8) * 4..(4 * 48 + 8) * 4 + 4], "the crop starts at (8, 4)");
+		assert_eq!(dimensions(&encode_rgba(&EncodeJob { crop, resize: Resize::to(10, 0), ..Default::default() }, &image).expect("encodes")), (10, 5), "the resize applies to the cropped size");
+		let err = encode_rgba(&EncodeJob { crop: Some(Crop { x: 40, y: 0, width: 20, height: 10 }), ..Default::default() }, &image).expect_err("does not fit");
+		assert!(matches!(err, EncodeError::CropOutside { .. }), "got {err:?}");
 	}
 
 	#[test]
 	fn resize_changes_the_output_dimensions() {
 		let pixels = fixture(48, 32);
-		for (resize, expected) in [(Resize { width: 24, height: 16, no_enlarge: false }, (24, 16)), (Resize { width: 24, height: 0, no_enlarge: false }, (24, 16)), (Resize { width: 0, height: 16, no_enlarge: false }, (24, 16))] {
+		for (resize, expected) in [(Resize::to(24, 16), (24, 16)), (Resize::to(24, 0), (24, 16)), (Resize::to(0, 16), (24, 16))] {
 			let bytes = encode_rgba(&EncodeJob { resize, ..Default::default() }, &RgbaImage { width: 48, height: 32, pixels: &pixels }).expect("resized encode");
-			let mut width = 0;
-			let mut height = 0;
-			assert_ne!(unsafe { libwebp_sys::WebPGetInfo(bytes.as_ptr(), bytes.len(), &raw mut width, &raw mut height) }, 0);
-			assert_eq!((width, height), expected, "resize {resize:?}");
+			assert_eq!(dimensions(&bytes), expected, "resize {resize:?}");
 		}
 	}
 
 	#[test]
-	fn no_enlarge_skips_an_upscale_but_not_a_downscale() {
+	fn resize_modes_decide_whether_to_resize() {
 		let pixels = fixture(48, 32);
 		let image = RgbaImage { width: 48, height: 32, pixels: &pixels };
-		for (resize, expected) in [(Resize { width: 96, height: 0, no_enlarge: true }, (48, 32)), (Resize { width: 24, height: 0, no_enlarge: true }, (24, 16)), (Resize { width: 96, height: 0, no_enlarge: false }, (96, 64))] {
-			let bytes = encode_rgba(&EncodeJob { resize, ..Default::default() }, &image).expect("encode");
-			let mut width = 0;
-			let mut height = 0;
-			assert_ne!(unsafe { libwebp_sys::WebPGetInfo(bytes.as_ptr(), bytes.len(), &raw mut width, &raw mut height) }, 0);
-			assert_eq!((width, height), expected, "resize {resize:?}");
+		for (resize, expected) in [(Resize { width: 96, height: 0, mode: ResizeMode::DownOnly }, (48, 32)), (Resize { width: 24, height: 0, mode: ResizeMode::DownOnly }, (24, 16)), (Resize { width: 24, height: 0, mode: ResizeMode::UpOnly }, (48, 32)), (Resize::to(96, 0), (96, 64))] {
+			assert_eq!(dimensions(&encode_rgba(&EncodeJob { resize, ..Default::default() }, &image).expect("encode")), expected, "resize {resize:?}");
 		}
 	}
 
 	/// The `-exact` resize path is a different code path; make sure it still produces a
 	/// decodable file at the right size rather than failing or corrupting.
 	#[test]
-	fn lossless_resize_uses_the_exact_path_and_still_decodes() {
+	fn exact_resize_uses_the_exact_path_and_still_decodes() {
 		let pixels = fixture(48, 32);
-		let bytes = encode_rgba(&EncodeJob { resize: Resize { width: 24, height: 16, no_enlarge: false }, webp: WebpSettings { mode: Mode::Lossless, ..Default::default() }, ..Default::default() }, &RgbaImage { width: 48, height: 32, pixels: &pixels }).expect("lossless resize encodes");
-		let mut width = 0;
-		let mut height = 0;
-		assert_ne!(unsafe { libwebp_sys::WebPGetInfo(bytes.as_ptr(), bytes.len(), &raw mut width, &raw mut height) }, 0);
-		assert_eq!((width, height), (24, 16));
+		let bytes = encode_rgba(&EncodeJob { resize: Resize::to(24, 16), webp: WebpSettings { lossless: true, exact: true, ..Default::default() }, ..Default::default() }, &RgbaImage { width: 48, height: 32, pixels: &pixels }).expect("lossless resize encodes");
+		assert_eq!(dimensions(&bytes), (24, 16));
+	}
+
+	/// The metadata writer is `WriteWebPWithMetadata`: VP8X added with the right flags,
+	/// ICCP before the image, EXIF and XMP after, odd sizes padded, the RIFF size right.
+	#[test]
+	fn metadata_is_written_like_cwebp() {
+		let mut png = Vec::new();
+		image::RgbaImage::from_raw(48, 32, fixture(48, 32)).expect("fixture").write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).expect("png");
+		let source = SourceImage { bytes: png, ..SourceImage::from_rgba(&RgbaImage { width: 48, height: 32, pixels: &fixture(48, 32) }) };
+		let source_with = |bytes: Vec<u8>| SourceImage { bytes, format: SourceFormat::Webp, ..source.clone() };
+		// A WebP source carrying all three, as the metadata to copy.
+		let mut carrier = encode_rgba(&EncodeJob::default(), &source.as_rgba()).expect("encode");
+		let carrier = {
+			let metadata = Metadata { icc: Some(b"icc".to_vec()), exif: Some(b"exif".to_vec()), xmp: Some(b"xmp!".to_vec()) };
+			carrier = super::with_metadata(carrier, &metadata, WebpMetadata { exif: true, icc: true, xmp: true }, (48, 32)).expect("with metadata");
+			carrier
+		};
+		for lossless in [false, true] {
+			let job = EncodeJob::from(WebpSettings { lossless, metadata: WebpMetadata { exif: true, icc: true, xmp: false }, ..Default::default() });
+			let out = super::encode_source_with_progress(&job, &source_with(carrier.clone()), &mut |_| true).expect("encode");
+			assert_eq!(&out[12..16], b"VP8X");
+			let flags = out[20];
+			assert_eq!(flags & 0x2c, 0x28, "ICC and Exif, no XMP: {flags:#x}");
+			assert_eq!(flags & 0x10, 0x10, "the fixture has alpha");
+			assert_eq!(u32::from_le_bytes(out[4..8].try_into().expect("four bytes")) as usize, out.len() - 8, "RIFF size");
+			assert_eq!(&out[30..34], b"ICCP", "ICCP directly after VP8X");
+			let copied = Metadata::read_like_cwebp(&out, SourceFormat::Webp);
+			assert_eq!((copied.icc.as_deref(), copied.exif.as_deref(), copied.xmp.as_deref()), (Some(&b"icc"[..]), Some(&b"exif"[..]), None));
+			let (width, height, _) = decode(&out);
+			assert_eq!((width, height), (48, 32));
+		}
 	}
 
 	#[test]
@@ -958,8 +1112,8 @@ mod tests {
 	/// Quality must actually move the output size, or the control is decorative.
 	#[test]
 	fn quality_changes_the_output_size() {
-		let low = encode(&EncodeJob::from(WebpSettings { quality: 5, ..Default::default() })).expect("q5 encodes");
-		let high = encode(&EncodeJob::from(WebpSettings { quality: 95, ..Default::default() })).expect("q95 encodes");
+		let low = encode(&EncodeJob::from(WebpSettings { quality: 5.0, ..Default::default() })).expect("q5 encodes");
+		let high = encode(&EncodeJob::from(WebpSettings { quality: 95.0, ..Default::default() })).expect("q95 encodes");
 		assert!(low.len() < high.len(), "q5 produced {} bytes, q95 produced {} bytes", low.len(), high.len());
 	}
 }

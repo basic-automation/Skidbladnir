@@ -1,163 +1,102 @@
-//! Turning [`EncodeJob`] into a `cwebp` command line.
+//! Turning an [`EncodeJob`] into the `cwebp` command line that makes the same file.
 //!
-//! This is not dead weight in a port that intends to call libwebp directly. It has two
-//! jobs that outlive the subprocess:
+//! This is the other half of the parity claim. [`crate::encoder`] builds a `WebPConfig`
+//! from the settings; this builds the `cwebp` arguments from the same settings; and
+//! `tests/parity.rs` runs both and compares the bytes. If a field of [`WebpSettings`] had
+//! no flag here, or a flag had no field, one side or the other would be unreachable.
 //!
-//! 1. **It drives the reference encoder in the parity test.** The Phase 2 gate is that
-//!    our own encoder and the real `cwebp` produce the same bytes for the same settings,
-//!    and something has to build the `cwebp` side of that comparison.
-//! 2. **It is the sidecar fallback, kept working.** If binding libwebp ever stops being
-//!    viable on a platform, shipping the real `cwebp` as a Tauri sidecar is the
-//!    documented escape hatch, and it needs exactly this function.
+//! Every setting is written out, including the ones at their default, so the command line
+//! is fully determined by the settings and never depends on `cwebp`'s defaults agreeing
+//! with ours. It is also a record: a user can see the exact `cwebp` invocation their
+//! settings stand for.
 //!
-//! The flag order and the per-mode flag *selection* are deliberately byte-for-byte what
-//! the Electron app produces: `index.html` decides which values to send for the chosen
-//! mode, and `main.js` concatenates them in a fixed order. Both behaviours are
-//! reproduced here, quirks included, because this is the thing that is supposed to be a
-//! faithful reading of the old app.
+//! [`WebpSettings`]: crate::settings::WebpSettings
 
 use std::{ffi::OsString, path::Path};
 
-use crate::settings::{EncodeJob, Mode, TargetMetric};
+use crate::settings::{EncodeJob, FilterType, ResizeMode, TargetMetric};
 
 /// Build the `cwebp` argument list for these settings, encoding `input` to `output`.
 ///
 /// The returned vector excludes the `cwebp` program name itself, so it can be handed
-/// straight to [`std::process::Command::args`].
-///
-/// The order matches `main.js`'s concatenation: preset, near-lossless, JPEG-like,
-/// lossless, autofilter, multi-threading, filter strength, filter sharpness, sharp YUV,
-/// alpha filtering, quality, alpha quality, method, low memory, segments, partition
-/// limit, target size, target PSNR, passes, SNS, resize, then the input path and `-o`.
-/// (`-metadata`, which the Electron app never sent, goes just before the input path.)
-///
-/// Which of those appear depends on the mode, because the Electron renderer only sends
-/// the values that mode uses — the advanced lossy controls reach the encoder in
-/// [`Mode::Lossy`] alone, and [`Mode::NearLossless`] sends nothing but its own level.
+/// straight to [`std::process::Command::args`]. No flag here depends on another's position:
+/// `-preset` and `-z`, the two that do, are never emitted, because the settings already
+/// hold the values they would have set.
 #[must_use]
 pub fn cwebp_args(job: &EncodeJob, input: &Path, output: &Path) -> Vec<OsString> {
-	// `cwebp` is a WebP encoder, so the job's WebP settings are everything but the resize.
-	let settings = &job.webp;
-	let mut args: Vec<OsString> = Vec::new();
-	let mut push = |flag: &str| args.push(OsString::from(flag));
+	let s = &job.webp;
+	let mut args: Vec<String> = Vec::new();
+	let mut flag = |name: &str, values: &[String]| {
+		args.push(name.to_owned());
+		args.extend(values.iter().cloned());
+	};
 
-	match settings.mode {
-		Mode::Preset => {
-			// An unset preset is a validation error, not something to guess at; emitting
-			// no -preset would silently encode with the plain lossy defaults instead.
-			if let Some(preset) = settings.preset {
-				push("-preset");
-				push(preset.as_cwebp_str());
-			}
-		}
-		Mode::NearLossless => {
-			// The near-lossless level is the quality slider's value: the Electron UI
-			// relabels the same control rather than adding a second one.
-			push("-near_lossless");
-			push(&settings.quality.to_string());
-		}
-		Mode::JpegLike => push("-jpeg_like"),
-		// -exact is not a separate control: the Electron app always pairs it with
-		// -lossless, preserving RGB under fully transparent pixels.
-		Mode::Lossless => {
-			push("-lossless");
-			push("-exact");
-		}
-		Mode::Lossy => {}
-	}
-
-	// The filter selection is sent for the lossy mode only.
-	if settings.mode.uses_lossy_options() {
-		match settings.filter {
-			crate::settings::FilterType::Auto => push("-af"),
-			crate::settings::FilterType::Simple => push("-nostrong"),
-			crate::settings::FilterType::Strong => push("-strong"),
+	if s.lossless {
+		flag("-lossless", &[]);
+		if s.near_lossless < 100 {
+			flag("-near_lossless", &[s.near_lossless.to_string()]);
 		}
 	}
-
-	if settings.multi_threading {
-		push("-mt");
+	if s.exact {
+		flag("-exact", &[]);
 	}
-
-	if settings.mode.uses_lossy_options() && settings.filter.uses_manual_strength() {
-		push("-f");
-		push(&settings.filter_strength.to_string());
-		push("-sharpness");
-		push(&settings.filter_sharpness.to_string());
+	// `{}` prints the shortest decimal that reads back as the same f32.
+	flag("-q", &[s.quality.to_string()]);
+	flag("-alpha_q", &[s.alpha_quality.to_string()]);
+	flag("-alpha_method", &[u8::from(s.alpha_compression).to_string()]);
+	flag("-alpha_filter", &[s.alpha_filtering.as_cwebp_str().to_owned()]);
+	flag("-m", &[s.method.to_string()]);
+	if let Some(hint) = s.image_hint.as_cwebp_str() {
+		flag("-hint", &[hint.to_owned()]);
 	}
-
-	if settings.mode.uses_lossy_options() && settings.sharp_yuv {
-		push("-sharp_yuv");
+	match s.target {
+		Some(TargetMetric::Size(bytes)) => flag("-size", &[bytes.to_string()]),
+		Some(TargetMetric::Psnr(psnr)) => flag("-psnr", &[psnr.to_string()]),
+		None => {}
 	}
-
-	// A preset carries its own alpha filtering choice, so the Electron app clears this
-	// flag in preset mode rather than overriding the preset.
-	if settings.mode != Mode::Preset
-		&& let Some(alpha_filtering) = settings.alpha_filtering
-	{
-		push("-alpha_filter");
-		push(alpha_filtering.as_cwebp_str());
+	flag("-segments", &[s.segments.to_string()]);
+	flag("-sns", &[s.sns.to_string()]);
+	flag("-f", &[s.filter_strength.to_string()]);
+	flag("-sharpness", &[s.filter_sharpness.to_string()]);
+	flag(
+		match s.filter_type {
+			FilterType::Simple => "-nostrong",
+			FilterType::Strong => "-strong",
+		},
+		&[],
+	);
+	if s.autofilter {
+		flag("-af", &[]);
 	}
-
-	// Near-lossless is the one mode that does not send an explicit quality: its level
-	// went out as -near_lossless above.
-	if settings.mode != Mode::NearLossless {
-		push("-q");
-		push(&settings.quality.to_string());
-	}
-
-	if matches!(settings.mode, Mode::Lossy | Mode::Lossless | Mode::JpegLike) {
-		push("-alpha_q");
-		push(&settings.alpha_quality.to_string());
-		push("-m");
-		push(&settings.method.to_string());
-	}
-
-	if settings.mode.uses_lossy_options() {
-		if settings.low_memory {
-			push("-low_memory");
+	flag("-pass", &[s.passes.to_string()]);
+	flag("-qrange", &[s.qmin.to_string(), s.qmax.to_string()]);
+	flag("-pre", &[s.preprocessing.to_string()]);
+	flag("-partition_limit", &[s.partition_limit.to_string()]);
+	for (on, name) in [(s.jpeg_like, "-jpeg_like"), (s.sharp_yuv, "-sharp_yuv"), (s.low_memory, "-low_memory"), (s.multi_threading, "-mt"), (!s.keep_alpha, "-noalpha")] {
+		if on {
+			flag(name, &[]);
 		}
-		push("-segments");
-		push(&settings.segments.to_string());
-		push("-partition_limit");
-		push(&settings.partition_limit.to_string());
-
-		match settings.target {
-			Some(TargetMetric::Size(bytes)) => {
-				push("-size");
-				push(&bytes.to_string());
-			}
-			Some(TargetMetric::Psnr(psnr)) => {
-				// The Electron app asks for the measurement as well as the target, so
-				// the PSNR it achieved is reported back.
-				push("-print_psnr");
-				push("-psnr");
-				push(&psnr.to_string());
-			}
-			None => {}
-		}
-
-		push("-pass");
-		push(&settings.passes.to_string());
-		push("-sns");
-		push(&settings.sns.to_string());
 	}
-
+	if let Some(colour) = s.blend_alpha {
+		flag("-blend_alpha", &[format!("0x{colour:06x}")]);
+	}
+	if s.metadata.any() {
+		let kinds: Vec<&str> = [(s.metadata.exif, "exif"), (s.metadata.icc, "icc"), (s.metadata.xmp, "xmp")].into_iter().filter_map(|(on, name)| on.then_some(name)).collect();
+		flag("-metadata", &[kinds.join(",")]);
+	}
+	if let Some(crop) = job.crop {
+		flag("-crop", &[crop.x.to_string(), crop.y.to_string(), crop.width.to_string(), crop.height.to_string()]);
+	}
 	if !job.resize.is_noop() {
-		push("-resize");
-		push(&job.resize.width.to_string());
-		push(&job.resize.height.to_string());
+		flag("-resize", &[job.resize.width.to_string(), job.resize.height.to_string()]);
+		match job.resize.mode {
+			ResizeMode::Always => {}
+			ResizeMode::DownOnly => flag("-resize_mode", &["down_only".to_owned()]),
+			ResizeMode::UpOnly => flag("-resize_mode", &["up_only".to_owned()]),
+		}
 	}
 
-	// Not something the Electron app could send; it comes after everything it could, so
-	// every command line it produced is unchanged.
-	let keep = job.metadata;
-	if keep.any() {
-		let kinds: Vec<&str> = [(keep.icc, "icc"), (keep.exif, "exif"), (keep.xmp, "xmp")].into_iter().filter_map(|(on, name)| on.then_some(name)).collect();
-		args.push(OsString::from("-metadata"));
-		args.push(OsString::from(kinds.join(",")));
-	}
-
+	let mut args: Vec<OsString> = args.into_iter().map(OsString::from).collect();
 	args.push(input.as_os_str().to_os_string());
 	args.push(OsString::from("-o"));
 	args.push(output.as_os_str().to_os_string());
@@ -169,178 +108,44 @@ mod tests {
 	use std::path::Path;
 
 	use super::cwebp_args;
-	use crate::settings::{AlphaFiltering, EncodeJob, FilterType, KeepMetadata, Mode, Preset, Resize, TargetMetric, WebpSettings};
+	use crate::settings::{AlphaFiltering, Crop, EncodeJob, FilterType, ImageHint, Resize, ResizeMode, TargetMetric, WebpMetadata, WebpSettings};
 
 	/// Render an argument list as a space-joined string, so a failing assertion reads like
 	/// the command line it is about rather than a vector of `OsString`.
-	fn line(settings: &EncodeJob) -> String {
-		cwebp_args(settings, Path::new("in.png"), Path::new("out.webp")).iter().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>().join(" ")
+	fn line(job: &EncodeJob) -> String {
+		cwebp_args(job, Path::new("in.png"), Path::new("out.webp")).iter().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>().join(" ")
 	}
 
-	/// The Electron app's default lossy encode, minus its `-size 1` bug. Every flag and
-	/// its position is what `main.js` concatenates.
+	/// The app's default encode, every setting spelled out.
 	#[test]
-	fn default_lossy_matches_the_electron_command_line() {
-		assert_eq!(line(&EncodeJob::default()), "-af -mt -alpha_filter best -q 75 -alpha_q 100 -m 4 -segments 4 -partition_limit 0 -pass 6 -sns 50 in.png -o out.webp");
-	}
-
-	#[test]
-	fn lossless_pairs_exact_and_skips_the_advanced_controls() {
-		let settings = EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() });
-		// No -af: the renderer sends the filter selection for the lossy mode only. No
-		// -segments / -sns / -pass / -partition_limit either.
-		assert_eq!(line(&settings), "-lossless -exact -mt -alpha_filter best -q 75 -alpha_q 100 -m 4 in.png -o out.webp");
+	fn default_encode_spells_out_every_setting() {
+		assert_eq!(line(&EncodeJob::default()), "-q 75 -alpha_q 100 -alpha_method 1 -alpha_filter best -m 4 -segments 4 -sns 50 -f 60 -sharpness 0 -strong -af -pass 6 -qrange 0 100 -pre 0 -partition_limit 0 -mt in.png -o out.webp");
 	}
 
 	#[test]
-	fn near_lossless_sends_the_quality_slider_as_its_level_and_no_q() {
-		let settings = EncodeJob::from(WebpSettings { mode: Mode::NearLossless, quality: 60, ..Default::default() });
-		assert_eq!(line(&settings), "-near_lossless 60 -mt -alpha_filter best in.png -o out.webp");
+	fn near_lossless_is_its_own_level_beside_quality_and_method() {
+		let job = EncodeJob::from(WebpSettings { lossless: true, near_lossless: 60, quality: 90.0, method: 6, ..WebpSettings::default() });
+		let rendered = line(&job);
+		assert!(rendered.starts_with("-lossless -near_lossless 60 -q 90 "), "{rendered}");
+		assert!(rendered.contains("-m 6"), "{rendered}");
+		// Off is 100, which cwebp spells by leaving the flag out.
+		assert!(!line(&EncodeJob::from(WebpSettings { lossless: true, ..WebpSettings::default() })).contains("-near_lossless"));
 	}
 
 	#[test]
-	fn jpeg_like_is_lossy_with_the_basic_controls_only() {
-		let settings = EncodeJob::from(WebpSettings { mode: Mode::JpegLike, ..Default::default() });
-		assert_eq!(line(&settings), "-jpeg_like -mt -alpha_filter best -q 75 -alpha_q 100 -m 4 in.png -o out.webp");
-	}
-
-	/// A preset clears the alpha-filter flag so the preset's own choice stands, and sends
-	/// quality but not alpha quality or method.
-	#[test]
-	fn preset_mode_clears_alpha_filter() {
-		let settings = EncodeJob::from(WebpSettings { mode: Mode::Preset, preset: Some(Preset::Drawing), ..Default::default() });
-		assert_eq!(line(&settings), "-preset drawing -mt -q 75 in.png -o out.webp");
-	}
-
-	#[test]
-	fn every_preset_reaches_the_command_line() {
-		for (preset, expected) in [(Preset::Default, "default"), (Preset::Photo, "photo"), (Preset::Picture, "picture"), (Preset::Drawing, "drawing"), (Preset::Icon, "icon"), (Preset::Text, "text")] {
-			let settings = EncodeJob::from(WebpSettings { mode: Mode::Preset, preset: Some(preset), ..Default::default() });
-			assert_eq!(line(&settings), format!("-preset {expected} -mt -q 75 in.png -o out.webp"));
+	fn every_switch_reaches_the_command_line() {
+		let job = EncodeJob { crop: Some(Crop { x: 1, y: 2, width: 30, height: 20 }), resize: Resize { width: 16, height: 0, mode: ResizeMode::DownOnly }, webp: WebpSettings { exact: true, quality: 42.5, alpha_compression: false, alpha_filtering: AlphaFiltering::Off, image_hint: ImageHint::Graph, target: Some(TargetMetric::Psnr(41.5)), filter_type: FilterType::Simple, autofilter: false, qmin: 10, qmax: 90, preprocessing: 3, jpeg_like: true, sharp_yuv: true, low_memory: true, multi_threading: false, keep_alpha: false, blend_alpha: Some(0x00ff_8000), metadata: WebpMetadata { exif: true, icc: false, xmp: true }, ..WebpSettings::default() }, ..Default::default() };
+		let rendered = line(&job);
+		for expected in ["-exact", "-q 42.5", "-alpha_method 0", "-alpha_filter none", "-hint graph", "-psnr 41.5", "-nostrong", "-qrange 10 90", "-pre 3", "-jpeg_like", "-sharp_yuv", "-low_memory", "-noalpha", "-blend_alpha 0xff8000", "-metadata exif,xmp", "-crop 1 2 30 20", "-resize 16 0 -resize_mode down_only"] {
+			assert!(rendered.contains(expected), "missing `{expected}` in {rendered}");
 		}
-	}
-
-	/// An unselected preset must not silently fall through to the lossy defaults.
-	#[test]
-	fn preset_mode_without_a_preset_emits_no_preset_flag() {
-		let settings = EncodeJob::from(WebpSettings { mode: Mode::Preset, preset: None, ..Default::default() });
-		assert!(!line(&settings).contains("-preset"), "an unselected preset must be caught by validate(), not guessed at");
-		assert_eq!(settings.validate(), Err(crate::settings::ValidationError::MissingPreset));
-	}
-
-	#[test]
-	fn manual_filtering_adds_strength_and_sharpness() {
-		let strong = EncodeJob::from(WebpSettings { filter: FilterType::Strong, filter_strength: 65, filter_sharpness: 3, ..Default::default() });
-		assert_eq!(line(&strong), "-strong -mt -f 65 -sharpness 3 -alpha_filter best -q 75 -alpha_q 100 -m 4 -segments 4 -partition_limit 0 -pass 6 -sns 50 in.png -o out.webp");
-		let simple = EncodeJob::from(WebpSettings { filter: FilterType::Simple, filter_strength: 10, filter_sharpness: 7, ..Default::default() });
-		assert_eq!(line(&simple), "-nostrong -mt -f 10 -sharpness 7 -alpha_filter best -q 75 -alpha_q 100 -m 4 -segments 4 -partition_limit 0 -pass 6 -sns 50 in.png -o out.webp");
-	}
-
-	/// `-metadata` names what to keep, after every flag the Electron app could send, and is
-	/// absent when nothing is kept — so every command line that app produced is unchanged.
-	#[test]
-	fn metadata_is_last_and_absent_by_default() {
-		let tail = |metadata: KeepMetadata| {
-			let job = EncodeJob { metadata, ..EncodeJob::default() };
-			line(&job).trim_end_matches(" in.png -o out.webp").rsplit(" -sns 50").next().unwrap_or_default().to_owned()
-		};
-		assert_eq!(tail(KeepMetadata::default()), "");
-		assert_eq!(tail(KeepMetadata { icc: true, ..KeepMetadata::default() }), " -metadata icc");
-		assert_eq!(tail(KeepMetadata { icc: true, exif: true, xmp: true }), " -metadata icc,exif,xmp");
-		assert_eq!(tail(KeepMetadata { exif: true, xmp: true, ..KeepMetadata::default() }), " -metadata exif,xmp");
-	}
-
-	/// Under auto filtering the encoder picks the strength, so the user's slider values
-	/// must not be sent — the Electron UI disables both sliders in that state.
-	#[test]
-	fn auto_filtering_withholds_the_strength_sliders() {
-		let settings = EncodeJob::from(WebpSettings { filter: FilterType::Auto, filter_strength: 99, filter_sharpness: 5, ..Default::default() });
-		let rendered = line(&settings);
-		assert!(rendered.contains("-af"));
-		assert!(!rendered.contains("-f 99"), "auto filtering must not send a manual strength: {rendered}");
-		assert!(!rendered.contains("-sharpness"), "auto filtering must not send a sharpness: {rendered}");
-	}
-
-	#[test]
-	fn target_size_and_psnr_are_mutually_exclusive() {
-		let sized = EncodeJob::from(WebpSettings { target: Some(TargetMetric::Size(51_200)), ..Default::default() });
-		let rendered = line(&sized);
-		assert!(rendered.contains("-size 51200"), "{rendered}");
-		assert!(!rendered.contains("-psnr"), "{rendered}");
-
-		let psnr = EncodeJob::from(WebpSettings { target: Some(TargetMetric::Psnr(42)), ..Default::default() });
-		let rendered = line(&psnr);
-		assert!(rendered.contains("-print_psnr -psnr 42"), "{rendered}");
-		assert!(!rendered.contains("-size"), "{rendered}");
-	}
-
-	/// The regression guard for the divergence: a default encode must not carry a size
-	/// target at all.
-	#[test]
-	fn default_encode_carries_no_size_target() {
-		assert!(!line(&EncodeJob::default()).contains("-size"), "the Electron app's `-size 1` default must not come back");
-	}
-
-	#[test]
-	fn optional_lossy_switches_appear_only_when_set() {
-		let all_on = EncodeJob::from(WebpSettings { sharp_yuv: true, low_memory: true, ..Default::default() });
-		let rendered = line(&all_on);
-		assert!(rendered.contains("-sharp_yuv"), "{rendered}");
-		assert!(rendered.contains("-low_memory"), "{rendered}");
-
-		let rendered = line(&EncodeJob::default());
-		assert!(!rendered.contains("-sharp_yuv"), "{rendered}");
-		assert!(!rendered.contains("-low_memory"), "{rendered}");
-	}
-
-	/// `-sharp_yuv` is a lossy-only control: the Electron renderer sends it in the lossy
-	/// branch alone, so the other modes must not pick it up from a stale settings value.
-	#[test]
-	fn sharp_yuv_does_not_leak_into_other_modes() {
-		for mode in [Mode::Lossless, Mode::NearLossless, Mode::JpegLike, Mode::Preset] {
-			let settings = EncodeJob::from(WebpSettings { mode, preset: Some(Preset::Photo), sharp_yuv: true, low_memory: true, ..Default::default() });
-			let rendered = line(&settings);
-			assert!(!rendered.contains("-sharp_yuv"), "{mode:?} must not send -sharp_yuv: {rendered}");
-			assert!(!rendered.contains("-low_memory"), "{mode:?} must not send -low_memory: {rendered}");
+		for absent in ["-af", "-mt", "-lossless", "-size"] {
+			assert!(!rendered.split(' ').any(|word| word == absent), "unexpected `{absent}` in {rendered}");
 		}
-	}
-
-	#[test]
-	fn multi_threading_can_be_turned_off() {
-		let settings = EncodeJob::from(WebpSettings { multi_threading: false, ..Default::default() });
-		assert!(!line(&settings).contains("-mt"));
-	}
-
-	#[test]
-	fn alpha_filtering_variants_and_absence() {
-		for (choice, expected) in [(AlphaFiltering::Off, "none"), (AlphaFiltering::Fast, "fast"), (AlphaFiltering::Best, "best")] {
-			let settings = EncodeJob::from(WebpSettings { alpha_filtering: Some(choice), ..Default::default() });
-			assert!(line(&settings).contains(&format!("-alpha_filter {expected}")));
-		}
-		let settings = EncodeJob::from(WebpSettings { alpha_filtering: None, ..Default::default() });
-		assert!(!line(&settings).contains("-alpha_filter"));
-	}
-
-	/// Resize is sent in every mode, and only when at least one dimension is non-zero.
-	#[test]
-	fn resize_is_emitted_in_every_mode_when_set() {
-		for mode in [Mode::Lossy, Mode::Lossless, Mode::NearLossless, Mode::JpegLike, Mode::Preset] {
-			let settings = EncodeJob { resize: Resize { width: 1024, height: 0, no_enlarge: false }, webp: WebpSettings { mode, preset: Some(Preset::Icon), ..Default::default() }, ..Default::default() };
-			assert!(line(&settings).contains("-resize 1024 0"), "{mode:?} must carry the resize");
-		}
-		assert!(!line(&EncodeJob::default()).contains("-resize"));
-	}
-
-	/// Resize lands immediately before the input path, as the last option.
-	#[test]
-	fn resize_is_the_last_option_before_the_paths() {
-		let settings = EncodeJob { resize: Resize { width: 0, height: 480, no_enlarge: false }, ..Default::default() };
-		assert!(line(&settings).ends_with("-resize 0 480 in.png -o out.webp"), "{}", line(&settings));
 	}
 
 	/// Paths go through as `OsString` rather than being formatted into a shell string, so
-	/// a space or a quote in a filename cannot break the invocation the way it can in the
-	/// Electron app, which builds one shell line and spawns it with `shell: true`.
+	/// a space or a quote in a filename cannot break the invocation.
 	#[test]
 	fn paths_are_passed_as_arguments_not_shell_text() {
 		let args = cwebp_args(&EncodeJob::default(), Path::new("/tmp/a b/holiday \"photo\".png"), Path::new("/tmp/out dir/holiday.webp"));

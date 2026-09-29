@@ -32,7 +32,7 @@ use std::{
 };
 
 use skidbladnir_encode::{
-	animation::{self, Animation, Frame}, settings::{AlphaFiltering, FilterType, Mode, Resize, WebpSettings}
+	animation::{self, Animation, Frame}, settings::{FilterType, Resize, ResizeMode, WebpSettings}
 };
 
 const WIDTH: u32 = 48;
@@ -68,7 +68,7 @@ fn encode(settings: &WebpSettings, animation: &Animation) -> Vec<u8> {
 #[test]
 fn lossless_round_trip_is_exact() {
 	let original = fixture(3);
-	let settings = WebpSettings { mode: Mode::Lossless, ..Default::default() };
+	let settings = WebpSettings { lossless: true, exact: true, ..Default::default() };
 	let decoded = animation::decode(&encode(&settings, &original)).expect("our output must decode");
 	assert_eq!(decoded, original);
 }
@@ -135,7 +135,7 @@ fn fixture_frame(index: u32) -> Vec<u8> {
 /// that only animations exercise.
 #[test]
 fn a_still_webp_decodes_as_one_frame() {
-	let still = skidbladnir_encode::encode_rgba(&WebpSettings { mode: Mode::Lossless, ..Default::default() }.into(), &skidbladnir_encode::RgbaImage { width: WIDTH, height: HEIGHT, pixels: &fixture(0).frames[0].pixels }).expect("encode a still");
+	let still = skidbladnir_encode::encode_rgba(&WebpSettings { lossless: true, exact: true, ..Default::default() }.into(), &skidbladnir_encode::RgbaImage { width: WIDTH, height: HEIGHT, pixels: &fixture(0).frames[0].pixels }).expect("encode a still");
 	let decoded = animation::decode(&still).expect("a still WebP must decode");
 	assert_eq!(decoded.frames.len(), 1);
 	assert_eq!(decoded.frames[0].pixels, fixture(0).frames[0].pixels);
@@ -144,7 +144,7 @@ fn a_still_webp_decodes_as_one_frame() {
 /// The resize applies to every frame, with the still path's aspect-ratio rule.
 #[test]
 fn resize_applies_to_every_frame() {
-	let resized = animation::encode(&WebpSettings::default(), Resize { width: 24, height: 0, no_enlarge: false }, &fixture(0), &mut |_| true).expect("encode");
+	let resized = animation::encode(&WebpSettings::default(), Resize::to(24, 0), &fixture(0), &mut |_| true).expect("encode");
 	let decoded = animation::decode(&resized).expect("decode");
 	assert_eq!((decoded.width, decoded.height, decoded.frames.len()), (24, 16, 4));
 }
@@ -153,11 +153,11 @@ fn resize_applies_to_every_frame() {
 /// smaller than the target is left alone, and a larger one is still shrunk.
 #[test]
 fn never_enlarge_applies_to_the_canvas() {
-	let enlarge = Resize { width: WIDTH * 2, height: 0, no_enlarge: true };
+	let enlarge = Resize { width: WIDTH * 2, height: 0, mode: ResizeMode::DownOnly };
 	let kept = animation::decode(&animation::encode(&WebpSettings::default(), enlarge, &fixture(0), &mut |_| true).expect("encode")).expect("decode");
 	assert_eq!((kept.width, kept.height, kept.frames.len()), (WIDTH, HEIGHT, 4), "a smaller canvas must not be enlarged");
 
-	let reduce = Resize { width: 24, height: 0, no_enlarge: true };
+	let reduce = Resize { width: 24, height: 0, mode: ResizeMode::DownOnly };
 	let reduced = animation::decode(&animation::encode(&WebpSettings::default(), reduce, &fixture(0), &mut |_| true).expect("encode")).expect("decode");
 	assert_eq!((reduced.width, reduced.height), (24, 16), "a larger canvas is still resized");
 }
@@ -183,7 +183,7 @@ fn progress_and_cancel() {
 #[test]
 fn controls_without_an_img2webp_flag_reach_the_frames() {
 	let animation = fixture(0);
-	let base = WebpSettings { filter: FilterType::Strong, filter_strength: 60, ..Default::default() };
+	let base = WebpSettings { autofilter: false, filter_type: FilterType::Strong, filter_strength: 60, ..Default::default() };
 	let baseline = encode(&base, &animation);
 	let mut variants: Vec<(&str, WebpSettings)> = Vec::new();
 	let mut add = |name: &'static str, settings: WebpSettings| variants.push((name, settings));
@@ -225,25 +225,26 @@ fn write_pam(path: &Path, pixels: &[u8]) {
 
 /// Our settings, and the `img2webp` flags that ask libwebp for the same per-frame config.
 ///
-/// The lossy cases pin three controls to libwebp's own defaults, because `img2webp` has no
-/// flag for any of them: the filter (the app defaults to auto; libwebp to strong, strength
-/// 60), the pass count (the app 6; libwebp 1) and alpha filtering (the app "best"; libwebp
-/// "fast" — found by `tests/gif.rs`, where it moved mostly transparent frames by 2 bytes). The pass count is not inert
-/// without a target, as one might assume — at `-q 95 -m 1` it changes the output, found
-/// by this test.
+/// The lossy cases start from libwebp's own defaults ([`WebpSettings::libwebp_defaults`]),
+/// because `img2webp` has no flag for three controls the app sets differently: the filter
+/// (the app defaults to `-af`; libwebp to strong, strength 60), the pass count (the app 6;
+/// libwebp 1) and alpha filtering (the app "best"; libwebp "fast" — found by
+/// `tests/gif.rs`, where it moved mostly transparent frames by 2 bytes). The pass count is
+/// not inert without a target, as one might assume — at `-q 95 -m 1` it changes the
+/// output, found by this test.
 fn cases() -> Vec<(&'static str, WebpSettings, Vec<&'static str>)> {
-	let lossy = WebpSettings { filter: FilterType::Strong, filter_strength: 60, passes: 1, alpha_filtering: Some(AlphaFiltering::Fast), ..Default::default() };
+	let lossy = WebpSettings { multi_threading: true, ..WebpSettings::libwebp_defaults() };
 	let mut cases = Vec::new();
 	let mut add = |name: &'static str, settings: WebpSettings, flags: Vec<&'static str>| cases.push((name, settings, flags));
-	add("lossless", WebpSettings { mode: Mode::Lossless, ..Default::default() }, vec!["-lossless", "-exact", "-q", "75", "-m", "4"]);
-	add("lossless q100 m6", WebpSettings { mode: Mode::Lossless, quality: 100, method: 6, ..Default::default() }, vec!["-lossless", "-exact", "-q", "100", "-m", "6"]);
-	add("lossless q0 m0", WebpSettings { mode: Mode::Lossless, quality: 0, method: 0, ..Default::default() }, vec!["-lossless", "-exact", "-q", "0", "-m", "0"]);
+	add("lossless", WebpSettings { lossless: true, exact: true, ..Default::default() }, vec!["-lossless", "-exact", "-q", "75", "-m", "4"]);
+	add("lossless q100 m6", WebpSettings { lossless: true, exact: true, quality: 100.0, method: 6, ..Default::default() }, vec!["-lossless", "-exact", "-q", "100", "-m", "6"]);
+	add("lossless q0 m0", WebpSettings { lossless: true, exact: true, quality: 0.0, method: 0, ..Default::default() }, vec!["-lossless", "-exact", "-q", "0", "-m", "0"]);
 	add("lossy q75", lossy.clone(), vec!["-lossy", "-q", "75", "-m", "4"]);
-	add("lossy q20 m6", WebpSettings { quality: 20, method: 6, ..lossy.clone() }, vec!["-lossy", "-q", "20", "-m", "6"]);
-	add("lossy q95 m1", WebpSettings { quality: 95, method: 1, ..lossy.clone() }, vec!["-lossy", "-q", "95", "-m", "1"]);
+	add("lossy q20 m6", WebpSettings { quality: 20.0, method: 6, ..lossy.clone() }, vec!["-lossy", "-q", "20", "-m", "6"]);
+	add("lossy q95 m1", WebpSettings { quality: 95.0, method: 1, ..lossy.clone() }, vec!["-lossy", "-q", "95", "-m", "1"]);
 	add("lossy sharp yuv", WebpSettings { sharp_yuv: true, ..lossy.clone() }, vec!["-lossy", "-sharp_yuv", "-q", "75", "-m", "4"]);
-	add("near-lossless 60", WebpSettings { mode: Mode::NearLossless, quality: 60, ..Default::default() }, vec!["-near_lossless", "60"]);
-	add("near-lossless 0", WebpSettings { mode: Mode::NearLossless, quality: 0, ..Default::default() }, vec!["-near_lossless", "0"]);
+	add("near-lossless 60", WebpSettings { lossless: true, near_lossless: 60, ..Default::default() }, vec!["-near_lossless", "60"]);
+	add("near-lossless 0", WebpSettings { lossless: true, near_lossless: 0, ..Default::default() }, vec!["-near_lossless", "0"]);
 	cases
 }
 

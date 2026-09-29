@@ -25,32 +25,31 @@ repository = "https://github.com/basic-automation/Skidbladnir"
 # none of the advanced controls, which is why libwebp-sys does the encoding. Default
 # features are off so the binary carries the four formats the app accepts and no more.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tiff"] }
-# Read directly (the same version `image` uses) for the PNG text chunks that carry EXIF
-# and XMP, which `image` does not expose; see `src/metadata.rs`.
-png = "0.18"
-# JPEG input is decoded by libjpeg-turbo's decoder (inside MozJPEG, built from source with
-# `cc`, no CMake), because that is what `cwebp` decodes JPEGs with: any other decoder rounds
-# its IDCT and upsampling differently, and JPEG-to-WebP output drifts off `cwebp`'s. CMYK
-# JPEGs, which `cwebp` refuses, stay with `image`. See `decode_jpeg` in `src/source.rs`.
-mozjpeg = "0.10"
 base64 = "0.23"
-# The AVIF encoder (ROADMAP.md Phase 7). Rust over rav1e: no C library on any platform.
-# Default features on: `asm` is rav1e's hand-written SIMD, assembled with `nasm`, which is
-# therefore a build requirement (README "Build from source"; installed on every CI
-# runner). `threading` is what lets the multi-threading control mean something.
-ravif = "0.13"
 # The AVIF decoder: the user's AVIF input, and our own AVIF output for the preview, so
 # the comparison shows on every platform rather than only where the web engine happens
 # to decode AVIF. Rust over rav1d, the Rust port of dav1d, whose SIMD also needs `nasm`.
 # `binary` is off: it only adds a PNG writer for the crate's own command-line tool.
 avif-decode = { version = "3", default-features = false }
 libwebp-sys = "0.14"
+# Metadata: the source's ICC profile, Exif and XMP, read the way each reference tool reads
+# them (src/metadata.rs). `png` and `tiff` are the decoders `image` already uses, taken
+# directly for their chunks and tags; `flate2` inflates PNG's compressed text and iCCP.
+# (JPEG input is decoded by libjpeg-turbo, built from third_party/ by the encode crate's
+# build.rs, because every reference tool decodes JPEG with it.)
+png = "0.18"
+tiff = "0.11"
+flate2 = "1"
 # The JPEG XL encoder is libjxl itself (BSD-3), bound directly in `src/jxl.rs`. The
 # existing Rust wrappers (`jpegxl-rs`, `jpegxl-sys`) are GPL-3.0, which an ISC app cannot
 # link, so they are not used. `jpegxl-src` carries libjxl's source and its CMake build;
 # it runs at build time only and nothing of it is linked. `pkg-config` is the fallback
 # for a dev host without CMake, which links the system libjxl instead (see build.rs).
 jpegxl-src = "0.12"
+# libavif and libaom are built from the pinned submodules with CMake (see
+# crates/skidbladnir-encode/build.rs), and the avifenc shim beside them with `cc`.
+cmake = "0.1"
+cc = "1"
 pkg-config = "0.3"
 # The JPEG XL decoder: our own output for the preview and the reported dimensions, and
 # JPEG XL input. Pure Rust, so no second copy of libjxl's decoder is needed.

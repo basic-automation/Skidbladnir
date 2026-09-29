@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Regenerate the third-party notices from the licence files of the native libraries the
-app ships, read from the exact sources that are built: the libwebp-sys, mozjpeg-sys and
-jpegxl-src crates in Cargo's registry, and the libheif, libde265, Kvazaar and x265
-submodules.
+app ships, read from the exact sources that are built: the libwebp-sys and jpegxl-src
+crates in Cargo's registry, and the libavif, libaom, libjpeg-turbo, libheif, libde265,
+Kvazaar and x265 submodules.
 
     scripts/third-party-notices.py [--check]
 
@@ -20,18 +20,20 @@ meta = json.loads(subprocess.run(["cargo", "metadata", "--format-version", "1"],
 crate = {p["name"]: pathlib.Path(p["manifest_path"]).parent for p in meta["packages"]}
 webp = crate["libwebp-sys"] / "vendor"
 jxl = crate["jpegxl-src"] / "libjxl"
-mozjpeg = crate["mozjpeg-sys"]
 # The pinned tag is recorded beside each submodule in .gitmodules (`version = ...`): a
 # shallow CI checkout has no tags to describe.
 submodule = lambda name: subprocess.run(["git", "config", "-f", str(root / ".gitmodules"), f"submodule.third_party/{name}.version"], capture_output=True, text=True, check=True).stdout.strip()
 
 common = [
 	("libwebp", "BSD-3-Clause", "The WebP encoder and decoder, statically linked.", [webp / "COPYING", webp / "PATENTS"]),
-	("MozJPEG (libjpeg-turbo)", "IJG AND BSD-3-Clause AND Zlib", "The JPEG decoder for JPEG input, statically linked. This software is based in part on the work of the Independent JPEG Group.", [mozjpeg / "LICENSE"]),
 	("libjxl", "BSD-3-Clause", "The JPEG XL encoder, statically linked.", [jxl / "LICENSE", jxl / "PATENTS"]),
 	("Highway (part of libjxl)", "BSD-3-Clause", "SIMD library used by libjxl.", [jxl / "third_party/highway/LICENSE-BSD3"]),
 	("Brotli (part of libjxl)", "MIT", "Compression used by libjxl.", [jxl / "third_party/brotli/LICENSE"]),
 	("skcms (part of libjxl)", "BSD-3-Clause", "Colour management used by libjxl.", [jxl / "third_party/skcms/LICENSE"]),
+	(f"libavif {submodule('libavif')}", "BSD-2-Clause", "AVIF writing, statically linked, with parts of its avifenc app adapted in native/avif_shim.c and its JPEG reader (apps/shared/avifjpeg.c, with third_party/iccjpeg) compiled into it.", [root / "third_party/libavif/LICENSE"]),
+	(f"libaom {submodule('aom')}", "BSD-2-Clause", "The AV1 encoder for AVIF, statically linked.", [root / "third_party/aom/LICENSE", root / "third_party/aom/PATENTS"]),
+	(f"libjpeg-turbo {submodule('libjpeg-turbo')}", "IJG and BSD-3-Clause (and Zlib for its SIMD code)", "JPEG decoding, statically linked. This software is based in part on the work of the Independent JPEG Group.", [root / "third_party/libjpeg-turbo/LICENSE.md", root / "third_party/libjpeg-turbo/README.ijg"]),
+	(f"libheif {submodule('libheif')} image readers (heifio)", "MIT", "heif-enc's JPEG reader and Exif helpers (heifio/decoder_jpeg.cc, heifio/exif.cc), compiled into the app by native/heic_jpeg.cc. Unlike the rest of libheif they are MIT-licensed.", [(root / "third_party/libheif/heifio/decoder_jpeg.cc", "/*", "*/")]),
 ]
 heif = [
 	(f"libde265 {submodule('libde265')}", "LGPL-3.0", "The HEVC decoder for HEIC, built into the shipped libheif.", [root / "third_party/libde265/COPYING"]),
@@ -78,7 +80,14 @@ for name, (intro, sections) in editions.items():
 	for title, spdx, what, files in sections:
 		out += [f"## {title}", "", f"{what} Licence: {spdx}.", ""]
 		for path in files:
-			out += ["```text", path.read_text(encoding="utf-8", errors="replace").rstrip(), "```", ""]
+			if isinstance(path, tuple):
+				# The licence comment at the top of a source file.
+				path, start, end = path
+				source = path.read_text(encoding="utf-8")
+				text = source[source.index(start) + len(start):source.index(end)].strip("\n")
+			else:
+				text = path.read_text(encoding="utf-8", errors="replace").rstrip()
+			out += ["```text", text, "```", ""]
 	text = "\n".join(out)
 	target = root / name
 	if "--check" in sys.argv:

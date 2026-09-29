@@ -22,9 +22,12 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
-  # Build libjxl from source and link it statically, as releases do, and fail if that
-  # cannot happen rather than quietly linking whatever libjxl the runner has.
+  # Build libjxl, libavif with libaom, and libjpeg-turbo from source and link them
+  # statically, as releases do, and fail if that cannot happen rather than quietly linking
+  # whatever the runner has.
   SKIDBLADNIR_LIBJXL: vendored
+  SKIDBLADNIR_LIBAVIF: vendored
+  SKIDBLADNIR_LIBJPEG: vendored
 
 jobs:
   # Formatting gets its own job on **nightly rustfmt**, deliberately, while everything
@@ -54,7 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # The notices check reads the libheif, libde265, Kvazaar and x265 licences from here.
+          # The notices check reads the native libraries' licences from the submodules.
           submodules: true
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@v2
@@ -92,16 +95,14 @@ jobs:
 
       - name: Install the Linux system dependencies Tauri needs
         # Needed from Phase 1 onward, when src-tauri/ joins the workspace: Tauri 2 links
-        # against webkit2gtk-4.1, and patchelf is what bundles the AppImage. The image
-        # libraries are for building the reference cwebp below, which needs a PNG reader.
-        # libavif-bin is libavif's `avifdec` and `avifenc`, for the AVIF gates; libjxl-tools
-        # is libjxl's `djxl`, the reference decoder for the JPEG XL gate; libheif-examples is
-        # libheif's `heif-dec`, the reference decoder for HEIC's; libgif-dev is for building
-        # the reference gif2webp.
+        # against webkit2gtk-4.1, and patchelf is what bundles the AppImage.
+        # libavif-bin is libavif's `avifdec` and `avifenc`, for the AVIF gates, and
+        # libjxl-tools is libjxl's `djxl`, the reference decoder for the JPEG XL gate,
+        # and libheif-examples is libheif's `heif-dec`, the reference decoder for HEIC's.
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev libpng-dev libjpeg-dev libtiff-dev libgif-dev libavif-bin libjxl-tools libheif-examples libheif-plugin-libde265
+          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev libavif-bin libjxl-tools libheif-examples libheif-plugin-libde265
 
       - uses: actions/setup-node@v7
         with:
@@ -131,8 +132,9 @@ jobs:
           npm --prefix frontend run generate
 
       - name: Install nasm
-        # The AV1 encoder (rav1e) and decoder (rav1d) assemble their SIMD with nasm; their
-        # build scripts fail outright without it. So does x265's, in the GPL edition.
+        # libaom, libjpeg-turbo and the AV1 decoder (rav1d) assemble their SIMD with nasm;
+        # rav1d's and libaom's builds fail outright without it. So does x265's, in the GPL
+        # edition.
         uses: ilammy/setup-nasm@v1
 
       - name: Build libheif (${{ matrix.edition }} edition)
@@ -174,62 +176,82 @@ jobs:
         if: matrix.edition == 'gpl'
         run: cargo test --package skidbladnir-encode --features x265 --test heic_reference -- --nocapture
 
-      - name: Build a version-matched reference cwebp
-        if: matrix.edition == 'standard' && matrix.os != 'windows-latest'
-        # Byte parity is only meaningful between EQUAL libwebp versions, so the reference
-        # is built from the same upstream tag as the libwebp that libwebp-sys vendors,
-        # rather than whatever apt or brew happens to ship. The version comes from the
-        # linked library itself, so a libwebp-sys bump is followed automatically instead
-        # of silently degrading the gate to a skip.
-        #
-        # Unix only: libwebp's makefile.unix does not build on the Windows runner. Parity
-        # is reported there and enforced on the other two.
-        shell: bash
+      - name: Install the reference decoders (macOS)
+        # avifdec and avifenc, djxl and heif-dec; Linux has them from apt above.
+        if: matrix.os == 'macos-latest' && matrix.edition == 'standard'
+        run: brew install libavif jpeg-xl libheif
+
+      - name: reference decoders read what we write
+        # Required on Linux and macOS, where the decoders are installed; reported only on
+        # Windows, which has none. The GPL legs check their own HEIC above.
+        if: matrix.edition == 'standard'
+        env:
+          SKIDBLADNIR_REQUIRE_PARITY: ${{ matrix.os != 'windows-latest' && '1' || '' }}
+        # The encoders' byte parity is the `parity` job's. These are the gates a reference
+        # DECODER keeps, run on every platform: libavif's avifdec decodes what we write
+        # (avif_reference), libjxl's djxl decodes it and rebuilds recompressed JPEGs
+        # (jxl_reference), and the runner's own libheif (heif-dec) decodes our HEIC
+        # (heic_reference). avif_input is the wide AVIF-input gate: avifenc writes 17 colour
+        # encodings and our decoder must agree with avifdec's reading of them. Each prints
+        # its verdict or a loud "NOT RUN".
+        run: cargo test --package skidbladnir-encode --test avif_reference --test jxl_reference --test heic_reference --test avif_input -- --nocapture
+
+  # Byte parity with the four reference encoders — the claim that every result of cwebp,
+  # avifenc, cjxl and heif-enc (with Kvazaar) for a still image is one Skidbladnir can
+  # produce. Each reference is built from the source of the library we link, and all of them
+  # read JPEG through the libjpeg-turbo we link (scripts/build-reference-tools.sh), so a
+  # mismatch is an option or a reader that differs, never a version. A missing or
+  # mismatched reference fails the job rather than skipping it.
+  parity:
+    name: parity with the reference encoders
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: Install the reference tools' development files, and the decoders
+        # libtiff is cwebp's TIFF reader; giflib is for gif2webp, the reference for GIF input.
+        # avifdec, djxl and heif-info are the metadata gate's readers for AVIF, JPEG XL and
+        # HEIC output (tests/metadata.rs), which has no byte-for-byte reference there.
         run: |
-          # cwebp's makefile.unix compiles its PNG/JPEG/TIFF readers unconditionally and,
-          # on macOS, looks for their headers in /opt/local (MacPorts) which the runner
-          # does not have. CPATH and LIBRARY_PATH are honoured by the compiler directly,
-          # so the Homebrew prefix is added without overriding the makefile's own
-          # variables — passing EXTRA_FLAGS on the command line would replace them.
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            # libavif provides `avifdec` and `avifenc` for the AVIF gates, jpeg-xl `djxl` for
-            # JPEG XL's and libheif `heif-dec` for HEIC's; giflib is for the reference gif2webp.
-            brew install jpeg-turbo libpng libtiff giflib libavif jpeg-xl libheif
-            prefix=$(brew --prefix)
-            export CPATH="$prefix/include${CPATH:+:$CPATH}"
-            export LIBRARY_PATH="$prefix/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libpng-dev libtiff-dev libgif-dev zlib1g-dev libavif-bin libjxl-tools libheif-examples libheif-plugin-libde265
+
+      - name: Install nasm
+        uses: ilammy/setup-nasm@v1
+
+      - name: Build libheif (Kvazaar + libde265)
+        uses: ./.github/actions/libheif
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Restore the reference encoders
+        id: references
+        uses: actions/cache@v6
+        with:
+          path: build/reference
+          key: reference-${{ runner.os }}-${{ hashFiles('.gitmodules', 'Cargo.lock', 'scripts/build-reference-tools.sh', 'scripts/build-reference-avifenc.sh', 'scripts/build-libheif.sh') }}-${{ github.sha }}
+          restore-keys: reference-${{ runner.os }}-${{ hashFiles('.gitmodules', 'Cargo.lock', 'scripts/build-reference-tools.sh', 'scripts/build-reference-avifenc.sh', 'scripts/build-libheif.sh') }}-
+
+      - name: Build the reference encoders
+        run: |
+          if [ -x build/reference/bin/cjxl ]; then
+            printf '%s\n' "SKIDBLADNIR_REFERENCE_CWEBP=$PWD/build/reference/bin/cwebp" "SKIDBLADNIR_REFERENCE_IMG2WEBP=$PWD/build/reference/bin/img2webp" "SKIDBLADNIR_REFERENCE_GIF2WEBP=$PWD/build/reference/bin/gif2webp" "SKIDBLADNIR_REFERENCE_AVIFENC=$PWD/build/reference/bin/avifenc" "SKIDBLADNIR_REFERENCE_CJXL=$PWD/build/reference/bin/cjxl" "SKIDBLADNIR_REFERENCE_HEIF_ENC=$PWD/build/reference/heif/bin/heif-enc" >> "$GITHUB_ENV"
+          else
+            scripts/build-reference-tools.sh >> "$GITHUB_ENV"
           fi
-          version=$(cargo run -q --example libwebp-version --package skidbladnir-encode)
-          echo "linked libwebp: $version"
-          git clone --depth 1 --branch "v$version" https://github.com/webmproject/libwebp.git "$RUNNER_TEMP/libwebp"
-          # img2webp is the reference for animated WebP (tests/animation.rs), gif2webp for
-          # GIF input (tests/gif.rs); gif2webp needs giflib, installed above.
-          make -C "$RUNNER_TEMP/libwebp" -f makefile.unix -j4 examples/cwebp examples/img2webp examples/gif2webp
-          echo "SKIDBLADNIR_REFERENCE_CWEBP=$RUNNER_TEMP/libwebp/examples/cwebp" >> "$GITHUB_ENV"
-          echo "SKIDBLADNIR_REFERENCE_IMG2WEBP=$RUNNER_TEMP/libwebp/examples/img2webp" >> "$GITHUB_ENV"
-          echo "SKIDBLADNIR_REFERENCE_GIF2WEBP=$RUNNER_TEMP/libwebp/examples/gif2webp" >> "$GITHUB_ENV"
           echo "SKIDBLADNIR_REQUIRE_PARITY=1" >> "$GITHUB_ENV"
 
-      - name: encoder parity against the reference cwebp
-        # Run separately with --nocapture so the parity verdict is always in the log: the
-        # test prints either "PARITY OK: N settings matched" or a loud "PARITY NOT RUN"
-        # with the reason. A silent skip is exactly what must not happen.
-        #
-        # On Linux and macOS SKIDBLADNIR_REQUIRE_PARITY is set by the step above, so a
-        # missing or mismatched reference FAILS rather than skipping. On Windows it is
-        # unset and the result is reported only.
-        #
-        # cmyk_jpeg rides along because it also needs the reference: it checks that cwebp
-        # still REFUSES CMYK JPEG, the one input Skidbladnir converts and cwebp does not.
-        # avif_reference is the AVIF gate: libavif's avifdec decodes what we write, and
-        # jxl_reference is JPEG XL's: libjxl's djxl decodes it and rebuilds recompressed JPEGs.
-        # heic_reference is HEIC's: the runner's own libheif (`heif-dec`) decodes it.
-        # animation is the animated-WebP gate, byte for byte against img2webp.
-        # gif is the GIF-input gate, byte for byte against gif2webp. avif_input is the wide
-        # AVIF-input gate: avifenc writes 17 colour encodings and our decoder must agree
-        # with avifdec's reading of them. metadata is `-metadata`, against cwebp itself.
-        if: matrix.edition == 'standard'
-        run: cargo test --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_reference --test jxl_reference --test heic_reference --test animation --test gif --test avif_input --test metadata -- --nocapture
+      - name: byte parity with cwebp, img2webp, gif2webp, avifenc, cjxl and heif-enc
+        # Released builds are what the claim is about, so the comparison is too.
+        # cmyk_jpeg rides along because it checks that cwebp still REFUSES a CMYK JPEG, the
+        # one input Skidbladnir converts to WebP and cwebp does not. animation is animated
+        # WebP against img2webp, gif is GIF input against gif2webp, and metadata is
+        # `-metadata` against cwebp.
+        run: cargo test --release --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_parity --test jxl_parity --test heic_parity --test animation --test gif --test metadata -- --nocapture
 
   # Drives the real window over WebDriver. Separate from the compile matrix because it
   # needs a display, a WebKit driver and a full release build, and because a flaky display
@@ -265,8 +287,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install nasm
-        # The AV1 encoder (rav1e) and decoder (rav1d) assemble their SIMD with nasm; their
-        # build scripts fail outright without it.
+        # libaom, libjpeg-turbo and the AV1 decoder (rav1d) assemble their SIMD with nasm;
+        # rav1d's and libaom's builds fail outright without it.
         uses: ilammy/setup-nasm@v1
 
       - name: Build libheif (${{ matrix.edition }} edition)
@@ -360,8 +382,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install nasm
-        # The AV1 encoder (rav1e) and decoder (rav1d) assemble their SIMD with nasm; their
-        # build scripts fail outright without it.
+        # libaom, libjpeg-turbo and the AV1 decoder (rav1d) assemble their SIMD with nasm;
+        # rav1d's and libaom's builds fail outright without it.
         uses: ilammy/setup-nasm@v1
 
       - name: Build libheif (standard edition)

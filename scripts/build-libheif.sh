@@ -2,7 +2,13 @@
 # Build the libheif Skidbladnir ships: one shared library with an HEVC encoder and the
 # libde265 HEVC decoder (LGPL-3.0) built into it, and nothing else.
 #
-#   scripts/build-libheif.sh [--edition standard|gpl] [--prefix <dir>]
+#   scripts/build-libheif.sh [--edition standard|gpl] [--prefix <dir>] [--with-heif-enc] [--jpeg <prefix>]
+#
+# --with-heif-enc also builds libheif's heif-enc, linked to this same libheif: the reference
+# tests/heic_parity.rs compares against (it needs the libpng and libjpeg development files).
+# --jpeg points its JPEG reader at a libjpeg installed under <prefix> rather than the
+# system's (see scripts/build-reference-tools.sh). Never ship that build; the app's libheif
+# is the one without them.
 #
 # The edition decides the encoder, and with it the licence of the app that ships it:
 # - standard (the default): Kvazaar (BSD-3-Clause). The app stays ISC.
@@ -25,6 +31,9 @@
 # encoder (x265 above all) that happens to be installed on the user's machine, and every
 # other codec is off because the app does not use it.
 #
+# Sharp YUV (`-C sharp-yuv` in heif-enc) comes from libwebp's libsharpyuv, built from the
+# libwebp submodule (the version libwebp-sys vendors) and linked into libheif statically.
+#
 # Sources are the pinned submodules under third_party/. Needs CMake and a C/C++ compiler,
 # and for the gpl edition on x86_64, nasm (x265's assembly). On Windows it runs from Git
 # Bash with Visual Studio's compiler. For an Intel build on an Apple Silicon Mac, set
@@ -34,10 +43,14 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 prefix="${SKIDBLADNIR_LIBHEIF_DIR:-}"
 edition="${SKIDBLADNIR_EDITION:-standard}"
+examples=OFF
+jpeg=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--prefix) prefix="$2"; shift 2;;
 		--edition) edition="$2"; shift 2;;
+		--with-heif-enc) examples=ON; shift;;
+		--jpeg) jpeg="$2"; shift 2;;
 		*) echo "unknown argument: $1" >&2; exit 2;;
 	esac
 done
@@ -46,7 +59,7 @@ case "$edition" in
 	gpl) encoder=x265; prefix="${prefix:-$root/build/libheif-gpl}";;
 	*) echo "unknown edition: $edition (standard or gpl)" >&2; exit 2;;
 esac
-for module in libheif "$encoder" libde265; do
+for module in libheif "$encoder" libde265 libwebp; do
 	[ -f "$root/third_party/$module/CMakeLists.txt" ] || [ -f "$root/third_party/$module/source/CMakeLists.txt" ] || { echo "third_party/$module is missing: run git submodule update --init third_party/$module" >&2; exit 1; }
 done
 
@@ -130,6 +143,14 @@ fi
 build libde265 "$root/third_party/libde265" "$deps" \
 	-DBUILD_SHARED_LIBS=OFF -DENABLE_SDL=OFF -DENABLE_DECODER=OFF -DENABLE_ENCODER=OFF
 
+# libsharpyuv alone: the target, not libwebp's whole install.
+echo "==> libsharpyuv"
+cmake -S "$(native "$root/third_party/libwebp")" -B "$(native "$work/libwebp")" "${common[@]}" -DBUILD_SHARED_LIBS=OFF \
+	-DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_CWEBP=OFF -DWEBP_BUILD_DWEBP=OFF -DWEBP_BUILD_GIF2WEBP=OFF -DWEBP_BUILD_IMG2WEBP=OFF \
+	-DWEBP_BUILD_VWEBP=OFF -DWEBP_BUILD_WEBPINFO=OFF -DWEBP_BUILD_WEBPMUX=OFF -DWEBP_BUILD_EXTRAS=OFF
+cmake --build "$(native "$work/libwebp")" --config Release --parallel "$jobs" --target sharpyuv
+sharpyuv=$(find "$work/libwebp" -maxdepth 2 \( -name libsharpyuv.a -o -name sharpyuv.lib \) | head -1)
+
 off=()
 for codec in X264 OpenH264_DECODER AOM_DECODER AOM_ENCODER DAV1D RAV1E SvtEnc JPEG_DECODER JPEG_ENCODER OpenJPEG_DECODER OpenJPEG_ENCODER OPENJPH_ENCODER FFMPEG_DECODER UVG266 VVDEC VVENC; do
 	off+=("-DWITH_$codec=OFF")
@@ -143,10 +164,11 @@ build libheif "$root/third_party/libheif" "$prefix" \
 	-DBUILD_SHARED_LIBS=ON -DENABLE_PLUGIN_LOADING=OFF \
 	"${encoder_options[@]}" -DWITH_LIBDE265=ON -DWITH_LIBDE265_PLUGIN=OFF \
 	"${off[@]}" \
-	-DWITH_LIBSHARPYUV=OFF -DWITH_UNCOMPRESSED_CODEC=OFF -DWITH_HEADER_COMPRESSION=OFF \
-	-DWITH_EXAMPLES=OFF -DWITH_GDK_PIXBUF=OFF -DBUILD_TESTING=OFF -DWITH_FUZZERS=OFF \
+	-DWITH_LIBSHARPYUV=ON "-DLIBSHARPYUV_INCLUDE_DIR=$(native "$root/third_party/libwebp")" "-DLIBSHARPYUV_LIBRARY=$(native "$sharpyuv")" \
+	-DWITH_UNCOMPRESSED_CODEC=OFF -DWITH_HEADER_COMPRESSION=OFF \
+	-DWITH_EXAMPLES=$examples -DWITH_GDK_PIXBUF=OFF -DBUILD_TESTING=OFF -DWITH_FUZZERS=OFF \
 	-DBUILD_DOCUMENTATION=OFF \
-	"-DCMAKE_PREFIX_PATH=$(native "$deps")" \
+	"-DCMAKE_PREFIX_PATH=$(native "$deps")${jpeg:+;$(native "$jpeg")}" \
 	"-DCMAKE_C_FLAGS=$static_defines" "-DCMAKE_CXX_FLAGS=$static_defines" \
 	"${extra[@]}"
 

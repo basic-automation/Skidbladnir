@@ -13,7 +13,7 @@ use std::path::Path;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::Serialize;
 use skidbladnir_encode::{
-	animation, encoder::{RgbaImage, encode_rgba}, settings::{EncodeJob, Mode, OutputFormat, Resize, WebpSettings}, source::{self, Conversion, SourceError}
+	animation, encoder::{RgbaImage, encode_rgba, encode_source_with_progress}, settings::{EncodeJob, OutputFormat, Resize, WebpSettings}, source::{self, Conversion, SourceError}
 };
 
 /// Above this many pixels a preview is refused rather than attempted.
@@ -66,25 +66,22 @@ pub fn preview(settings: &EncodeJob, input: &Path) -> Result<Preview, String> {
 	if let Some(source) = source::animated_source(input, &bytes).map_err(|error| error.to_string())?
 		&& (settings.format == OutputFormat::Webp || source.animation.frames.len() > 1)
 	{
-		return preview_animation(settings, input, bytes.len() as u64, &source);
+		return preview_animation(settings, input, source_bytes, &source);
 	}
-	let image = source::load(input).map_err(|error| error.to_string())?;
+	let image = source::decode(input, bytes).map_err(|error| error.to_string())?;
 
 	if let Some(refusal) = too_large_to_preview(image.width, image.height) {
 		return Err(refusal);
 	}
 
-	// A JPEG going to JPEG XL is previewed the way it will be converted: recompressed
-	// losslessly when that applies, so the size shown is the size that will be written.
-	let bytes = std::fs::read(input).map_err(|error| format!("could not read `{}`: {error}", input.display()))?;
-	let encoded = match source::transcode_jpeg(settings, &bytes, &mut |_| true).map_err(|error| error.to_string())? {
-		Some(encoded) => encoded,
-		None => source::encode_decoded(settings, input, &bytes, &image, &mut |_| true).map_err(|error| error.to_string())?,
-	};
+	// Encoded exactly as a conversion would be — the source's metadata, depth and
+	// channels included, and a JPEG going to JPEG XL recompressed when that applies — so
+	// the size shown is the size that will be written.
+	let encoded = encode_source_with_progress(settings, &image, &mut |_| true).map_err(|error| error.to_string())?;
 
-	// The original is shown at the same dimensions as the encoded side when a resize is in
-	// play, so the comparison is like for like rather than a big image next to a small one.
-	let original = encode_rgba(&lossless(settings.resize), &image.as_rgba()).map_err(|error| error.to_string())?;
+	// The original is shown with the same crop and at the same dimensions as the encoded
+	// side, so the comparison is like for like rather than a big image next to a small one.
+	let original = encode_rgba(&EncodeJob { crop: settings.crop, ..lossless(settings.resize) }, &image.as_rgba()).map_err(|error| error.to_string())?;
 
 	let (width, height) = match settings.format {
 		OutputFormat::Webp => dimensions(&encoded),
@@ -144,7 +141,7 @@ fn preview_animation(settings: &EncodeJob, input: &Path, source_bytes: u64, sour
 
 /// A lossless WebP job, for showing pixels exactly.
 fn lossless(resize: Resize) -> EncodeJob {
-	EncodeJob { resize, webp: WebpSettings { mode: Mode::Lossless, quality: 100, ..Default::default() }, ..Default::default() }
+	EncodeJob { resize, webp: WebpSettings { lossless: true, exact: true, quality: 100.0, ..Default::default() }, ..Default::default() }
 }
 
 /// Whether an image is too large to hold two base64 copies of in the webview, and the
@@ -233,7 +230,7 @@ mod tests {
 	fn an_avif_preview_can_be_shown_by_any_web_engine() {
 		let scratch = Scratch::new("avif");
 		let input = scratch.join_png();
-		let job = EncodeJob { format: OutputFormat::Avif, avif: AvifSettings { speed: 10, ..Default::default() }, ..Default::default() };
+		let job = EncodeJob { format: OutputFormat::Avif, avif: AvifSettings { speed: Some(10), ..Default::default() }, ..Default::default() };
 		let result = preview(&job, &input).expect("preview");
 		// Shown as lossless WebP of the decoded AVIF, so every web engine can display it.
 		assert!(result.encoded.starts_with("data:image/webp;base64,"), "{}", &result.encoded[..40]);
@@ -250,7 +247,7 @@ mod tests {
 	fn a_resize_applies_to_both_sides() {
 		let scratch = Scratch::new("resize");
 		let input = scratch.join_png();
-		let result = preview(&EncodeJob { resize: Resize { width: 32, height: 0, no_enlarge: false }, ..Default::default() }, &input).expect("preview");
+		let result = preview(&EncodeJob { resize: Resize::to(32, 0), ..Default::default() }, &input).expect("preview");
 		assert_eq!((result.width, result.height), (32, 24));
 		// Both sides decode to the resized dimensions.
 		for (label, url) in [("original", &result.original), ("encoded", &result.encoded)] {
@@ -265,8 +262,8 @@ mod tests {
 	fn quality_changes_the_encoded_side() {
 		let scratch = Scratch::new("quality");
 		let input = scratch.join_png();
-		let low = preview(&EncodeJob::from(WebpSettings { quality: 5, ..Default::default() }), &input).expect("preview");
-		let high = preview(&EncodeJob::from(WebpSettings { quality: 95, ..Default::default() }), &input).expect("preview");
+		let low = preview(&EncodeJob::from(WebpSettings { quality: 5.0, ..Default::default() }), &input).expect("preview");
+		let high = preview(&EncodeJob::from(WebpSettings { quality: 95.0, ..Default::default() }), &input).expect("preview");
 		assert!(low.encoded_bytes < high.encoded_bytes, "q5 {} vs q95 {}", low.encoded_bytes, high.encoded_bytes);
 		// The original side is the same both times: it does not depend on the settings.
 		assert_eq!(low.original, high.original);
@@ -298,11 +295,11 @@ mod tests {
 		let scratch = Scratch::new("animated");
 		let frames = (0..3_u8).map(|index| Frame { pixels: (0..40 * 30).flat_map(|i| [u8::try_from(i % 200).unwrap_or(0), index * 80, 40, 255]).collect(), duration_ms: 90 }).collect();
 		let source = Animation { width: 40, height: 30, loop_count: 0, background: 0xffff_ffff, frames };
-		let bytes = animation::encode(&WebpSettings { mode: skidbladnir_encode::settings::Mode::Lossless, ..Default::default() }, Resize::default(), &source, &mut |_| true).expect("build the fixture");
+		let bytes = animation::encode(&WebpSettings { lossless: true, ..Default::default() }, Resize::default(), &source, &mut |_| true).expect("build the fixture");
 		let input = scratch.join("animation.webp");
 		fs::write(&input, &bytes).expect("write");
 
-		let result = preview(&EncodeJob { resize: Resize { width: 20, height: 0, no_enlarge: false }, ..Default::default() }, &input).expect("an animation must preview");
+		let result = preview(&EncodeJob { resize: Resize::to(20, 0), ..Default::default() }, &input).expect("an animation must preview");
 		assert_eq!((result.frames, result.width, result.height), (3, 20, 15));
 		for (label, url) in [("original", &result.original), ("encoded", &result.encoded)] {
 			let side = super::STANDARD.decode(url.trim_start_matches("data:image/webp;base64,")).expect("valid base64");

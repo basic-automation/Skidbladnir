@@ -73,7 +73,7 @@ pub fn inspect_webp(bytes: &[u8]) -> Option<WebpInfo> {
 mod tests {
 	use super::{WebpCompression, inspect_webp};
 	use crate::{
-		encoder::{RgbaImage, encode_rgba}, settings::{EncodeJob, Mode, WebpSettings}
+		encoder::{RgbaImage, encode_rgba}, settings::{EncodeJob, WebpSettings}
 	};
 
 	fn fixture(width: u32, height: u32, opaque: bool) -> Vec<u8> {
@@ -97,7 +97,7 @@ mod tests {
 		assert_eq!(info.compression, WebpCompression::Lossy);
 		assert!(!info.has_animation);
 
-		let lossless = encode_rgba(&EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() }), &image).expect("encode");
+		let lossless = encode_rgba(&EncodeJob::from(WebpSettings { lossless: true, exact: true, ..Default::default() }), &image).expect("encode");
 		let info = inspect_webp(&lossless).expect("inspect");
 		assert_eq!(info.compression, WebpCompression::Lossless);
 	}

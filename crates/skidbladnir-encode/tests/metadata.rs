@@ -18,7 +18,7 @@ use std::{
 };
 
 use skidbladnir_encode::{
-	EncodeJob, cwebp_args, encode_file, metadata, settings::{KeepMetadata, Mode, WebpSettings}
+	EncodeJob, SourceFormat, cwebp_args, encode_file, metadata::Metadata, settings::{HeicMetadata, JxlTarget, MetadataSource, Tristate, WebpMetadata, WebpSettings}
 };
 
 fn reference_cwebp() -> Option<PathBuf> {
@@ -147,9 +147,24 @@ fn tiff_with_icc() -> Vec<u8> {
 }
 
 /// `cwebp -metadata`'s spelling: a comma-separated list of `icc`, `exif`, `xmp`, or `all`.
-fn keep(names: &str) -> KeepMetadata {
+fn keep(names: &str) -> WebpMetadata {
 	let has = |kind: &str| names.split(',').any(|name| name == kind || name == "all");
-	KeepMetadata { icc: has("icc"), exif: has("exif"), xmp: has("xmp") }
+	WebpMetadata { icc: has("icc"), exif: has("exif"), xmp: has("xmp") }
+}
+
+/// The metadata of a file, read as `cwebp` reads it.
+fn extract(bytes: &[u8]) -> Metadata {
+	Metadata::read_like_cwebp(bytes, SourceFormat::sniff(bytes).expect("a format the app reads"))
+}
+
+/// A job writing WebP with `-metadata` as `names` asks.
+fn webp_job(webp: &WebpSettings, names: &str) -> EncodeJob {
+	EncodeJob::from(WebpSettings { metadata: keep(names), ..webp.clone() })
+}
+
+/// Keep or strip, as `avifenc` and `cjxl` put it.
+fn kept_or_stripped(keep: bool) -> MetadataSource {
+	if keep { MetadataSource::Keep } else { MetadataSource::Strip }
 }
 
 /// Our file and `cwebp`'s for the same job, or a note of why one refused.
@@ -197,17 +212,17 @@ fn keeps_metadata_exactly_as_cwebp_does() {
 	assert!(status.success(), "cwebp must write the WebP fixture");
 	sources.push(("webp, ICC + EXIF (cwebp-written)", webp_source));
 
-	let jobs = [("lossy", WebpSettings::default()), ("lossless", WebpSettings { mode: Mode::Lossless, ..WebpSettings::default() })];
+	let jobs = [("lossy", WebpSettings::default()), ("lossless", WebpSettings { lossless: true, exact: true, ..WebpSettings::default() })];
 	let kinds = ["all", "icc", "exif", "xmp", "exif,xmp", "none"];
 	let mut failures = Vec::new();
 	let mut compared = 0;
 	for (name, input) in &sources {
 		let source_bytes = fs::read(input).expect("read");
-		let found = metadata::extract(&source_bytes).expect("the fixtures' metadata is well formed");
-		assert!(!found.is_empty(), "{name}: the fixture must carry metadata, or this compares nothing");
+		let found = extract(&source_bytes);
+		assert!(found != Metadata::default(), "{name}: the fixture must carry metadata, or this compares nothing");
 		for (mode, webp) in &jobs {
 			for kind in kinds {
-				let job = EncodeJob { webp: webp.clone(), metadata: keep(kind), ..EncodeJob::default() };
+				let job = webp_job(webp, kind);
 				let tag = format!("{compared}");
 				compared += 1;
 				let case = format!("{name}, {mode}, -metadata {kind}");
@@ -222,7 +237,7 @@ fn keeps_metadata_exactly_as_cwebp_does() {
 					failures.push(format!("{case}: {} bytes, cwebp {} — not identical", ours.len(), theirs.len()));
 				}
 				// And what was kept is exactly the source's, so the gate is not vacuous.
-				let kept = metadata::extract(&ours).expect("our output's metadata reads back");
+				let kept = extract(&ours);
 				let expected = |wanted: bool, value: &Option<Vec<u8>>| if wanted { value.clone() } else { None };
 				let want = keep(kind);
 				if (kept.icc, kept.exif, kept.xmp) != (expected(want.icc, &found.icc), expected(want.exif, &found.exif), expected(want.xmp, &found.xmp)) {
@@ -235,7 +250,7 @@ fn keeps_metadata_exactly_as_cwebp_does() {
 	// Malformed ICC segmentation: cwebp refuses the file, and so do we, by name.
 	let broken = dir.join("broken-icc.jpg");
 	fs::write(&broken, jpeg_with(&icc_segments(&big_icc, 65_519, &[1, 3]))).expect("write");
-	let job = EncodeJob { metadata: keep("icc"), ..EncodeJob::default() };
+	let job = webp_job(&WebpSettings::default(), "icc");
 	match both(&cwebp, &job, &broken, &dir, "broken") {
 		(Err(ours), Err(_)) if ours.contains("could not keep the metadata") => {}
 		(ours, theirs) => failures.push(format!("a JPEG missing an ICC segment: ours {:?}, cwebp {:?}", ours.map(|b| b.len()), theirs.map(|b| b.len()))),
@@ -353,7 +368,7 @@ fn rich_png(dir: &Path) -> (PathBuf, Vec<u8>, Vec<u8>, String, image::RgbaImage)
 		drop(writer);
 		fs::write(&source, out).expect("write");
 	}
-	let found = metadata::extract(&fs::read(&source).expect("read")).expect("well formed");
+	let found = extract(&fs::read(&source).expect("read"));
 	assert_eq!((found.icc.as_deref(), found.exif.as_deref(), found.xmp.as_deref()), (Some(&icc[..]), Some(&exif[..]), Some(xmp.as_bytes())), "the fixture must carry all three");
 
 	(source, icc, exif, xmp, img)
@@ -361,9 +376,12 @@ fn rich_png(dir: &Path) -> (PathBuf, Vec<u8>, Vec<u8>, String, image::RgbaImage)
 
 /// Keeping metadata in **JPEG XL** output, checked by libjxl's own decoder: `djxl` must
 /// report the source's ICC profile as the image's (`--icc_out`) — verbatim for lossless,
-/// with the same primaries for lossy — and decode a lossless file to the source's pixels — so the profile *labels* them rather than being carried
-/// beside sRGB. EXIF and XMP must be the container's `Exif` (after its 4-byte TIFF-header
-/// offset) and `xml ` boxes, byte for byte. With nothing kept, none of the three appears.
+/// with the same primaries for lossy — and decode a lossless file to the source's pixels,
+/// so the profile *labels* them rather than being carried beside sRGB. EXIF and XMP must
+/// be the container's `Exif` (after its 4-byte TIFF-header offset) and `xml ` boxes, byte
+/// for byte (uncompressed, `--compress_boxes=0`). Stripped (`-x strip=exif`,
+/// `-x strip=xmp`), neither box appears; the profile
+/// stays, as it does with `cjxl`, which has no way to drop the colour space it encodes in.
 #[test]
 fn keeps_metadata_in_jpeg_xl() {
 	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
@@ -384,8 +402,14 @@ fn keeps_metadata_in_jpeg_xl() {
 	for (mode, lossless) in [("lossless", true), ("lossy", false)] {
 		for kind in ["all", "none"] {
 			let case = format!("{mode}, keep {kind}");
-			let mut job = EncodeJob { format: skidbladnir_encode::OutputFormat::Jxl, metadata: keep(kind), ..EncodeJob::default() };
-			job.jxl.lossless = lossless;
+			let mut job = EncodeJob { format: skidbladnir_encode::OutputFormat::Jxl, ..EncodeJob::default() };
+			(job.jxl.exif, job.jxl.xmp) = (kept_or_stripped(kind == "all"), kept_or_stripped(kind == "all"));
+			// `--compress_boxes=0`, so the boxes can be read here without Brotli. `cjxl`'s
+			// default compresses them, which `jxl_parity.rs` holds byte for byte.
+			job.jxl.compress_boxes = Tristate::Off;
+			if lossless {
+				job.jxl.target = JxlTarget::Distance(0.0);
+			}
 			job.jxl.effort = 3;
 			let output = dir.join(format!("{mode}-{kind}.jxl"));
 			if let Err(error) = encode_file(&job, &source, &output) {
@@ -402,16 +426,13 @@ fn keeps_metadata_in_jpeg_xl() {
 			let reported = fs::read(&icc_out).unwrap_or_default();
 			let boxes = bmff_boxes(&written);
 			let find = |kind: &[u8; 4]| boxes.iter().find(|(k, _)| k == kind).map(|(_, body)| body.to_vec());
+			if lossless && reported != icc {
+				failures.push(format!("{case}: djxl reports a {}-byte profile, not the source's {}", reported.len(), icc.len()));
+			}
+			if !lossless && !same_primaries(&reported, &icc) {
+				failures.push(format!("{case}: djxl's profile does not have the source's primaries"));
+			}
 			if kind == "all" {
-				// Lossless keeps the profile verbatim. Lossy (XYB) stores the colour space in
-				// JPEG XL's compact form, as `cjxl` does, and the decoder regenerates a profile:
-				// there the primaries must be the source's, which sRGB's are far from.
-				if lossless && reported != icc {
-					failures.push(format!("{case}: djxl reports a {}-byte profile, not the source's {}", reported.len(), icc.len()));
-				}
-				if !lossless && !same_primaries(&reported, &icc) {
-					failures.push(format!("{case}: djxl's profile does not have the source's primaries"));
-				}
 				if find(b"Exif") != Some([&[0_u8; 4][..], &exif].concat()) {
 					failures.push(format!("{case}: no Exif box with the source's EXIF"));
 				}
@@ -424,8 +445,8 @@ fn keeps_metadata_in_jpeg_xl() {
 						failures.push(format!("{case}: djxl does not decode the source's pixels in the source's profile"));
 					}
 				}
-			} else if reported == icc || find(b"Exif").is_some() || find(b"xml ").is_some() {
-				failures.push(format!("{case}: metadata was kept when none was asked for"));
+			} else if find(b"Exif").is_some() || find(b"xml ").is_some() {
+				failures.push(format!("{case}: EXIF or XMP was kept when it was stripped"));
 			}
 		}
 	}
@@ -433,7 +454,7 @@ fn keeps_metadata_in_jpeg_xl() {
 		let _ = fs::remove_dir_all(&dir);
 	}
 	assert!(failures.is_empty(), "JPEG XL METADATA FAILED:\n{}", failures.join("\n"));
-	eprintln!("JPEG XL METADATA OK: djxl reads the kept ICC profile as the image's, lossless pixels decode exactly in it, EXIF and XMP are the container's boxes; nothing is kept when nothing is asked for");
+	eprintln!("JPEG XL METADATA OK: djxl reads the ICC profile as the image's, lossless pixels decode exactly in it, EXIF and XMP are the container's boxes; stripped, neither appears");
 }
 
 /// Keeping metadata in **HEIC** output, checked by libheif's own `heif-info` (a separate
@@ -457,7 +478,9 @@ fn keeps_metadata_in_heic() {
 
 	let mut failures = Vec::new();
 	for kind in ["all", "none"] {
-		let mut job = EncodeJob { format: skidbladnir_encode::OutputFormat::Heic, metadata: keep(kind), ..EncodeJob::default() };
+		let mut job = EncodeJob { format: skidbladnir_encode::OutputFormat::Heic, ..EncodeJob::default() };
+		let kept = kind == "all";
+		job.heic.metadata = HeicMetadata { icc: kept, exif: kept, xmp: kept };
 		job.heic.quality = 80;
 		let output = dir.join(format!("{kind}.heic"));
 		if let Err(error) = encode_file(&job, &source, &output) {
@@ -510,12 +533,11 @@ fn colr_profile(file: &[u8]) -> Option<Vec<u8>> {
 	children(&ipco).into_iter().find(|(kind, body)| kind == b"colr" && body.starts_with(b"prof")).map(|(_, body)| body[4..].to_vec())
 }
 
-/// Keeping EXIF in **AVIF** output, checked by libavif's `avifdec --info`: the source's EXIF
-/// must be present at its exact size, and there must be no ICC profile or XMP, which the
-/// AVIF writer cannot store, rather than something half-written. With nothing kept, no
-/// EXIF either.
+/// Keeping metadata in **AVIF** output, checked by libavif's `avifdec --info`: the source's
+/// ICC profile, EXIF and XMP must each be present at its exact size, as `avifenc` keeps
+/// them. Ignored (`--ignore-icc`, `--ignore-exif`, `--ignore-xmp`), none is.
 #[test]
-fn keeps_exif_in_avif() {
+fn keeps_metadata_in_avif() {
 	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
 	let avifdec = env::var_os("SKIDBLADNIR_REFERENCE_AVIFDEC").map(PathBuf::from).filter(|path| path.is_file()).or_else(|| Command::new("avifdec").arg("--version").output().ok().filter(|out| out.status.success()).map(|_| PathBuf::from("avifdec")));
 	let Some(avifdec) = avifdec else {
@@ -527,27 +549,29 @@ fn keeps_exif_in_avif() {
 	let dir = env::temp_dir().join(format!("skidbladnir-avif-metadata-{}", std::process::id()));
 	let _ = fs::remove_dir_all(&dir);
 	fs::create_dir_all(&dir).expect("create the scratch directory");
-	let (source, _, exif, _, _) = rich_png(&dir);
+	let (input, icc, exif, xmp, _) = rich_png(&dir);
 
 	let mut failures = Vec::new();
 	for kind in ["all", "none"] {
-		let mut job = EncodeJob { format: skidbladnir_encode::OutputFormat::Avif, metadata: keep(kind), ..EncodeJob::default() };
-		job.avif.speed = 10;
+		let mut job = EncodeJob { format: skidbladnir_encode::OutputFormat::Avif, ..EncodeJob::default() };
+		job.avif.speed = Some(10);
+		let kept = kind == "all";
+		(job.avif.icc, job.avif.exif, job.avif.xmp) = (kept_or_stripped(kept), kept_or_stripped(kept), kept_or_stripped(kept));
 		let output = dir.join(format!("{kind}.avif"));
-		if let Err(error) = encode_file(&job, &source, &output) {
+		if let Err(error) = encode_file(&job, &input, &output) {
 			failures.push(format!("keep {kind}: {error}"));
 			continue;
 		}
 		let run = Command::new(&avifdec).arg("--info").arg(&output).output().expect("run avifdec");
 		let report = format!("{}{}", String::from_utf8_lossy(&run.stdout), String::from_utf8_lossy(&run.stderr));
 		let line = |label: &str| report.lines().find(|line| line.contains(label)).unwrap_or_default().to_owned();
-		let (icc, exif_line, xmp) = (line("ICC Profile"), line("Exif Metadata"), line("XMP Metadata"));
-		let expected_exif = if kind == "all" { format!("Present ({} bytes)", exif.len()) } else { "Absent".to_owned() };
-		if !run.status.success() || !exif_line.contains(&expected_exif) || !icc.contains("Absent") || !xmp.contains("Absent") {
-			failures.push(format!("keep {kind}: expected Exif {expected_exif} and no ICC or XMP, avifdec says:\n{icc}\n{exif_line}\n{xmp}"));
+		let expected = |length: usize| if kept { format!("Present ({length} bytes)") } else { "Absent".to_owned() };
+		let lines = [(line("ICC Profile"), expected(icc.len())), (line("Exif Metadata"), expected(exif.len())), (line("XMP Metadata"), expected(xmp.len()))];
+		if !run.status.success() || lines.iter().any(|(line, expected)| !line.contains(expected.as_str())) {
+			failures.push(format!("keep {kind}: expected {:?}, avifdec says:\n{}", lines.iter().map(|(_, expected)| expected).collect::<Vec<_>>(), lines.iter().map(|(line, _)| line.as_str()).collect::<Vec<_>>().join("\n")));
 		}
 	}
 	let _ = fs::remove_dir_all(&dir);
 	assert!(failures.is_empty(), "AVIF METADATA FAILED:\n{}", failures.join("\n"));
-	eprintln!("AVIF METADATA OK: avifdec reads the source's EXIF at its exact size, and no ICC or XMP; nothing when nothing is kept");
+	eprintln!("AVIF METADATA OK: avifdec reads the source's ICC profile, EXIF and XMP at their exact sizes; none when they are ignored");
 }

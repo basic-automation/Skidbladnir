@@ -5,15 +5,13 @@
 // presets, and one scrolling column of settings with the Convert action at its head. The
 // controls are Nuxt UI components in the Paleday skin from main.css.
 //
-// The show/hide behaviour is reproduced because it is real encoder behaviour: the advanced
-// controls only reach the encoder in lossy mode, so offering them elsewhere would promise
-// an effect that will not happen.
-//
-// Help text is libwebp's own wording from `cwebp -longhelp`. The Electron app was not a
-// source for it: its `-info` spans are live value readouts and it has one tooltip in total.
+// Each output format's controls are its reference encoder's command line, one control per
+// option (cwebp, avifenc, cjxl, heif-enc with Kvazaar), in the format's own panel under
+// components/; the crop and resize they share are GeometrySettingsPanel. Help text is each
+// tool's own, with the flag the control sets.
 import { computed, onMounted, onUnmounted, ref, toRaw, watch } from 'vue'
-import type { AvifSettings, ConversionReport, Edition, EncodeJob, HeicSettings, Mode, OutputFormat, Preset } from '~/composables/useSettings'
-import { formatBytes, usesLossyOptions, usesManualFilter } from '~/composables/useSettings'
+import type { ConversionReport, Edition, EncodeJob, OutputFormat } from '~/composables/useSettings'
+import { formatBytes } from '~/composables/useSettings'
 import { invokeCommand, isTauri } from '~/composables/useTauri'
 
 const settings = ref<EncodeJob | null>(null)
@@ -80,131 +78,12 @@ const FORMATS: { value: OutputFormat, label: string, icon: string }[] = [
 	{ value: 'heic', label: 'HEIC', icon: 'i-bi-filetype-heic' },
 ]
 
-const BIT_DEPTH_ITEMS = [
-	{ label: '10-bit', value: 'ten' },
-	{ label: '8-bit', value: 'eight' },
-] satisfies { label: string, value: AvifSettings['bitDepth'] }[]
-
-const COLOR_MODEL_ITEMS = [
-	{ label: 'YCbCr', value: 'ycbcr' },
-	{ label: 'RGB', value: 'rgb' },
-] satisfies { label: string, value: AvifSettings['colorModel'] }[]
-
-const ALPHA_MODE_ITEMS = [
-	{ label: 'Clean', value: 'clean', description: 'Recolour fully transparent pixels to whatever encodes cheapest.' },
-	{ label: 'Keep', value: 'dirty', description: 'Keep the colour under transparency exactly as it is.' },
-	{ label: 'Premultiplied', value: 'premultiplied', description: 'Store colour premultiplied by alpha.' },
-] satisfies { label: string, value: AvifSettings['alphaMode'], description: string }[]
-
-const HEIC_CHROMA_ITEMS = [
-	{ label: '4:2:0', value: '420' },
-	{ label: '4:2:2', value: '422' },
-	{ label: '4:4:4', value: '444' },
-] satisfies { label: string, value: HeicSettings['chroma'] }[]
-
-const HEIC_BIT_DEPTH_ITEMS = [
-	{ label: '8-bit', value: 'eight' },
-	{ label: '10-bit', value: 'ten' },
-] satisfies { label: string, value: HeicSettings['bitDepth'] }[]
-
-const HEIC_PRESET_ITEMS = [
-	{ label: 'Ultrafast', value: 'ultrafast' },
-	{ label: 'Superfast', value: 'superfast' },
-	{ label: 'Very fast', value: 'veryfast' },
-	{ label: 'Faster', value: 'faster' },
-	{ label: 'Fast', value: 'fast' },
-	{ label: 'Medium', value: 'medium' },
-	{ label: 'Slow (libheif\'s default)', value: 'slow' },
-	{ label: 'Slower', value: 'slower' },
-	{ label: 'Very slow', value: 'veryslow' },
-	{ label: 'Placebo', value: 'placebo' },
-] satisfies { label: string, value: HeicSettings['preset'] }[]
-
-const HEIC_TUNE_ITEMS = [
-	{ label: 'SSIM', value: 'ssim' },
-	{ label: 'PSNR', value: 'psnr' },
-	{ label: 'Grain', value: 'grain' },
-	{ label: 'Fast decode', value: 'fastdecode' },
-] satisfies { label: string, value: HeicSettings['tune'] }[]
-
-const HEIC_AQ_ITEMS = [
-	{ label: 'Off', value: 'off' },
-	{ label: 'Variance', value: 'variance' },
-	{ label: 'Auto-variance', value: 'autoVariance' },
-	{ label: 'Auto-variance, dark bias', value: 'autoVarianceDark' },
-	{ label: 'Auto-variance, edges', value: 'autoVarianceEdge' },
-] satisfies { label: string, value: HeicSettings['aqMode'] }[]
-
-const MODES: { value: Mode, label: string, description: string }[] = [
-	{ value: 'lossy', label: 'Lossy', description: 'Ordinary WebP. The only mode with the advanced controls.' },
-	{ value: 'lossless', label: 'Lossless', description: 'Exact pixels, larger files. Keeps colour under transparency.' },
-	{ value: 'nearLossless', label: 'Near-lossless', description: 'Lossless with preprocessing; quality sets the level.' },
-	{ value: 'jpegLike', label: 'JPEG-like', description: 'Roughly match the size a JPEG of this quality would be.' },
-	{ value: 'preset', label: 'Preset', description: 'Use one of libwebp\'s tuned parameter sets.' },
-]
-
-const PRESET_ITEMS = [
-	{ label: 'Select a preset', value: null },
-	{ label: 'Default', value: 'default' },
-	{ label: 'Photo', value: 'photo' },
-	{ label: 'Picture', value: 'picture' },
-	{ label: 'Drawing', value: 'drawing' },
-	{ label: 'Icon', value: 'icon' },
-	{ label: 'Text', value: 'text' },
-] satisfies { label: string, value: Preset | null }[]
-
-const FILTER_ITEMS = [
-	{ label: 'Auto', value: 'auto' },
-	{ label: 'Simple', value: 'simple' },
-	{ label: 'Strong', value: 'strong' },
-]
-
-const TARGET_ITEMS = [
-	{ label: 'Use quality', value: 'none' },
-	{ label: 'Target file size', value: 'size' },
-	{ label: 'Target PSNR', value: 'psnr' },
-]
-
 const isWebp = computed(() => settings.value?.format === 'webp')
 const isAvif = computed(() => settings.value?.format === 'avif')
 const isJxl = computed(() => settings.value?.format === 'jxl')
 const isHeic = computed(() => settings.value?.format === 'heic')
 // The GPL edition encodes HEIC with x265, and only it has x265's controls.
 const x265 = computed(() => edition.value?.x265 === true)
-const extension = computed(() => settings.value?.format ?? 'webp')
-const lossy = computed(() => (settings.value && isWebp.value ? usesLossyOptions(settings.value.webp.mode) : false))
-const manualFilter = computed(() => (settings.value ? usesManualFilter(settings.value.webp.filter) : false))
-const basicOnly = computed(() => settings.value?.webp.mode === 'nearLossless' || settings.value?.webp.mode === 'preset')
-
-// The quality slider is relabelled per mode, because libwebp genuinely reinterprets it.
-const qualityLabel = computed(() => {
-	switch (settings.value?.webp.mode) {
-		case 'lossless': return 'Compression effort'
-		case 'nearLossless': return 'Near-lossless level'
-		default: return 'Quality'
-	}
-})
-const qualityHelp = computed(() => {
-	switch (settings.value?.webp.mode) {
-		case 'lossless': return '0 is fastest and largest, 100 slowest and smallest. Not fidelity here.'
-		case 'nearLossless': return '0 is maximum loss, 100 is off.'
-		default: return 'quality factor (0: small .. 100: big)'
-	}
-})
-
-// Target size and PSNR are mutually exclusive in libwebp, so the UI offers one choice.
-type TargetKind = 'none' | 'size' | 'psnr'
-const targetKind = ref<TargetKind>('none')
-const targetSize = ref(51200)
-const targetPsnr = ref(42)
-
-watch([targetKind, targetSize, targetPsnr], () => {
-	if (!settings.value) return
-	if (targetKind.value === 'size') settings.value.webp.target = { kind: 'size', value: targetSize.value }
-	else if (targetKind.value === 'psnr') settings.value.webp.target = { kind: 'psnr', value: targetPsnr.value }
-	else settings.value.webp.target = null
-})
-
 onMounted(async () => {
 	try {
 		backendVersion.value = await invokeCommand<string>('encoder_version')
@@ -314,9 +193,7 @@ async function chooseOutput() {
 
 const canConvert = computed(() => {
 	if (!settings.value || busy.value) return false
-	if (inputPaths.value.length === 0 || !outputDirectory.value) return false
-	// The preset requirement belongs to WebP's preset mode; it does not block an AVIF run.
-	return !(isWebp.value && settings.value.webp.mode === 'preset' && !settings.value.webp.preset)
+	return inputPaths.value.length > 0 && Boolean(outputDirectory.value)
 })
 
 async function convert() {
@@ -403,10 +280,6 @@ function applyPreset(preset: { name: string, settings: EncodeJob }) {
 	// stored preset.
 	settings.value = structuredClone(toRaw(preset.settings))
 	activePreset.value = preset.name
-	// The target radio is UI state derived from settings.webp.target, so bring it back in step.
-	targetKind.value = settings.value.webp.target?.kind ?? 'none'
-	if (settings.value.webp.target?.kind === 'size') targetSize.value = settings.value.webp.target.value
-	if (settings.value.webp.target?.kind === 'psnr') targetPsnr.value = settings.value.webp.target.value
 }
 
 async function cancel() {
@@ -848,259 +721,11 @@ function basename(path: string): string {
 					</ControlPanel>
 
 					<template v-if="settings">
-						<ControlPanel v-if="isWebp" title="Mode" class="pt-8">
-							<ChoiceGroup v-model="settings.webp.mode" :items="MODES" layout="cards" aria-label="Encoding mode" />
-							<div v-if="settings.webp.mode === 'preset'" class="flex w-80 flex-col gap-2 px-2.5 py-[7px]">
-								<span class="text-xs font-semibold text-paleday-fg">libwebp preset</span>
-								<USelect v-model="settings.webp.preset" :items="PRESET_ITEMS" variant="soft" size="sm" aria-label="libwebp preset" :ui="{ base: 'bg-paleday-field' }" />
-								<p v-if="!settings.webp.preset" class="text-xs text-paleday-warning">
-									Pick a preset before converting.
-								</p>
-							</div>
-						</ControlPanel>
-
-						<ControlPanel v-if="isWebp" title="Quality" class="pt-8">
-							<div class="grid grid-cols-3 gap-4">
-								<ControlSlider v-model="settings.webp.quality" :label="qualityLabel" :min="0" :max="100" :help="qualityHelp" />
-								<ControlSlider v-model="settings.webp.alphaQuality" label="Alpha quality" :min="0" :max="100" help="transparency-compression quality (0..100)" :disabled="basicOnly" />
-								<ControlSlider v-model="settings.webp.method" label="Compression method" :min="0" :max="6" help="0 = fast, 6 = slowest and smallest" :disabled="basicOnly" />
-							</div>
-						</ControlPanel>
-
-						<ControlPanel v-if="isAvif" title="Quality" class="pt-8">
-							<div class="grid grid-cols-3 gap-4">
-								<ControlSlider v-model="settings.avif.quality" label="Quality" :min="1" :max="100" help="colour quality (1: small .. 100: big)" />
-								<ControlSlider v-model="settings.avif.alphaQuality" label="Alpha quality" :min="1" :max="100" help="transparency quality (1..100)" />
-								<ControlSlider v-model="settings.avif.speed" label="Speed" :min="1" :max="10" help="1 = slowest and smallest, 10 = fastest and largest" />
-							</div>
-						</ControlPanel>
-
-						<ControlPanel v-if="isAvif" title="AVIF">
-							<div class="grid grid-cols-4 gap-3">
-								<div class="flex flex-col gap-2 px-2.5 py-[7px]">
-									<span class="text-xs font-semibold text-paleday-fg">Bit depth</span>
-									<ChoiceGroup v-model="settings.avif.bitDepth" :items="BIT_DEPTH_ITEMS" aria-label="AVIF bit depth" />
-									<p class="text-xs text-paleday-dim">
-										10-bit keeps more precision through the colour conversion, even for 8-bit images.
-									</p>
-								</div>
-								<div class="flex flex-col gap-2 px-2.5 py-[7px]">
-									<span class="text-xs font-semibold text-paleday-fg">Colour model</span>
-									<ChoiceGroup v-model="settings.avif.colorModel" :items="COLOR_MODEL_ITEMS" aria-label="AVIF colour model" />
-									<p class="text-xs text-paleday-dim">
-										RGB skips the colour conversion at a large size cost.
-									</p>
-								</div>
-								<div class="col-span-2 flex flex-col gap-2 px-2.5 py-[7px]">
-									<span class="text-xs font-semibold text-paleday-fg">Colour under transparency</span>
-									<ChoiceGroup v-model="settings.avif.alphaMode" :items="ALPHA_MODE_ITEMS" orientation="vertical" aria-label="AVIF colour under transparency" />
-								</div>
-							</div>
-							<div class="grid grid-cols-4 gap-3">
-								<ControlToggle v-model="settings.avif.multiThreading" label="Multi-threading" help="encode on every core" />
-							</div>
-						</ControlPanel>
-
-						<ControlPanel v-if="isJxl" title="Quality" class="pt-8">
-							<div class="grid grid-cols-3 gap-4">
-								<ControlSlider v-model="settings.jxl.quality" label="Quality" :min="0" :max="100" help="90 is visually lossless, libjxl's own default" :disabled="settings.jxl.lossless" />
-								<ControlSlider v-model="settings.jxl.effort" label="Effort" :min="1" :max="10" help="1 = fastest, 10 = slowest and smallest" />
-							</div>
-						</ControlPanel>
-
-						<ControlPanel v-if="isJxl" title="JPEG XL">
-							<div class="grid grid-cols-3 gap-3">
-								<ControlToggle v-model="settings.jxl.losslessJpeg" label="Recompress JPEGs losslessly" help="JPEG files are repacked about 20% smaller without decoding them, and the original JPEG can be rebuilt bit for bit. Not with a resize." />
-								<ControlToggle v-model="settings.jxl.lossless" label="Lossless" help="Every other image is kept pixel for pixel, at a larger size. Quality does not apply." />
-								<ControlToggle v-model="settings.jxl.multiThreading" label="Multi-threading" help="encode on every core" />
-							</div>
-							<p class="px-2.5 text-xs text-paleday-dim">
-								Browsers are still turning JPEG XL on, so the preview here decodes it itself rather than relying on the web engine.
-							</p>
-						</ControlPanel>
-
-						<ControlPanel v-if="isHeic" title="Quality" class="pt-8">
-							<div class="grid grid-cols-3 gap-4">
-								<ControlSlider v-model="settings.heic.quality" label="Quality" :min="0" :max="100" :help="x265 ? 'quality factor (0: small .. 100: big); x265\'s CRF is (100 − quality) ÷ 2' : 'quality factor (0: small .. 100: big); 50 is libheif\'s default'" :disabled="x265 && settings.heic.lossless" />
-								<ControlToggle v-if="x265" v-model="settings.heic.lossless" label="Lossless" help="Every pixel kept exactly, stored as RGB at 4:4:4. Quality, chroma, bit depth and the rate controls do not apply. Lossless HEIC is rare, and not every reader opens it." />
-							</div>
-							<p v-if="x265" class="px-2.5 text-xs text-paleday-dim">
-								HEVC in HEIF, the format iPhones use, encoded by x265.
-							</p>
-							<p v-else class="px-2.5 text-xs text-paleday-dim">
-								HEVC in HEIF, the format iPhones use, encoded by Kvazaar. Kvazaar writes 8-bit 4:2:0 colour only, so there is no lossless mode. The GPL edition of Skidbladnir encodes with x265 instead, which adds lossless, 4:4:4, 10-bit and x265's own controls.
-							</p>
-						</ControlPanel>
-
-						<ControlPanel v-if="isHeic && x265 && !settings.heic.lossless" title="HEIC">
-							<div class="grid grid-cols-4 gap-3">
-								<div class="col-span-2 flex min-w-0 flex-col gap-2 px-2.5 py-[7px]">
-									<span class="text-xs font-semibold text-paleday-fg">Chroma</span>
-									<ChoiceGroup v-model="settings.heic.chroma" :items="HEIC_CHROMA_ITEMS" aria-label="HEIC chroma subsampling" />
-									<p class="text-xs text-paleday-dim">
-										4:2:0 is what phones write and every reader decodes. 4:4:4 keeps colour at full resolution, so red text and pixel art stay sharp, but not every reader decodes it.
-									</p>
-								</div>
-								<div class="col-span-2 flex min-w-0 flex-col gap-2 px-2.5 py-[7px]">
-									<span class="text-xs font-semibold text-paleday-fg">Bit depth</span>
-									<ChoiceGroup v-model="settings.heic.bitDepth" :items="HEIC_BIT_DEPTH_ITEMS" aria-label="HEIC bit depth" />
-									<p class="text-xs text-paleday-dim">
-										10-bit is HEVC Main 10, as phones write HDR photos. It keeps more precision through the colour conversion, so smooth gradients band less, even from an 8-bit image.
-									</p>
-								</div>
-							</div>
-						</ControlPanel>
-
-						<ControlPanel v-if="isHeic && x265" title="x265">
-							<div class="grid grid-cols-4 gap-3">
-								<div class="flex min-w-0 flex-col gap-2 px-2.5 py-[7px]">
-									<span class="text-xs font-semibold text-paleday-fg">Preset</span>
-									<USelect v-model="settings.heic.preset" :items="HEIC_PRESET_ITEMS" variant="soft" size="sm" aria-label="x265 preset" :ui="{ base: 'bg-paleday-field' }" />
-									<p class="text-xs text-paleday-dim">
-										Slower presets search harder for a smaller file.
-									</p>
-								</div>
-								<div class="col-span-2 flex min-w-0 flex-col gap-2 px-2.5 py-[7px]">
-									<span class="text-xs font-semibold text-paleday-fg">Tune</span>
-									<ChoiceGroup v-model="settings.heic.tune" :items="HEIC_TUNE_ITEMS" aria-label="x265 tune" />
-									<p class="text-xs text-paleday-dim">
-										Sets x265's remaining decisions for a goal. The controls on this panel apply over it.
-									</p>
-								</div>
-								<ControlSlider v-model="settings.heic.tuIntraDepth" label="TU intra depth" :min="1" :max="4" help="how far transform units split; deeper finds finer detail, more slowly (at most 3 under 32 px)" />
-							</div>
-							<template v-if="!settings.heic.lossless">
-								<div class="grid grid-cols-4 gap-3">
-									<div class="flex min-w-0 flex-col gap-2 px-2.5 py-[7px]">
-										<span class="text-xs font-semibold text-paleday-fg">Adaptive quantisation</span>
-										<USelect v-model="settings.heic.aqMode" :items="HEIC_AQ_ITEMS" variant="soft" size="sm" aria-label="x265 adaptive quantisation mode" :ui="{ base: 'bg-paleday-field' }" />
-										<p class="text-xs text-paleday-dim">
-											How bits move between flat and detailed areas.
-										</p>
-									</div>
-									<ControlSlider v-model="settings.heic.aqStrength" label="AQ strength" :min="0" :max="30" :divisor="10" help="0.0 .. 3.0; higher moves more bits into flat areas" :disabled="settings.heic.aqMode === 'off'" />
-									<ControlSlider v-model="settings.heic.psyRd" label="Psy-RD" :min="0" :max="50" :divisor="10" help="0.0 .. 5.0; keeps texture and energy rather than the smoothest match" />
-									<ControlSlider v-model="settings.heic.psyRdoq" label="Psy-RDOQ" :min="0" :max="500" :divisor="10" help="0.0 .. 50.0; keeps detail when quantising" />
-								</div>
-								<div class="grid grid-cols-4 gap-3">
-									<ControlToggle v-model="settings.heic.deblock" label="Deblocking" help="the in-loop filter that smooths block edges" />
-									<ControlSlider v-model="settings.heic.deblockStrength" label="Deblocking strength" :min="-6" :max="6" help="tC offset: higher smooths more" :disabled="!settings.heic.deblock" />
-									<ControlSlider v-model="settings.heic.deblockThreshold" label="Deblocking threshold" :min="-6" :max="6" help="beta offset: higher treats more edges as blocking" :disabled="!settings.heic.deblock" />
-									<ControlToggle v-model="settings.heic.sao" label="SAO" help="sample adaptive offset: smooths ringing around edges" />
-								</div>
-								<p class="px-2.5 text-xs text-paleday-dim">
-									These shape the colour image. libheif encodes transparency separately, with its own values for them.
-								</p>
-							</template>
-						</ControlPanel>
-
-						<ControlPanel title="Resize">
-							<div class="grid grid-cols-3 gap-3">
-								<ControlToggle v-model="settings.resize.noEnlarge" label="Do not enlarge" help="Images already smaller than the target keep their size instead of being upscaled." />
-								<div class="flex min-w-0 flex-col gap-2 px-2.5 py-[7px] text-xs">
-									<span class="font-semibold text-paleday-fg">Width</span>
-									<UInput v-model.number="settings.resize.width" type="number" :min="0" variant="soft" aria-label="Resize width in pixels" :ui="{ base: 'bg-paleday-rule text-paleday-fg hover:bg-paleday-rule focus:bg-paleday-rule', trailing: 'pe-2.5 text-paleday-fg' }">
-										<template #trailing>
-											px
-										</template>
-									</UInput>
-									<p class="text-paleday-dim">
-										0 derives it from the height, keeping the aspect ratio.
-									</p>
-								</div>
-								<div class="flex min-w-0 flex-col gap-2 px-2.5 py-[7px] text-xs">
-									<span class="font-semibold text-paleday-fg">Height</span>
-									<UInput v-model.number="settings.resize.height" type="number" :min="0" variant="soft" aria-label="Resize height in pixels" :ui="{ base: 'bg-paleday-rule text-paleday-fg hover:bg-paleday-rule focus:bg-paleday-rule', trailing: 'pe-2.5 text-paleday-fg' }">
-										<template #trailing>
-											px
-										</template>
-									</UInput>
-									<p class="text-paleday-dim">
-										0 derives it from the width, keeping the aspect ratio.
-									</p>
-								</div>
-							</div>
-						</ControlPanel>
-
-						<!-- cwebp -metadata. Off by default, as in cwebp and the Electron app. -->
-						<ControlPanel title="Metadata">
-							<div class="grid grid-cols-3 gap-3">
-								<ControlToggle v-if="!isAvif" v-model="settings.metadata.icc" label="Keep colour profile" help="The ICC profile. Without it a wide-gamut photo (Display P3, Adobe RGB) is shown as sRGB and its colours shift." />
-								<ControlToggle v-model="settings.metadata.exif" label="Keep EXIF" help="Camera, exposure, date and orientation — and location, if the camera recorded it." />
-								<ControlToggle v-if="!isAvif" v-model="settings.metadata.xmp" label="Keep XMP" help="Editing history, ratings, rights and captions." />
-							</div>
-							<p class="px-2.5 text-xs text-paleday-dim">
-								<template v-if="isWebp">Kept exactly as cwebp -metadata keeps them, from JPEG, PNG, TIFF and WebP files. Not yet for animations.</template>
-								<template v-else-if="isJxl">The colour profile labels the image in the JPEG XL file; EXIF and XMP are stored beside it. A JPEG recompressed losslessly always keeps its own metadata, since the original must be rebuildable bit for bit.</template>
-								<template v-else-if="isHeic">The colour profile labels the image in the HEIC file; EXIF and XMP are stored as its metadata items.</template>
-								<template v-else>AVIF output can keep EXIF only: its encoder has no way to store a colour profile or XMP yet.</template>
-							</p>
-						</ControlPanel>
-
-						<!-- The expert controls, behind a disclosure as in the Electron app, open by default. -->
-						<UAccordion
-							v-if="lossy"
-							:items="[{ label: 'Advanced', value: 'advanced', slot: 'advanced' }]"
-							default-value="advanced"
-							:ui="{
-								item: 'border-0',
-								trigger: 'py-0 text-sm font-semibold text-paleday-bright',
-								trailingIcon: 'size-4',
-								body: 'pt-4 pb-0',
-							}"
-						>
-							<template #advanced-body>
-								<div class="flex flex-col gap-4">
-									<div class="grid grid-cols-4 gap-3">
-										<ControlSlider v-model="settings.webp.sns" label="Spatial noise shaping" :min="0" :max="100" help="0 = off, 100 = maximum" />
-										<ControlSlider v-model="settings.webp.segments" label="Segments" :min="1" :max="4" help="number of segments to use (1..4)" />
-										<ControlSlider v-model="settings.webp.partitionLimit" label="Partition limit" :min="0" :max="100" help="degradation allowed to fit the 512k prediction-mode limit" />
-										<ControlSlider v-model="settings.webp.passes" label="Analysis passes" :min="1" :max="10" help="analysis pass number (1..10)" />
-									</div>
-
-									<div class="grid grid-cols-4 gap-3">
-										<div class="flex min-w-0 flex-col gap-2 px-2.5 py-[7px]">
-											<span class="text-xs font-semibold text-paleday-fg">Deblocking filter</span>
-											<ChoiceGroup v-model="settings.webp.filter" :items="FILTER_ITEMS" aria-label="Deblocking filter" />
-											<p class="text-xs text-paleday-dim">
-												Auto lets the encoder pick the strength, so the two sliders do not apply.
-											</p>
-										</div>
-										<ControlSlider v-model="settings.webp.filterStrength" label="Filter strength" :min="0" :max="100" help="0 = off .. 100 = strongest" :disabled="!manualFilter" />
-										<ControlSlider v-model="settings.webp.filterSharpness" label="Filter sharpness" :min="0" :max="7" help="0 = most sharp .. 7 = least sharp" :disabled="!manualFilter" />
-									</div>
-
-									<div class="grid grid-cols-4 gap-3">
-										<div class="flex min-w-0 flex-col gap-2 px-2.5 py-[7px]">
-											<span class="text-xs font-semibold text-paleday-fg">Compression target</span>
-											<ChoiceGroup v-model="targetKind" :items="TARGET_ITEMS" orientation="vertical" aria-label="Compression target" />
-											<p class="text-xs text-paleday-dim">
-												A size or PSNR target overrides the quality slider.
-												<template v-if="animatedInputs.length > 0">For an animation it applies to each frame, not the whole file.</template>
-											</p>
-										</div>
-										<div v-if="targetKind === 'size'" class="flex min-w-0 flex-col gap-2 px-2.5 py-[7px] text-xs">
-											<span class="font-semibold text-paleday-fg">Target size</span>
-											<UInput v-model.number="targetSize" type="number" :min="1" variant="soft" aria-label="Target size in bytes" :ui="{ base: 'bg-paleday-rule text-paleday-fg hover:bg-paleday-rule focus:bg-paleday-rule', trailing: 'pe-2.5 text-paleday-fg' }">
-												<template #trailing>
-													bytes
-												</template>
-											</UInput>
-											<p class="text-paleday-dim">
-												Encoding stops as close to this output size as libwebp can get.
-											</p>
-										</div>
-										<ControlSlider v-if="targetKind === 'psnr'" v-model="targetPsnr" label="Target PSNR (dB)" :min="1" :max="10000" help="typically around 42" />
-									</div>
-
-									<div class="grid grid-cols-4 gap-3">
-										<ControlToggle v-model="settings.webp.sharpYuv" label="Sharp YUV" help="sharper (and slower) RGB to YUV" />
-										<ControlToggle v-model="settings.webp.lowMemory" label="Low memory" help="less memory, slower encoding" />
-										<ControlToggle v-model="settings.webp.multiThreading" label="Multi-threading" help="use multi-threading if available" />
-									</div>
-								</div>
-							</template>
-						</UAccordion>
+						<WebpSettingsPanel v-if="isWebp" v-model="settings.webp" />
+						<AvifSettingsPanel v-if="isAvif" v-model="settings.avif" />
+						<JxlSettingsPanel v-if="isJxl" v-model="settings.jxl" />
+						<HeicSettingsPanel v-if="isHeic" v-model="settings.heic" :x265="x265" />
+						<GeometrySettingsPanel v-model="settings" />
 
 						<ControlPanel v-if="inputPaths.length > 0 && !busy" title="Preview">
 							<div class="flex items-center gap-2 px-2.5">

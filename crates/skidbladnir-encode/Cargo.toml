@@ -20,16 +20,18 @@ full = ["x265"]
 gif = { workspace = true }
 image = { workspace = true }
 libwebp-sys = { workspace = true }
-mozjpeg = { workspace = true }
-png = { workspace = true }
-ravif = { workspace = true }
 avif-decode = { workspace = true }
 jxl-oxide = { workspace = true }
+png = { workspace = true }
+tiff = { workspace = true }
+flate2 = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 
 [build-dependencies]
 jpegxl-src = { workspace = true }
+cmake = { workspace = true }
+cc = { workspace = true }
 pkg-config = { workspace = true }
 
 [dev-dependencies]

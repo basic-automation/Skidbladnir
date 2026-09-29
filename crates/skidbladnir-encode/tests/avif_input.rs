@@ -168,11 +168,11 @@ fn matches_avifdec_across_colour_encodings() {
 	eprintln!("AVIF INPUT OK: {} files decoded within tolerance of avifdec", cases.len());
 }
 
-/// What `ravif` writes, this reads back — the app's own AVIF output is valid input.
+/// What libavif writes, this reads back — the app's own AVIF output is valid input.
 #[test]
 fn reads_back_our_own_avif_output() {
 	let source = source(true);
-	let job = skidbladnir_encode::settings::EncodeJob { format: skidbladnir_encode::settings::OutputFormat::Avif, avif: skidbladnir_encode::settings::AvifSettings { speed: 10, quality: 95, alpha_quality: 95, ..Default::default() }, ..Default::default() };
+	let job = skidbladnir_encode::settings::EncodeJob { format: skidbladnir_encode::settings::OutputFormat::Avif, avif: skidbladnir_encode::settings::AvifSettings { speed: Some(10), quality: Some(95), quality_alpha: Some(95), ..Default::default() }, ..Default::default() };
 	let encoded = skidbladnir_encode::encode_rgba(&job, &skidbladnir_encode::RgbaImage { width: WIDTH, height: HEIGHT, pixels: source.as_raw() }).expect("encode");
 	let (width, height, ours) = decode_avif(&encoded).expect("our own AVIF must decode");
 	assert_eq!((width, height), (WIDTH, HEIGHT));

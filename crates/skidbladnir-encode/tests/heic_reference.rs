@@ -110,7 +110,7 @@ fn reference_heifdec_reads_our_heic_correctly() {
 	let high = opaque_psnr(&pixels, &decode(&heifdec, &encode(HeicSettings { quality: 95, ..HeicSettings::default() }, Resize::default(), &pixels), "q95").2);
 	assert!(high > low, "quality 95 decodes at {high:.1} dB but quality 20 at {low:.1} dB");
 
-	let (width, height, _) = decode(&heifdec, &encode(HeicSettings::default(), Resize { width: 32, height: 0, no_enlarge: false }, &pixels), "resize");
+	let (width, height, _) = decode(&heifdec, &encode(HeicSettings::default(), Resize::to(32, 0), &pixels), "resize");
 	assert_eq!((width, height), (32, 24));
 
 	eprintln!("HEIC REFERENCE OK: heif-dec read every file at the right size and alpha (libheif {}; default {default_psnr:.1} dB, q20 {low:.1} dB, q95 {high:.1} dB).", heic::linked_version());

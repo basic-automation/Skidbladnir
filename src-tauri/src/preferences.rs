@@ -24,7 +24,7 @@ use skidbladnir_encode::settings::EncodeJob;
 const FILE_NAME: &str = "preferences.json";
 
 /// What the app remembers between launches.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Preferences {
 	/// The encode settings last used.
@@ -48,7 +48,7 @@ pub enum PreferencesFallback {
 }
 
 /// Preferences as loaded, plus what happened if the stored ones could not be used.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoadedPreferences {
 	/// The preferences to use.
@@ -116,7 +116,7 @@ pub fn save_to(directory: &Path, preferences: &Preferences) -> io::Result<()> {
 mod tests {
 	use std::{fs, path::PathBuf};
 
-	use skidbladnir_encode::settings::{EncodeJob, HEIC_X265, HeicBitDepth, Mode, WebpSettings};
+	use skidbladnir_encode::settings::{EncodeJob, HEIC_X265, HeicBitDepth, WebpSettings};
 
 	use super::{Preferences, PreferencesFallback, load_from, save_to};
 
@@ -142,7 +142,7 @@ mod tests {
 	#[test]
 	fn round_trips_settings_and_destination() {
 		let scratch = Scratch::new("roundtrip");
-		let preferences = Preferences { settings: EncodeJob::from(WebpSettings { mode: Mode::Lossless, quality: 92, sharp_yuv: true, ..Default::default() }), output_directory: Some(scratch.0.clone()) };
+		let preferences = Preferences { settings: EncodeJob::from(WebpSettings { lossless: true, quality: 92.0, sharp_yuv: true, ..Default::default() }), output_directory: Some(scratch.0.clone()) };
 		save_to(&scratch.0, &preferences).expect("save");
 		let loaded = load_from(&scratch.0);
 		assert_eq!(loaded.fell_back, None);
@@ -188,7 +188,8 @@ mod tests {
 		fs::write(scratch.0.join("preferences.json"), br#"{"settings":{"format":"heic","webp":{"quality":61},"heic":{"quality":70,"bitDepth":"ten"}}}"#).expect("write");
 		let loaded = load_from(&scratch.0);
 		assert_eq!(loaded.fell_back, None);
-		assert_eq!((loaded.preferences.settings.webp.quality, loaded.preferences.settings.heic.quality), (61, 70));
+		assert!((loaded.preferences.settings.webp.quality - 61.0).abs() < f32::EPSILON);
+		assert_eq!(loaded.preferences.settings.heic.quality, 70);
 		assert_eq!(loaded.preferences.settings.heic.bit_depth, if HEIC_X265 { HeicBitDepth::Ten } else { HeicBitDepth::Eight });
 	}
 
@@ -200,7 +201,7 @@ mod tests {
 		fs::write(scratch.0.join("preferences.json"), br#"{"settings":{"quality":33}}"#).expect("write the partial file");
 		let loaded = load_from(&scratch.0);
 		assert_eq!(loaded.fell_back, None);
-		assert_eq!(loaded.preferences.settings.webp.quality, 33);
+		assert!((loaded.preferences.settings.webp.quality - 33.0).abs() < f32::EPSILON);
 		assert_eq!(loaded.preferences.settings.webp.segments, EncodeJob::default().webp.segments);
 	}
 
