@@ -680,8 +680,18 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       image, so there it is reported, not trusted (1.4.2 on Arch applies them and agrees
       exactly). Mutation-tested: clockwise
       rotation fails `irot` 1 and 3; swapped mirror axes fail both `imir`.
-- [ ] AVIF input refuses grid (tiled) images — `avif-parse` does not support `grid` items.
-      Some cameras tile large captures. Needs the grid's tiles decoded and stitched.
+- [x] AVIF input decodes grid (tiled) images (done 2026-09-28). `avif-parse` refuses
+      `grid` items, so `src/avif_grid.rs` reads the container itself, rewraps each tile (and
+      its alpha tile, when the alpha plane is a grid too) as a minimal single-image AVIF for
+      the ordinary decoder, and stitches the tiles, cropped to the grid's output size. The
+      canvas is allocated only once the first tile proves the layout fits (MIAF: covering the
+      output, overhanging by less than a tile), so a hostile descriptor cannot demand a huge
+      buffer. The grid's own crop/rotation/mirror still apply. **Gate:** `decodes_grid_avifs`
+      in `tests/avif_input.rs` — `avifenc --grid` 2x2 and 4x3 (with alpha) lossless files
+      come back exactly as their source, a rotated grid exactly as the rotated source, and a
+      lossy 4:2:0 grid within tolerance of `avifdec`; each fixture is checked to really be a
+      grid. Mutation-tested: swapped row/column order, dropped alpha tiles and a lost edge
+      column each fail it.
 - [x] **Show the AVIF preview on every platform** (done 2026-09-27). The encoded AVIF is
       decoded in Rust and sent to the webview as lossless WebP, so no web engine has to
       decode AVIF; the smoke test's "displays the AVIF preview" is a hard check again. The

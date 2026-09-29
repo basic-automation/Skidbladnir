@@ -267,3 +267,73 @@ fn honours_crop_rotation_and_mirror() {
 	};
 	eprintln!("AVIF TRANSFORMS OK: {} files shown with their crop, rotation and mirror, exactly{referee}", cases.len());
 }
+
+/// Grid (tiled) AVIFs decode whole: every tile in its place, cropped to the grid's output
+/// size, with an alpha grid kept, and the grid item's own rotation still applied.
+///
+/// Lossless grids must come back exactly as their source; a lossy one must match `avifdec`
+/// (same tolerance idea as the colour-encoding gate: a misplaced tile is off by tens of
+/// levels over a whole tile).
+#[test]
+fn decodes_grid_avifs() {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let (Some(avifenc), avifdec) = (tool("SKIDBLADNIR_REFERENCE_AVIFENC", "avifenc"), tool("SKIDBLADNIR_REFERENCE_AVIFDEC", "avifdec")) else {
+		let message = "AVIF GRIDS NOT CHECKED: avifenc (libavif) is needed.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+	let dir = env::temp_dir().join(format!("skidbladnir-avif-grid-{}", std::process::id()));
+	let _ = fs::remove_dir_all(&dir);
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+	// MIAF requires grid tiles of at least 64x64, so the fixtures are the usual source
+	// scaled up to 256x192: 2x2 tiles of 128x96, and 4x3 tiles of 64x64.
+	let big = |alpha: bool| image::imageops::resize(&source(alpha), 256, 192, image::imageops::FilterType::Triangle);
+	let (opaque, translucent) = (big(false), big(true));
+	let (opaque_png, translucent_png) = (dir.join("opaque.png"), dir.join("translucent.png"));
+	opaque.save(&opaque_png).expect("write");
+	translucent.save(&translucent_png).expect("write");
+
+	// (name, source, avifenc flags, expected pixels: None = compare with avifdec)
+	let rotated = image::imageops::rotate270(&opaque);
+	let cases: Vec<(&str, &Path, Vec<&str>, Option<&image::RgbaImage>)> = vec![("2x2 lossless", &opaque_png, vec!["-l", "--grid", "2x2"], Some(&opaque)), ("4x3 lossless with alpha", &translucent_png, vec!["-l", "--grid", "4x3"], Some(&translucent)), ("2x2 lossless, the grid rotated", &opaque_png, vec!["-l", "--grid", "2x2", "--irot", "1"], Some(&rotated)), ("2x2 lossy 4:2:0", &opaque_png, vec!["-q", "80", "-y", "420", "--grid", "2x2"], None)];
+
+	let mut failures = Vec::new();
+	for (index, (name, png, flags, expected)) in cases.iter().enumerate() {
+		let avif = dir.join(format!("{index}.avif"));
+		let mut args = vec!["-s", "10"];
+		args.extend(flags.iter().copied());
+		let (png_str, avif_str) = (png.to_string_lossy().into_owned(), avif.to_string_lossy().into_owned());
+		args.extend([png_str.as_str(), avif_str.as_str()]);
+		run(&avifenc, &args);
+		let bytes = fs::read(&avif).expect("read");
+		// Otherwise a libavif that quietly ignored `--grid` would pass this gate untested.
+		if !skidbladnir_encode::avif_grid::is_grid(&bytes) {
+			failures.push(format!("{name}: avifenc did not write a grid"));
+			continue;
+		}
+		let (width, height, ours) = match decode_avif(&bytes) {
+			Ok(decoded) => decoded,
+			Err(error) => {
+				failures.push(format!("{name}: refused: {error}"));
+				continue;
+			}
+		};
+		if let Some(expected) = expected {
+			if (width, height) != expected.dimensions() || ours != *expected.as_raw() {
+				failures.push(format!("{name}: {width}x{height} {}", if (width, height) == expected.dimensions() { "with different pixels" } else { "at the wrong size" }));
+			}
+		} else if let Some(avifdec) = &avifdec {
+			let out = dir.join(format!("{index}.png"));
+			run(avifdec, &["-d", "8", "-u", "nearest", &avif_str, &out.to_string_lossy()]);
+			let theirs = image::open(&out).expect("read").into_rgba8();
+			let (mean, worst) = if theirs.dimensions() == (width, height) { difference(&ours, theirs.as_raw()) } else { (f64::MAX, u8::MAX) };
+			if mean > 2.0 || worst > 20 {
+				failures.push(format!("{name}: against avifdec mean {mean:.3} worst {worst}"));
+			}
+		}
+	}
+	let _ = fs::remove_dir_all(&dir);
+	assert!(failures.is_empty(), "AVIF GRIDS FAILED:\n{}", failures.join("\n"));
+	eprintln!("AVIF GRIDS OK: {} grid AVIFs decoded whole", cases.len());
+}

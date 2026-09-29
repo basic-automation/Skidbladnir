@@ -285,8 +285,9 @@ fn to_rgba8(decoded: image::DynamicImage) -> image::RgbaImage {
 	image::RgbaImage::from_raw(width, height, narrowed).unwrap_or_else(|| image::RgbaImage::new(width, height))
 }
 
-/// Decode an AVIF file to `(width, height, rgba)`, with its `clap`/`irot`/`imir` crop,
-/// rotation and mirror applied (see [`crate::avif_transform`]).
+/// Decode an AVIF file to `(width, height, rgba)` — a grid (tiled) AVIF stitched whole
+/// (see [`crate::avif_grid`]) — with its `clap`/`irot`/`imir` crop, rotation and mirror
+/// applied (see [`crate::avif_transform`]).
 ///
 /// 16-bit output (from a 10- or 12-bit AVIF) is reduced by dropping the low byte, the
 /// same reduction `to_rgba8` makes for 16-bit PNG, so a deep source is narrowed the same
@@ -296,6 +297,18 @@ fn to_rgba8(decoded: image::DynamicImage) -> image::RgbaImage {
 ///
 /// Returns the decoder's message if the file is not a decodable AVIF still.
 pub fn decode_avif(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
+	// A grid (tiled) AVIF is decoded tile by tile, each through the ordinary decoder below;
+	// avif-parse refuses the grid itself.
+	let (width, height, pixels) = if crate::avif_grid::is_grid(bytes) { crate::avif_grid::decode(bytes, &decode_avif_image)? } else { decode_avif_image(bytes)? };
+	// Shown the way the file asks: its crop, rotation and mirror, which avif-decode leaves
+	// to the caller. A phone's sideways-stored portrait would otherwise convert sideways.
+	let transforms = crate::avif_transform::transforms(bytes, width, height);
+	Ok(crate::avif_transform::apply(width, height, pixels, &transforms))
+}
+
+/// Decode one AVIF image item (the file's primary item) to `(width, height, rgba)`, with
+/// no transforms applied.
+fn decode_avif_image(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
 	use avif_decode::{Decoder, Image};
 
 	// The parser underneath is not panic-free on hostile input: a malformed box trips a
@@ -337,10 +350,7 @@ pub fn decode_avif(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
 	let (Ok(width), Ok(height)) = (u32::try_from(width), u32::try_from(height)) else {
 		return Err(format!("{width}x{height} is too large"));
 	};
-	// Shown the way the file asks: its crop, rotation and mirror, which avif-decode leaves
-	// to the caller. A phone's sideways-stored portrait would otherwise convert sideways.
-	let transforms = crate::avif_transform::transforms(bytes, width, height);
-	Ok(crate::avif_transform::apply(width, height, pixels, &transforms))
+	Ok((width, height, pixels))
 }
 
 /// Decode a WebP file with libwebp, returning `(width, height, rgba)`.

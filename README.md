@@ -180,7 +180,8 @@ What it can do:
   includes **CMYK JPEGs** as Photoshop writes them, which `cwebp` itself refuses to read.
   AVIF input is checked against libavif's own `avifdec` across 17 colour encodings (bit
   depths, chroma subsampling, range, colour matrices, alpha), and an AVIF's crop,
-  rotation and mirror are applied, so a sideways-stored portrait converts upright. JPEG
+  rotation and mirror are applied, so a sideways-stored portrait converts upright. Tiled
+  (grid) AVIFs, as some cameras write large captures, are decoded whole. JPEG
   XL input is checked against libjxl's `djxl`.
 - Refuse to overwrite your source image, and stage every write through a temporary
   file so a failed conversion cannot damage a file that was already there.
@@ -198,7 +199,7 @@ Known gaps:
 - An AVIF, JPEG XL or HEIC encode cannot be cancelled mid-file: none of those encoders reports progress, so
   Cancel takes effect when the current file finishes (which is then discarded, not
   written). There is no chroma subsampling control — AVIF is always written 4:4:4 —
-  animated AVIF is not read, and tiled (grid) AVIFs are refused.
+  animated AVIF is not read.
 - An animation (animated WebP or GIF) converts to WebP only. AVIF, JPEG XL and HEIC
   output refuse it by name rather than keeping just the first frame, because those
   encoders write still images here. A target size or PSNR applies to each frame of an

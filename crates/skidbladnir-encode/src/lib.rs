@@ -12,6 +12,7 @@
 
 pub mod animation;
 pub mod avif;
+pub mod avif_grid;
 pub mod avif_transform;
 pub mod cwebp;
 pub mod encoder;
