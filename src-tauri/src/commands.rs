@@ -330,7 +330,7 @@ pub async fn convert_image(app: tauri::AppHandle, state: tauri::State<'_, Cancel
 #[cfg(test)]
 mod tests {
 	use skidbladnir_encode::{
-		settings::{EncodeJob, Mode, WebpSettings}, source::Conversion
+		settings::{EncodeJob, WebpSettings}, source::Conversion
 	};
 
 	use super::{ConversionReport, convert_one, default_settings, encoder_version, inspect_dropped_paths, validate_settings};
@@ -353,8 +353,6 @@ mod tests {
 	#[test]
 	fn validate_settings_reports_the_same_rules_as_the_encoder() {
 		assert_eq!(validate_settings(EncodeJob::default()), Ok(EncodeJob::default()));
-		let missing_preset = EncodeJob::from(WebpSettings { mode: Mode::Preset, preset: None, ..Default::default() });
-		assert_eq!(validate_settings(missing_preset), Err("mode is `preset` but no preset was selected".to_owned()));
 		let bad_method = EncodeJob::from(WebpSettings { method: 9, ..Default::default() });
 		assert_eq!(validate_settings(bad_method), Err("method is 9, but must be in 0..=6".to_owned()));
 	}
@@ -365,7 +363,7 @@ mod tests {
 	fn validate_settings_returns_the_filled_in_form() {
 		let partial: EncodeJob = serde_json::from_str(r#"{"mode":"lossless","quality":90}"#).expect("partial settings deserialize");
 		let validated = validate_settings(partial).expect("partial settings are valid");
-		assert_eq!(validated.webp.quality, 90);
+		assert!((validated.webp.quality - 90.0).abs() < f32::EPSILON);
 		assert_eq!(validated.webp.method, EncodeJob::default().webp.method, "an omitted field comes back as the core's default");
 	}
 
@@ -377,7 +375,7 @@ mod tests {
 		std::fs::create_dir_all(&dir).expect("create the scratch directory");
 		let webp = dir.join("image.webp");
 		let pixels = [1_u8, 2, 3, 255];
-		let bytes = skidbladnir_encode::encoder::encode_rgba(&EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() }), &skidbladnir_encode::encoder::RgbaImage { width: 1, height: 1, pixels: &pixels }).expect("encode the fixture");
+		let bytes = skidbladnir_encode::encoder::encode_rgba(&EncodeJob::from(WebpSettings { lossless: true, exact: true, ..Default::default() }), &skidbladnir_encode::encoder::RgbaImage { width: 1, height: 1, pixels: &pixels }).expect("encode the fixture");
 		std::fs::write(&webp, &bytes).expect("write the fixture");
 		let junk = dir.join("readme.txt");
 		std::fs::write(&junk, b"not an image").expect("write the junk file");
@@ -404,7 +402,7 @@ mod tests {
 		// A 1x1 lossless WebP, written by the core itself so the fixture is real.
 		let webp = dir.join("only.webp");
 		let pixels = [10_u8, 20, 30, 255];
-		let bytes = skidbladnir_encode::encoder::encode_rgba(&EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() }), &skidbladnir_encode::encoder::RgbaImage { width: 1, height: 1, pixels: &pixels }).expect("encode the fixture");
+		let bytes = skidbladnir_encode::encoder::encode_rgba(&EncodeJob::from(WebpSettings { lossless: true, exact: true, ..Default::default() }), &skidbladnir_encode::encoder::RgbaImage { width: 1, height: 1, pixels: &pixels }).expect("encode the fixture");
 		std::fs::write(&webp, &bytes).expect("write the fixture");
 
 		let error = convert_one(&EncodeJob::default(), webp.clone(), dir.clone(), &mut |_| true).expect_err("must refuse");

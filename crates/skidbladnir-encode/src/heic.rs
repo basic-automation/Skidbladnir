@@ -359,7 +359,7 @@ mod tests {
 	#[test]
 	fn applies_the_shared_resize() {
 		let pixels = fixture(64, 48, false);
-		let bytes = encode(&HeicSettings::default(), Resize { width: 32, height: 0, no_enlarge: false }, &RgbaImage { width: 64, height: 48, pixels: &pixels }, &mut |_| true).expect("encode");
+		let bytes = encode(&HeicSettings::default(), Resize::to(32, 0), &RgbaImage { width: 64, height: 48, pixels: &pixels }, &mut |_| true).expect("encode");
 		assert_eq!(dimensions(&bytes), Some((32, 24)));
 	}
 

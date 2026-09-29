@@ -29,7 +29,7 @@ use std::{
 };
 
 use skidbladnir_encode::{
-	RgbaImage, cwebp_args, encode_rgba, settings::{AlphaFiltering, EncodeJob, FilterType, Mode, Preset, Resize, TargetMetric, WebpSettings}
+	RgbaImage, cwebp_args, encode_rgba, settings::{AlphaFiltering, Crop, EncodeJob, FilterType, ImageHint, Preset, Resize, ResizeMode, TargetMetric, WebpMetadata, WebpSettings}
 };
 
 /// Locate a reference `cwebp`, preferring an explicitly configured one.
@@ -84,82 +84,139 @@ fn write_pam(path: &Path, pixels: &[u8], width: u32, height: u32) {
 	fs::write(path, out).expect("write the PAM fixture");
 }
 
-/// Every setting combination worth comparing: the whole control surface, one case per
-/// control, plus the mode-specific paths.
+/// Every setting worth comparing: each `cwebp` flag on its own across its range, then the
+/// combinations the old five-mode window could not express, which are the point of the
+/// flag-for-field model.
 fn cases() -> Vec<(String, EncodeJob)> {
 	let mut cases: Vec<(String, EncodeJob)> = Vec::new();
 	let mut add = |name: &str, settings: EncodeJob| cases.push((name.to_owned(), settings));
+	let webp = |settings: WebpSettings| EncodeJob::from(settings);
+	let d = WebpSettings::default;
 
-	add("default lossy", EncodeJob::default());
+	add("default", EncodeJob::default());
+	add("libwebp defaults", webp(WebpSettings::libwebp_defaults()));
 
-	for quality in [0_u8, 1, 50, 99, 100] {
-		add(&format!("quality {quality}"), EncodeJob::from(WebpSettings { quality, ..Default::default() }));
+	for quality in [0.0_f32, 1.0, 50.0, 62.5, 99.9, 100.0] {
+		add(&format!("quality {quality}"), webp(WebpSettings { quality, ..d() }));
 	}
 	for alpha_quality in [0_u8, 50, 100] {
-		add(&format!("alpha quality {alpha_quality}"), EncodeJob::from(WebpSettings { alpha_quality, ..Default::default() }));
+		add(&format!("alpha quality {alpha_quality}"), webp(WebpSettings { alpha_quality, ..d() }));
 	}
+	add("alpha method 0", webp(WebpSettings { alpha_compression: false, ..d() }));
 	for method in 0..=6_u8 {
-		add(&format!("method {method}"), EncodeJob::from(WebpSettings { method, ..Default::default() }));
+		add(&format!("method {method}"), webp(WebpSettings { method, ..d() }));
 	}
 	for segments in 1..=4_u8 {
-		add(&format!("segments {segments}"), EncodeJob::from(WebpSettings { segments, ..Default::default() }));
+		add(&format!("segments {segments}"), webp(WebpSettings { segments, ..d() }));
 	}
 	for sns in [0_u8, 25, 50, 100] {
-		add(&format!("sns {sns}"), EncodeJob::from(WebpSettings { sns, ..Default::default() }));
+		add(&format!("sns {sns}"), webp(WebpSettings { sns, ..d() }));
 	}
 	for passes in [1_u8, 6, 10] {
-		add(&format!("passes {passes}"), EncodeJob::from(WebpSettings { passes, ..Default::default() }));
+		add(&format!("passes {passes}"), webp(WebpSettings { passes, ..d() }));
 	}
 	for partition_limit in [0_u8, 50, 100] {
-		add(&format!("partition limit {partition_limit}"), EncodeJob::from(WebpSettings { partition_limit, ..Default::default() }));
+		add(&format!("partition limit {partition_limit}"), webp(WebpSettings { partition_limit, ..d() }));
 	}
-
-	add("auto filter", EncodeJob::from(WebpSettings { filter: FilterType::Auto, ..Default::default() }));
+	for (qmin, qmax) in [(0_u8, 100_u8), (20, 60), (50, 50)] {
+		add(&format!("qrange {qmin} {qmax}"), webp(WebpSettings { qmin, qmax, ..d() }));
+	}
+	for preprocessing in 0..=7_u8 {
+		add(&format!("pre {preprocessing}"), webp(WebpSettings { preprocessing, ..d() }));
+	}
 	for (strength, sharpness) in [(0_u8, 0_u8), (20, 3), (100, 7)] {
-		add(&format!("strong filter {strength}/{sharpness}"), EncodeJob::from(WebpSettings { filter: FilterType::Strong, filter_strength: strength, filter_sharpness: sharpness, ..Default::default() }));
-		add(&format!("simple filter {strength}/{sharpness}"), EncodeJob::from(WebpSettings { filter: FilterType::Simple, filter_strength: strength, filter_sharpness: sharpness, ..Default::default() }));
+		for filter_type in [FilterType::Strong, FilterType::Simple] {
+			add(&format!("{filter_type:?} filter {strength}/{sharpness}"), webp(WebpSettings { autofilter: false, filter_type, filter_strength: strength, filter_sharpness: sharpness, ..d() }));
+		}
+		add(&format!("autofilter with -f {strength} -sharpness {sharpness}"), webp(WebpSettings { autofilter: true, filter_strength: strength, filter_sharpness: sharpness, ..d() }));
 	}
+	add("simple autofilter", webp(WebpSettings { autofilter: true, filter_type: FilterType::Simple, ..d() }));
 
 	for bytes in [512_u32, 2_048, 16_384] {
-		add(&format!("target size {bytes}"), EncodeJob::from(WebpSettings { target: Some(TargetMetric::Size(bytes)), ..Default::default() }));
+		add(&format!("target size {bytes}"), webp(WebpSettings { target: Some(TargetMetric::Size(bytes)), ..d() }));
 	}
-	for psnr in [30_u32, 42, 50] {
-		add(&format!("target psnr {psnr}"), EncodeJob::from(WebpSettings { target: Some(TargetMetric::Psnr(psnr)), ..Default::default() }));
+	for psnr in [30.0_f32, 42.0, 42.5, 50.0] {
+		add(&format!("target psnr {psnr}"), webp(WebpSettings { target: Some(TargetMetric::Psnr(psnr)), ..d() }));
 	}
+	add("target size with one pass", webp(WebpSettings { passes: 1, target: Some(TargetMetric::Size(2_048)), ..d() }));
 
-	add("sharp yuv", EncodeJob::from(WebpSettings { sharp_yuv: true, ..Default::default() }));
-	add("low memory", EncodeJob::from(WebpSettings { low_memory: true, ..Default::default() }));
-	add("no multi-threading", EncodeJob::from(WebpSettings { multi_threading: false, ..Default::default() }));
-	add("sharp yuv + low memory + no mt", EncodeJob::from(WebpSettings { sharp_yuv: true, low_memory: true, multi_threading: false, ..Default::default() }));
-
+	add("sharp yuv", webp(WebpSettings { sharp_yuv: true, ..d() }));
+	add("low memory", webp(WebpSettings { low_memory: true, ..d() }));
+	add("no multi-threading", webp(WebpSettings { multi_threading: false, ..d() }));
+	add("jpeg-like", webp(WebpSettings { jpeg_like: true, ..d() }));
+	add("jpeg-like with sns 20 and 2 segments", webp(WebpSettings { jpeg_like: true, sns: 20, segments: 2, ..d() }));
+	add("exact lossy", webp(WebpSettings { exact: true, ..d() }));
 	for alpha_filtering in [AlphaFiltering::Off, AlphaFiltering::Fast, AlphaFiltering::Best] {
-		add(&format!("alpha filter {}", alpha_filtering.as_cwebp_str()), EncodeJob::from(WebpSettings { alpha_filtering: Some(alpha_filtering), ..Default::default() }));
+		add(&format!("alpha filter {}", alpha_filtering.as_cwebp_str()), webp(WebpSettings { alpha_filtering, ..d() }));
 	}
-	add("no alpha filter flag", EncodeJob::from(WebpSettings { alpha_filtering: None, ..Default::default() }));
-
-	add("lossless", EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() }));
-	for quality in [0_u8, 50, 100] {
-		add(&format!("lossless effort {quality}"), EncodeJob::from(WebpSettings { mode: Mode::Lossless, quality, ..Default::default() }));
-	}
-	for quality in [0_u8, 40, 60, 80, 100] {
-		add(&format!("near-lossless {quality}"), EncodeJob::from(WebpSettings { mode: Mode::NearLossless, quality, ..Default::default() }));
-	}
-	add("jpeg-like", EncodeJob::from(WebpSettings { mode: Mode::JpegLike, ..Default::default() }));
-	for preset in [Preset::Default, Preset::Photo, Preset::Picture, Preset::Drawing, Preset::Icon, Preset::Text] {
-		add(&format!("preset {}", preset.as_cwebp_str()), EncodeJob::from(WebpSettings { mode: Mode::Preset, preset: Some(preset), ..Default::default() }));
+	add("no alpha", webp(WebpSettings { keep_alpha: false, ..d() }));
+	for colour in [0x00ff_ffff_u32, 0x0012_3456, 0] {
+		add(&format!("blend alpha {colour:06x}"), webp(WebpSettings { blend_alpha: Some(colour), ..d() }));
 	}
 
-	// Resize, including the -exact path that lossless takes.
-	for resize in [Resize { width: 32, height: 24, no_enlarge: false }, Resize { width: 32, height: 0, no_enlarge: false }, Resize { width: 0, height: 24, no_enlarge: false }, Resize { width: 128, height: 96, no_enlarge: false }] {
-		add(&format!("resize {}x{}", resize.width, resize.height), EncodeJob { resize, ..Default::default() });
-		add(&format!("lossless resize {}x{}", resize.width, resize.height), EncodeJob { resize, webp: WebpSettings { mode: Mode::Lossless, ..Default::default() }, ..Default::default() });
-	}
-
-	// A few combinations, because controls interact: target size with a manual filter,
-	// sharp YUV with a preset-free lossy encode, and the full advanced set at once.
-	add("everything at once", EncodeJob { resize: Resize { width: 40, height: 0, no_enlarge: false }, webp: WebpSettings { mode: Mode::Lossy, quality: 61, alpha_quality: 77, alpha_filtering: Some(AlphaFiltering::Fast), method: 5, segments: 3, partition_limit: 22, sns: 66, passes: 4, filter: FilterType::Strong, filter_strength: 44, filter_sharpness: 2, target: Some(TargetMetric::Size(4_096)), sharp_yuv: true, low_memory: true, multi_threading: true, preset: None }, ..Default::default() });
-
+	lossless_cases(&mut cases);
+	geometry_cases(&mut cases);
 	cases
+}
+
+/// Lossless, near-lossless, `-z` and the presets.
+fn lossless_cases(cases: &mut Vec<(String, EncodeJob)>) {
+	let mut add = |name: &str, settings: EncodeJob| cases.push((name.to_owned(), settings));
+	let webp = |settings: WebpSettings| EncodeJob::from(settings);
+	let d = WebpSettings::default;
+
+	add("lossless", webp(WebpSettings { lossless: true, ..d() }));
+	add("lossless exact", webp(WebpSettings { lossless: true, exact: true, ..d() }));
+	for quality in [0.0_f32, 50.0, 100.0] {
+		add(&format!("lossless effort {quality}"), webp(WebpSettings { lossless: true, quality, ..d() }));
+	}
+	for hint in [ImageHint::Picture, ImageHint::Photo, ImageHint::Graph] {
+		add(&format!("lossless hint {hint:?}"), webp(WebpSettings { lossless: true, image_hint: hint, ..d() }));
+	}
+	for level in [0_u8, 40, 60, 80, 99] {
+		add(&format!("near-lossless {level}"), webp(WebpSettings { lossless: true, near_lossless: level, ..d() }));
+	}
+	add("near-lossless 60, q 90, m 6", webp(WebpSettings { lossless: true, near_lossless: 60, quality: 90.0, method: 6, ..d() }));
+	add("lossless alpha method 0", webp(WebpSettings { lossless: true, alpha_compression: false, ..d() }));
+	add("lossless no alpha", webp(WebpSettings { lossless: true, keep_alpha: false, ..d() }));
+	for level in 0..=9_u8 {
+		let mut settings = d();
+		settings.apply_lossless_preset(level).expect("a valid level");
+		add(&format!("-z {level}"), webp(settings));
+	}
+	for preset in [Preset::Default, Preset::Photo, Preset::Picture, Preset::Drawing, Preset::Icon, Preset::Text] {
+		let mut settings = d();
+		settings.apply_preset(preset);
+		add(&format!("preset {}", preset.as_cwebp_str()), webp(settings.clone()));
+		settings.sns = 30;
+		settings.filter_strength = 45;
+		add(&format!("preset {} then -sns 30 -f 45", preset.as_cwebp_str()), webp(settings));
+	}
+}
+
+/// Crop and resize, including the -exact path and the resize modes, and everything at once.
+fn geometry_cases(cases: &mut Vec<(String, EncodeJob)>) {
+	let mut add = |name: &str, settings: EncodeJob| cases.push((name.to_owned(), settings));
+	let d = WebpSettings::default;
+
+	for resize in [Resize::to(32, 24), Resize::to(32, 0), Resize::to(0, 24), Resize::to(128, 96)] {
+		add(&format!("resize {}x{}", resize.width, resize.height), EncodeJob { resize, ..Default::default() });
+		add(&format!("lossless exact resize {}x{}", resize.width, resize.height), EncodeJob { resize, webp: WebpSettings { lossless: true, exact: true, ..d() }, ..Default::default() });
+	}
+	for mode in [ResizeMode::DownOnly, ResizeMode::UpOnly] {
+		for (width, height) in [(32, 0), (128, 0), (32, 96), (80, 40)] {
+			add(&format!("resize {width}x{height} {mode:?}"), EncodeJob { resize: Resize { width, height, mode }, ..Default::default() });
+		}
+	}
+	add("down-only declined still takes the ARGB path", EncodeJob { resize: Resize { width: 128, height: 0, mode: ResizeMode::DownOnly }, webp: WebpSettings { lossless: false, ..d() }, ..Default::default() });
+	for crop in [Crop { x: 0, y: 0, width: 64, height: 48 }, Crop { x: 5, y: 3, width: 31, height: 17 }, Crop { x: 63, y: 47, width: 1, height: 1 }] {
+		add(&format!("crop {crop:?}"), EncodeJob { crop: Some(crop), ..Default::default() });
+		add(&format!("crop {crop:?} then resize 40x0"), EncodeJob { crop: Some(crop), resize: Resize::to(40, 0), ..Default::default() });
+	}
+
+	// The full surface at once, lossy and lossless.
+	add("everything lossy", EncodeJob { crop: Some(Crop { x: 2, y: 2, width: 60, height: 40 }), resize: Resize::to(40, 0), webp: WebpSettings { quality: 61.5, alpha_quality: 77, alpha_compression: true, alpha_filtering: AlphaFiltering::Fast, method: 5, segments: 3, partition_limit: 22, sns: 66, passes: 4, filter_type: FilterType::Simple, autofilter: false, filter_strength: 44, filter_sharpness: 2, target: Some(TargetMetric::Size(4_096)), qmin: 5, qmax: 95, preprocessing: 1, jpeg_like: true, sharp_yuv: true, low_memory: true, multi_threading: true, exact: true, blend_alpha: Some(0x0080_8080), ..d() }, ..Default::default() });
+	add("everything lossless", EncodeJob { crop: Some(Crop { x: 2, y: 2, width: 60, height: 40 }), resize: Resize { width: 30, height: 30, mode: ResizeMode::DownOnly }, webp: WebpSettings { lossless: true, near_lossless: 70, exact: true, quality: 33.0, method: 2, image_hint: ImageHint::Photo, alpha_quality: 40, alpha_filtering: AlphaFiltering::Best, keep_alpha: true, ..d() }, ..Default::default() });
 }
 
 #[test]
@@ -264,9 +321,9 @@ fn matches_reference_cwebp_through_a_png_file() {
 	image::RgbaImage::from_raw(width, height, pixels).expect("buffer matches the dimensions").save_with_format(&png, image::ImageFormat::Png).expect("write the PNG fixture");
 
 	let mut mismatches: Vec<String> = Vec::new();
-	// A representative slice rather than all 76: this test is about the decoder agreeing,
+	// A representative slice rather than every case: this test is about the decoder agreeing,
 	// and the encoder surface is already covered above.
-	let subset = [("default lossy", EncodeJob::default()), ("lossless", EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() })), ("near-lossless 60", EncodeJob::from(WebpSettings { mode: Mode::NearLossless, quality: 60, ..Default::default() })), ("quality 30", EncodeJob::from(WebpSettings { quality: 30, ..Default::default() })), ("sharp yuv", EncodeJob::from(WebpSettings { sharp_yuv: true, ..Default::default() })), ("resize 32x0", EncodeJob { resize: Resize { width: 32, height: 0, no_enlarge: false }, ..Default::default() })];
+	let subset = [("default lossy", EncodeJob::default()), ("lossless", EncodeJob::from(WebpSettings { lossless: true, ..Default::default() })), ("near-lossless 60", EncodeJob::from(WebpSettings { lossless: true, near_lossless: 60, ..Default::default() })), ("quality 30", EncodeJob::from(WebpSettings { quality: 30.0, ..Default::default() })), ("sharp yuv", EncodeJob::from(WebpSettings { sharp_yuv: true, ..Default::default() })), ("resize 32x0", EncodeJob { resize: Resize::to(32, 0), ..Default::default() }), ("no alpha", EncodeJob::from(WebpSettings { keep_alpha: false, ..Default::default() })), ("crop", EncodeJob { crop: Some(Crop { x: 3, y: 4, width: 20, height: 20 }), ..Default::default() })];
 
 	for (name, settings) in &subset {
 		let theirs_path = dir.join(format!("cwebp-{}.webp", name.replace(' ', "-")));
@@ -370,4 +427,97 @@ fn matches_reference_cwebp_across_png_colour_types() {
 	let _ = fs::remove_dir_all(&dir);
 	assert!(mismatches.is_empty(), "{} of {} PNG colour types diverged. This is a DECODER difference — check how `image` reduces the sample depth against what libpng does:\n  {}", mismatches.len(), fixtures.len(), mismatches.join("\n  "));
 	eprintln!("COLOUR-TYPE PARITY OK: {} PNG colour types matched the reference cwebp.", fixtures.len());
+}
+
+/// `-metadata`: a PNG carrying an ICC profile, Exif and XMP, copied by `cwebp` and by us,
+/// every combination of the three, lossy and lossless. The metadata reader and the
+/// `VP8X` writer are ours, so this is the test that they are `cwebp`'s.
+#[test]
+fn matches_reference_cwebp_copying_metadata() {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let Some(cwebp) = reference_cwebp() else {
+		let message = "METADATA PARITY NOT RUN: no reference cwebp found.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+	if reference_version(&cwebp) != Some(skidbladnir_encode::encoder::linked_encoder_version()) {
+		let message = "METADATA PARITY NOT RUN: reference cwebp and the linked libwebp are different versions.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	}
+
+	let dir = env::temp_dir().join(format!("skidbladnir-parity-metadata-{}", std::process::id()));
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+	let (width, height) = (40_u32, 30_u32);
+	let mut png = Vec::new();
+	{
+		let mut encoder = png::Encoder::new(&mut png, width, height);
+		encoder.set_color(png::ColorType::Rgba);
+		encoder.set_depth(png::BitDepth::Eight);
+		encoder.add_itxt_chunk("XML:com.adobe.xmp".to_owned(), "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"/>".to_owned()).expect("add XMP");
+		let mut writer = encoder.write_header().expect("header");
+		let mut iccp = b"test\0\0".to_vec();
+		iccp.extend(zlib(&minimal_icc()));
+		writer.write_chunk(png::chunk::ChunkType(*b"iCCP"), &iccp).expect("iCCP");
+		writer.write_chunk(png::chunk::ChunkType(*b"eXIf"), b"MM\0*\0\0\0\x08\0\0\0\0\0").expect("eXIf");
+		writer.write_image_data(&fixture(width, height)).expect("pixels");
+	}
+	let input = dir.join("metadata.png");
+	fs::write(&input, &png).expect("write the fixture");
+
+	let mut mismatches: Vec<String> = Vec::new();
+	let mut total = 0;
+	for lossless in [false, true] {
+		for bits in 1..8_u8 {
+			let metadata = WebpMetadata { exif: bits & 1 != 0, icc: bits & 2 != 0, xmp: bits & 4 != 0 };
+			let job = EncodeJob::from(WebpSettings { lossless, metadata, ..WebpSettings::default() });
+			let name = format!("lossless {lossless}, {metadata:?}");
+			let theirs = dir.join(format!("cwebp-{total}.webp"));
+			let run = Command::new(&cwebp).args(cwebp_args(&job, &input, &theirs)).output().expect("run the reference cwebp");
+			assert!(run.status.success(), "reference cwebp failed for `{name}`: {}", String::from_utf8_lossy(&run.stderr));
+			let ours = dir.join(format!("ours-{total}.webp"));
+			skidbladnir_encode::source::encode_file(&job, &input, &ours).expect("our pipeline encodes");
+			let (expected, actual) = (fs::read(&theirs).expect("read reference"), fs::read(&ours).expect("read ours"));
+			if actual != expected {
+				mismatches.push(format!("`{name}`: ours {} bytes, cwebp {} bytes", actual.len(), expected.len()));
+			}
+			total += 1;
+		}
+	}
+	let _ = fs::remove_dir_all(&dir);
+	assert!(mismatches.is_empty(), "{} of {total} metadata copies diverged from cwebp:\n  {}", mismatches.len(), mismatches.join("\n  "));
+	eprintln!("METADATA PARITY OK: {total} metadata copies matched the reference cwebp.");
+}
+
+/// An RGB display profile with one tag and enough incompressible data that its `iCCP`
+/// chunk clears libpng's minimum size. libpng silently drops profiles it does not accept,
+/// so the fixture has to be one it does.
+fn minimal_icc() -> Vec<u8> {
+	let mut icc = vec![0_u8; 132 + 12 + 200];
+	icc[0..4].copy_from_slice(&344_u32.to_be_bytes());
+	icc[8..12].copy_from_slice(&0x0210_0000_u32.to_be_bytes());
+	icc[12..16].copy_from_slice(b"mntr");
+	icc[16..20].copy_from_slice(b"RGB ");
+	icc[20..24].copy_from_slice(b"XYZ ");
+	icc[36..40].copy_from_slice(b"acsp");
+	icc[68..80].copy_from_slice(&[0, 0, 0xf6, 0xd6, 0, 1, 0, 0, 0, 0, 0xd3, 0x2d]);
+	icc[128..132].copy_from_slice(&1_u32.to_be_bytes());
+	icc[132..136].copy_from_slice(b"desc");
+	icc[136..140].copy_from_slice(&144_u32.to_be_bytes());
+	icc[140..144].copy_from_slice(&200_u32.to_be_bytes());
+	let mut state = 0x1234_5678_u32;
+	for byte in &mut icc[144..] {
+		state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+		*byte = state.to_be_bytes()[0];
+	}
+	icc
+}
+
+fn zlib(data: &[u8]) -> Vec<u8> {
+	use std::io::Write as _;
+	let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+	encoder.write_all(data).expect("compress");
+	encoder.finish().expect("compress")
 }

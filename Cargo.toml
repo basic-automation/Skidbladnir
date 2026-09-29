@@ -37,6 +37,12 @@ ravif = "0.13"
 # `binary` is off: it only adds a PNG writer for the crate's own command-line tool.
 avif-decode = { version = "3", default-features = false }
 libwebp-sys = "0.14"
+# Metadata: the source's ICC profile, Exif and XMP, read the way each reference tool reads
+# them (src/metadata.rs). `png` and `tiff` are the decoders `image` already uses, taken
+# directly for their chunks and tags; `flate2` inflates PNG's compressed text and iCCP.
+png = "0.18"
+tiff = "0.11"
+flate2 = "1"
 # The JPEG XL encoder is libjxl itself (BSD-3), bound directly in `src/jxl.rs`. The
 # existing Rust wrappers (`jpegxl-rs`, `jpegxl-sys`) are GPL-3.0, which an ISC app cannot
 # link, so they are not used. `jpegxl-src` carries libjxl's source and its CMake build;

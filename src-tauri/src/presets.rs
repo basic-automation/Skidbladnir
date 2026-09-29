@@ -22,7 +22,7 @@ const FILE_NAME: &str = "presets.json";
 const MAX_NAME: usize = 80;
 
 /// A named settings preset.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Preset {
 	/// What the user called it.
@@ -32,7 +32,7 @@ pub struct Preset {
 }
 
 /// Why a preset could not be saved.
-#[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[derive(Clone, Debug, Error, PartialEq)]
 pub enum PresetError {
 	/// The name was empty or only whitespace.
 	#[error("a preset needs a name")]
@@ -115,7 +115,7 @@ fn write(directory: &Path, stored: &BTreeMap<String, EncodeJob>) -> Result<(), P
 mod tests {
 	use std::{fs, path::PathBuf};
 
-	use skidbladnir_encode::settings::{EncodeJob, Mode, WebpSettings};
+	use skidbladnir_encode::settings::{EncodeJob, WebpSettings};
 
 	use super::{PresetError, delete_from, load_from, save_to};
 
@@ -141,13 +141,13 @@ mod tests {
 		let scratch = Scratch::new("crud");
 		assert_eq!(load_from(&scratch.0), Vec::new(), "nothing saved yet");
 
-		let shots = EncodeJob::from(WebpSettings { quality: 88, ..Default::default() });
+		let shots = EncodeJob::from(WebpSettings { quality: 88.0, ..Default::default() });
 		let presets = save_to(&scratch.0, "Product shots", &shots).expect("save");
 		assert_eq!(presets.len(), 1);
 		assert_eq!(presets[0].name, "Product shots");
-		assert_eq!(presets[0].settings.webp.quality, 88);
+		assert!((presets[0].settings.webp.quality - 88.0).abs() < f32::EPSILON);
 
-		let presets = save_to(&scratch.0, "Wiki screenshots", &EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() })).expect("save");
+		let presets = save_to(&scratch.0, "Wiki screenshots", &EncodeJob::from(WebpSettings { lossless: true, exact: true, ..Default::default() })).expect("save");
 		// Sorted by name, so the list does not reshuffle between saves.
 		assert_eq!(presets.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), vec!["Product shots", "Wiki screenshots"]);
 
@@ -158,10 +158,10 @@ mod tests {
 	#[test]
 	fn saving_the_same_name_replaces_rather_than_duplicates() {
 		let scratch = Scratch::new("replace");
-		save_to(&scratch.0, "Mine", &EncodeJob::from(WebpSettings { quality: 10, ..Default::default() })).expect("save");
-		let presets = save_to(&scratch.0, "Mine", &EncodeJob::from(WebpSettings { quality: 90, ..Default::default() })).expect("save again");
+		save_to(&scratch.0, "Mine", &EncodeJob::from(WebpSettings { quality: 10.0, ..Default::default() })).expect("save");
+		let presets = save_to(&scratch.0, "Mine", &EncodeJob::from(WebpSettings { quality: 90.0, ..Default::default() })).expect("save again");
 		assert_eq!(presets.len(), 1);
-		assert_eq!(presets[0].settings.webp.quality, 90);
+		assert!((presets[0].settings.webp.quality - 90.0).abs() < f32::EPSILON);
 	}
 
 	#[test]

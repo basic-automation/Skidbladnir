@@ -4022,15 +4022,18 @@ name = "skidbladnir-encode"
 version = "0.1.0"
 dependencies = [
  "avif-decode",
+ "flate2",
  "image",
  "jpegxl-src",
  "jxl-oxide",
  "libwebp-sys",
  "pkg-config",
+ "png 0.18.1",
  "ravif",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "tiff",
 ]
 
 [[package]]

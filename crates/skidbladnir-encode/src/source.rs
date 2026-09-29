@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-	encoder::{EncodeError, RgbaImage, encode_rgba_with_progress}, settings::{EncodeJob, OutputFormat}
+	encoder::{EncodeError, RgbaImage}, settings::{EncodeJob, OutputFormat}
 };
 
 /// The input formats Skidbladnir accepts: the Electron app's list, plus AVIF.
@@ -101,21 +101,49 @@ fn is_heic_ftyp(bytes: &[u8]) -> bool {
 	ftyp_has_brand(bytes, &[b"heic", b"heix", b"heim", b"heis", b"hevc", b"hevx"])
 }
 
-/// An image decoded into the 8-bit RGBA the encoder wants.
+/// A decoded source image: its pixels, what kind of pixels they were, and the file they
+/// came from.
+///
+/// Every encoder starts from 8-bit RGBA, which is what `cwebp` hands libwebp. The others do
+/// not stop there: `avifenc`, `cjxl` and `heif-enc` keep a 16-bit PNG's depth, encode a
+/// grayscale PNG as grayscale, and leave out an alpha channel the source never had. So the
+/// source's own depth, channels and bytes travel with the pixels, and each encoder takes
+/// what its reference tool would have taken.
 #[derive(Clone, Debug)]
 pub struct SourceImage {
 	/// Width in pixels.
 	pub width: u32,
 	/// Height in pixels.
 	pub height: u32,
-	/// Tightly packed RGBA bytes.
+	/// Tightly packed 8-bit RGBA. For a 16-bit source, the high byte of each sample, which
+	/// is how `cwebp` narrows (libpng's `png_set_strip_16`).
 	pub pixels: Vec<u8>,
+	/// Tightly packed 16-bit RGBA, when the source had more than 8 bits per sample.
+	pub deep: Option<Vec<u16>>,
+	/// Whether the source was grayscale (with or without alpha).
+	pub gray: bool,
+	/// Whether the source had an alpha channel, or a PNG `tRNS` transparency, at all. An
+	/// opaque source reports `false` even though `pixels` carries an alpha byte.
+	pub has_alpha: bool,
 	/// The format it was decoded from.
 	pub format: SourceFormat,
+	/// The file's bytes, for the metadata each encoder reads out of it in its reference
+	/// tool's way, and for the encoders that take a JPEG's data as it is. Empty for pixels
+	/// that did not come from a file.
+	pub bytes: Vec<u8>,
 }
 
 impl SourceImage {
+	/// An image made of 8-bit RGBA pixels alone, with no file behind it.
+	#[must_use]
+	pub fn from_rgba(image: &RgbaImage<'_>) -> Self {
+		let has_alpha = image.pixels.as_chunks::<4>().0.iter().any(|pixel| pixel[3] != 255);
+		Self { width: image.width, height: image.height, pixels: image.pixels.to_vec(), deep: None, gray: false, has_alpha, format: SourceFormat::Png, bytes: Vec::new() }
+	}
+
 	/// Borrow this image in the shape [`encode_rgba`] takes.
+	///
+	/// [`encode_rgba`]: crate::encoder::encode_rgba
 	#[must_use]
 	pub fn as_rgba(&self) -> RgbaImage<'_> {
 		RgbaImage { width: self.width, height: self.height, pixels: &self.pixels }
@@ -172,7 +200,7 @@ pub fn load(path: &Path) -> Result<SourceImage, SourceError> {
 	let bytes = fs::read(path).map_err(|source| SourceError::Read { path: path.to_path_buf(), source })?;
 	let format = SourceFormat::sniff(&bytes).ok_or_else(|| SourceError::Unsupported { path: path.to_path_buf() })?;
 
-	let (width, height, pixels) = match format {
+	let decoded = match format {
 		// libwebp decodes its own format; using a second WebP implementation here would
 		// mean a WebP-to-WebP conversion round-trips through a decoder that is not the
 		// reference one.
@@ -180,22 +208,61 @@ pub fn load(path: &Path) -> Result<SourceImage, SourceError> {
 			// Check before decoding: libwebp's still decoder refuses an animation, but the
 			// failure it reports says nothing about why, and "libwebp rejected the file" is
 			// not something a user can act on.
-			if crate::inspect::inspect_webp(&bytes).is_some_and(|info| info.has_animation) {
+			let info = crate::inspect::inspect_webp(&bytes);
+			if info.is_some_and(|info| info.has_animation) {
 				return Err(SourceError::Animated { path: path.to_path_buf() });
 			}
-			decode_webp(&bytes).ok_or_else(|| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: "libwebp rejected the file".to_owned() })?
+			let (width, height, pixels) = decode_webp(&bytes).ok_or_else(|| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: "libwebp rejected the file".to_owned() })?;
+			Decoded { width, height, pixels, deep: None, gray: false, has_alpha: info.is_some_and(|info| info.has_alpha) }
 		}
-		SourceFormat::Avif => decode_avif(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?,
-		SourceFormat::Heic => crate::heic::decode(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?,
-		SourceFormat::Jxl => crate::jxl::decode(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?,
+		SourceFormat::Avif => Decoded::rgba(decode_avif(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?),
+		SourceFormat::Heic => Decoded::rgba(crate::heic::decode(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?),
+		SourceFormat::Jxl => Decoded::rgba(crate::jxl::decode(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?),
 		SourceFormat::Png | SourceFormat::Jpeg | SourceFormat::Tiff => {
-			let decoded = image::load_from_memory(&bytes).map_err(|error| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: error.to_string() })?;
-			let rgba = to_rgba8(decoded);
-			(rgba.width(), rgba.height(), rgba.into_raw())
+			let image = image::load_from_memory(&bytes).map_err(|error| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: error.to_string() })?;
+			Decoded::from_image(image, format == SourceFormat::Png && png_has_trns(&bytes))
 		}
 	};
 
-	Ok(SourceImage { width, height, pixels, format })
+	Ok(SourceImage { width: decoded.width, height: decoded.height, pixels: decoded.pixels, deep: decoded.deep, gray: decoded.gray, has_alpha: decoded.has_alpha, format, bytes })
+}
+
+/// Pixels as a decoder produced them, before they meet the file they came from.
+struct Decoded {
+	width: u32,
+	height: u32,
+	pixels: Vec<u8>,
+	deep: Option<Vec<u16>>,
+	gray: bool,
+	has_alpha: bool,
+}
+
+impl Decoded {
+	/// 8-bit RGBA with nothing else known about it: alpha is reported where any pixel is
+	/// not opaque.
+	fn rgba((width, height, pixels): (u32, u32, Vec<u8>)) -> Self {
+		let has_alpha = pixels.as_chunks::<4>().0.iter().any(|pixel| pixel[3] != 255);
+		Self { width, height, pixels, deep: None, gray: false, has_alpha }
+	}
+
+	/// An `image` decode, keeping what its colour type says about the source. A palette
+	/// PNG arrives already expanded to RGB or RGBA — the latter when it had a `tRNS`, which
+	/// is also what libpng's `png_set_tRNS_to_alpha` produces.
+	fn from_image(image: image::DynamicImage, trns: bool) -> Self {
+		use image::DynamicImage::{ImageLuma16, ImageLumaA16, ImageRgb16, ImageRgba16};
+		let color = image.color();
+		let gray = matches!(color, image::ColorType::L8 | image::ColorType::La8 | image::ColorType::L16 | image::ColorType::La16);
+		let has_alpha = color.has_alpha() || trns;
+		let wide = matches!(image, ImageLuma16(_) | ImageLumaA16(_) | ImageRgb16(_) | ImageRgba16(_));
+		let deep = wide.then(|| image.to_rgba16().into_raw());
+		let rgba = to_rgba8(image);
+		Self { width: rgba.width(), height: rgba.height(), pixels: rgba.into_raw(), deep, gray, has_alpha }
+	}
+}
+
+/// Whether a PNG has a `tRNS` chunk, which makes an RGB or grayscale PNG transparent.
+fn png_has_trns(bytes: &[u8]) -> bool {
+	crate::metadata::png_chunks(bytes).is_some_and(|chunks| chunks.iter().any(|(kind, _)| kind == b"tRNS"))
 }
 
 /// Reduce a decoded image to 8-bit RGBA the way `cwebp` does.
@@ -581,7 +648,7 @@ pub fn encode_file_with_progress(settings: &EncodeJob, input: &Path, output: &Pa
 		(encoded, (0, 0))
 	} else {
 		let image = load(input)?;
-		(encode_rgba_with_progress(settings, &image.as_rgba(), on_progress)?, (image.width, image.height))
+		(crate::encoder::encode_source_with_progress(settings, &image, on_progress)?, (image.width, image.height))
 	};
 
 	// A temporary name in the destination directory, so the rename stays on one filesystem
@@ -644,7 +711,7 @@ mod tests {
 	};
 
 	use super::{Conversion, ConvertError, SourceFormat, encode_file, load, output_path_in};
-	use crate::settings::{AvifSettings, EncodeJob, Mode, OutputFormat, Resize, WebpSettings};
+	use crate::settings::{AvifSettings, EncodeJob, OutputFormat, Resize, WebpSettings};
 
 	/// A scratch directory that cleans itself up. Every test in this module writes only
 	/// inside one of these — nothing here touches a path outside the temp directory.
@@ -730,7 +797,7 @@ mod tests {
 		let scratch = Scratch::new("resize");
 		let input = scratch.join("source.png");
 		write_png(&input, 64, 48);
-		let settings = EncodeJob { resize: Resize { width: 32, height: 0, no_enlarge: false }, ..Default::default() };
+		let settings = EncodeJob { resize: Resize::to(32, 0), ..Default::default() };
 		let conversion = encode_file(&settings, &input, &scratch.join("out.webp")).expect("conversion succeeds");
 		assert_eq!((conversion.width, conversion.height), (32, 24), "height must be derived, not echoed back as 0");
 	}
@@ -812,7 +879,7 @@ mod tests {
 		jxl_oxide::JxlImage::builder().read(written.as_slice()).expect("parse").reconstruct_jpeg(&mut rebuilt).expect("the file carries the JPEG");
 		assert_eq!(rebuilt, jpeg);
 
-		let resized = EncodeJob { resize: Resize { width: 20, height: 0, no_enlarge: false }, ..job };
+		let resized = EncodeJob { resize: Resize::to(20, 0), ..job };
 		let conversion = encode_file(&resized, &input, &output).expect("convert resized");
 		assert_eq!((conversion.width, conversion.height), (20, 15));
 	}
@@ -834,7 +901,7 @@ mod tests {
 		let png = scratch.join("source.png");
 		write_png(&png, 40, 30);
 		let webp = scratch.join("intermediate.webp");
-		encode_file(&EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() }), &png, &webp).expect("encode to webp");
+		encode_file(&EncodeJob::from(WebpSettings { lossless: true, exact: true, ..Default::default() }), &png, &webp).expect("encode to webp");
 
 		let loaded = load(&webp).expect("decode the webp");
 		assert_eq!(loaded.format, SourceFormat::Webp);
@@ -906,7 +973,7 @@ mod tests {
 		let png = scratch.join("source.png");
 		write_png(&png, 40, 30);
 		let webp = scratch.join("out.webp");
-		super::encode_file(&EncodeJob::from(WebpSettings { mode: Mode::Lossless, ..Default::default() }), &png, &webp).expect("encode");
+		super::encode_file(&EncodeJob::from(WebpSettings { lossless: true, exact: true, ..Default::default() }), &png, &webp).expect("encode");
 
 		let inspected = super::inspect_paths(&[webp]);
 		let details = inspected[0].webp.expect("a WebP must report its header");
@@ -1077,7 +1144,7 @@ mod tests {
 		write_png(&input, 48, 32);
 		let output = output_path_in(scratch.0.clone(), &input, OutputFormat::Avif);
 		assert!(output.ends_with("in.avif"));
-		let job = EncodeJob { format: OutputFormat::Avif, resize: Resize { width: 24, height: 0, no_enlarge: false }, avif: AvifSettings { speed: 10, ..Default::default() }, ..Default::default() };
+		let job = EncodeJob { format: OutputFormat::Avif, resize: Resize::to(24, 0), avif: AvifSettings { speed: 10, ..Default::default() }, ..Default::default() };
 		let conversion = encode_file(&job, &input, &output).expect("AVIF conversion succeeds");
 		assert_eq!((conversion.width, conversion.height), (24, 16));
 		let bytes = std::fs::read(&output).expect("read the output");

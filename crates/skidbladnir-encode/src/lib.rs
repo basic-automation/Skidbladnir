@@ -16,11 +16,12 @@ pub mod encoder;
 pub mod heic;
 pub mod inspect;
 pub mod jxl;
+pub mod metadata;
 pub mod settings;
 pub mod source;
 
 pub use cwebp::cwebp_args;
-pub use encoder::{EncodeError, RgbaImage, encode_rgba, encode_rgba_with_progress, rescale_rgba};
+pub use encoder::{EncodeError, RgbaImage, encode_rgba, encode_rgba_with_progress, encode_source_with_progress, rescale_rgba};
 pub use inspect::{WebpCompression, WebpInfo, inspect_webp};
-pub use settings::{AlphaFiltering, AvifAlphaMode, AvifBitDepth, AvifColorModel, AvifSettings, EncodeJob, FilterType, HeicSettings, JxlSettings, Mode, OutputFormat, Preset, Resize, TargetMetric, ValidationError, WebpSettings};
+pub use settings::{AlphaFiltering, AvifAlphaMode, AvifBitDepth, AvifColorModel, AvifSettings, Crop, EncodeJob, FilterType, HeicSettings, ImageHint, JxlSettings, OutputFormat, Preset, Resize, ResizeMode, TargetMetric, ValidationError, WebpMetadata, WebpSettings};
 pub use source::{Conversion, ConvertError, FoundImage, PathInspection, SourceError, SourceFormat, SourceImage, encode_file, encode_file_with_progress, inspect_paths, load, mirrored_output_path, scan_directory};

@@ -129,7 +129,7 @@ fn reference_avifdec_reads_our_avif_correctly() {
 	}
 
 	// The shared resize, with the height derived from the aspect ratio.
-	let decoded = decode(&avifdec, &encode(fast, Resize { width: 32, height: 0, no_enlarge: false }, &pixels), "resize");
+	let decoded = decode(&avifdec, &encode(fast, Resize::to(32, 0), &pixels), "resize");
 	assert_eq!((decoded.width, decoded.height), (32, 24));
 	checked += 1;
 

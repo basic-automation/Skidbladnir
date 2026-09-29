@@ -136,7 +136,7 @@ fn reference_djxl_reads_our_jpeg_xl_correctly() {
 	}
 
 	// The shared resize.
-	let (width, height, _) = decode(&djxl, &encode(fast, Resize { width: 32, height: 0, no_enlarge: false }, &pixels), "resize");
+	let (width, height, _) = decode(&djxl, &encode(fast, Resize::to(32, 0), &pixels), "resize");
 	assert_eq!((width, height), (32, 24));
 
 	eprintln!("JPEG XL REFERENCE OK: djxl read every file at the right size and alpha (default {default_psnr:.1} dB, q30 {low:.1} dB, q98 {high:.1} dB, lossless exact).");

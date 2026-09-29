@@ -459,7 +459,7 @@ mod tests {
 	#[test]
 	fn applies_the_shared_resize() {
 		let pixels = fixture(40, 24, false);
-		let bytes = encode(&quick(&JxlSettings::default()), Resize { width: 20, height: 0, no_enlarge: false }, &RgbaImage { width: 40, height: 24, pixels: &pixels }, &mut |_| true).expect("encode");
+		let bytes = encode(&quick(&JxlSettings::default()), Resize::to(20, 0), &RgbaImage { width: 40, height: 24, pixels: &pixels }, &mut |_| true).expect("encode");
 		assert_eq!(dimensions(&bytes), Some((20, 12)));
 	}
 
