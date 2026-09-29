@@ -149,6 +149,19 @@ fn resize_applies_to_every_frame() {
 	assert_eq!((decoded.width, decoded.height, decoded.frames.len()), (24, 16, 4));
 }
 
+/// "Never enlarge" holds for an animation as it does for a still: a canvas already
+/// smaller than the target is left alone, and a larger one is still shrunk.
+#[test]
+fn never_enlarge_applies_to_the_canvas() {
+	let enlarge = Resize { width: WIDTH * 2, height: 0, no_enlarge: true };
+	let kept = animation::decode(&animation::encode(&WebpSettings::default(), enlarge, &fixture(0), &mut |_| true).expect("encode")).expect("decode");
+	assert_eq!((kept.width, kept.height, kept.frames.len()), (WIDTH, HEIGHT, 4), "a smaller canvas must not be enlarged");
+
+	let reduce = Resize { width: 24, height: 0, no_enlarge: true };
+	let reduced = animation::decode(&animation::encode(&WebpSettings::default(), reduce, &fixture(0), &mut |_| true).expect("encode")).expect("decode");
+	assert_eq!((reduced.width, reduced.height), (24, 16), "a larger canvas is still resized");
+}
+
 /// Cancelling between frames stops the encode, and progress reaches 100 on completion.
 #[test]
 fn progress_and_cancel() {

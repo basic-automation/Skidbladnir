@@ -181,6 +181,8 @@ pub enum Keyframes {
 /// As [`encode`].
 pub fn encode_with(settings: &WebpSettings, resize: Resize, animation: &Animation, keyframes: Keyframes, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
 	let config = build_config(settings)?;
+	// "Never enlarge" is decided once, for the canvas, exactly as a still image decides it.
+	let resize = resize.for_source(animation.width, animation.height);
 	// gif2webp decides from the finished config, so near-lossless (lossless underneath)
 	// gets the lossless spacing too.
 	let spacing = match keyframes {
