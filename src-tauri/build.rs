@@ -11,8 +11,17 @@
 //! A debug build also looks in `build/libheif` itself (`build/libheif-gpl` with the `gpl`
 //! feature), so `tauri dev` runs straight from the tree. A release binary never carries
 //! that absolute path.
+//!
+//! With the `gpl` feature, the GPL edition's config overlay (`tauri.gpl.conf.json`, and
+//! `tauri.gpl.windows.conf.json` on Windows) is applied here too, under whatever the Tauri
+//! CLI passes. tauri-build checks that the libheif it bundles exists, and embeds the
+//! updater's endpoint: `tauri build --config tauri.gpl.conf.json` hands it the overlay,
+//! but a plain `cargo build --features gpl` would otherwise look for the standard
+//! edition's libheif and point the updater at the standard edition's releases.
 
 use std::{env, fs, path::PathBuf};
+
+use serde_json::Value;
 
 fn main() {
 	let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"));
@@ -48,5 +57,52 @@ fn main() {
 		_ => {}
 	}
 
+	if env::var_os("CARGO_FEATURE_GPL").is_some() {
+		apply_gpl_overlay(&manifest);
+	}
+
 	tauri_build::build();
+}
+
+/// Put the GPL edition's config overlay into `TAURI_CONFIG`, beneath what is already there.
+fn apply_gpl_overlay(manifest: &std::path::Path) {
+	let mut overlays = vec!["tauri.gpl.conf.json"];
+	if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+		overlays.push("tauri.gpl.windows.conf.json");
+	}
+	let mut merged = Value::Object(serde_json::Map::new());
+	for overlay in overlays {
+		let path = manifest.join(overlay);
+		println!("cargo:rerun-if-changed={}", path.display());
+		let text = fs::read_to_string(&path).unwrap_or_else(|error| panic!("the GPL edition needs {}: {error}", path.display()));
+		compose(&mut merged, serde_json::from_str(&text).unwrap_or_else(|error| panic!("{} is not JSON: {error}", path.display())));
+	}
+	println!("cargo:rerun-if-env-changed=TAURI_CONFIG");
+	if let Some(given) = env::var("TAURI_CONFIG").ok().filter(|given| !given.trim().is_empty()) {
+		compose(&mut merged, serde_json::from_str(&given).expect("TAURI_CONFIG is JSON"));
+	}
+	let merged = merged.to_string();
+	// tauri-build reads it below, in this process, to check what it bundles; the
+	// `generate_context!` macro reads it in the compiler, to embed the config.
+	// SAFETY: a build script is one thread.
+	unsafe { env::set_var("TAURI_CONFIG", &merged) };
+	println!("cargo:rustc-env=TAURI_CONFIG={merged}");
+}
+
+/// Fold merge patch `next` into merge patch `base`, so applying the result is applying both
+/// in turn. Unlike applying a patch, a `null` is kept: it deletes from the config.
+fn compose(base: &mut Value, next: Value) {
+	match (base, next) {
+		(Value::Object(base), Value::Object(next)) => {
+			for (key, value) in next {
+				match base.get_mut(&key) {
+					Some(existing) if existing.is_object() && value.is_object() => compose(existing, value),
+					_ => {
+						base.insert(key, value);
+					}
+				}
+			}
+		}
+		(base, next) => *base = next,
+	}
 }

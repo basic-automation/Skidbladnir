@@ -225,18 +225,20 @@ jobs:
         id: archive
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)
-          export name="Skidbladnir-$version"
-          git archive --format=tar --prefix="$name/" HEAD > "$RUNNER_TEMP/source.tar"
-          git submodule foreach --quiet 'git archive --format=tar --prefix="$name/$sm_path/" HEAD > "$RUNNER_TEMP/submodule-$(basename "$sm_path").tar"'
+          # Not `$name`: `git submodule foreach` sets that to each submodule's own name.
+          export archive_root="Skidbladnir-$version"
+          git archive --format=tar --prefix="$archive_root/" HEAD > "$RUNNER_TEMP/source.tar"
+          git submodule foreach --quiet 'git archive --format=tar --prefix="$archive_root/$sm_path/" HEAD > "$RUNNER_TEMP/submodule-$(basename "$sm_path").tar"'
           for part in "$RUNNER_TEMP"/submodule-*.tar; do tar --concatenate --file="$RUNNER_TEMP/source.tar" "$part"; done
-          gzip -9 < "$RUNNER_TEMP/source.tar" > "$name-source.tar.gz"
+          gzip -9 < "$RUNNER_TEMP/source.tar" > "$archive_root-source.tar.gz"
           # Every submodule must be in it; an empty or missing one would be a source
           # archive that cannot build what was shipped.
+          tar -tzf "$archive_root-source.tar.gz" > "$RUNNER_TEMP/contents"
           for module in libheif libde265 kvazaar x265; do
-            tar -tzf "$name-source.tar.gz" | grep -q "^$name/third_party/$module/." || { echo "::error::third_party/$module is missing from the archive"; exit 1; }
+            grep -q "^$archive_root/third_party/$module/." "$RUNNER_TEMP/contents" || { echo "::error::third_party/$module is missing from the archive"; exit 1; }
           done
-          ls -la "$name-source.tar.gz"
-          echo "file=$name-source.tar.gz" >> "$GITHUB_OUTPUT"
+          ls -la "$archive_root-source.tar.gz"
+          echo "file=$archive_root-source.tar.gz" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v7
         with:

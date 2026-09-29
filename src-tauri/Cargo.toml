@@ -39,6 +39,8 @@ full = ["gpl"]
 
 [build-dependencies]
 tauri-build = { workspace = true }
+# Composing the GPL edition's config overlay (build.rs).
+serde_json = { workspace = true }
 
 [dependencies]
 base64 = { workspace = true }

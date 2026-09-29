@@ -108,6 +108,13 @@ else
 		MINGW* | MSYS* | CYGWIN*) x265_lib=x265-static.lib;;
 		*) x265_lib=libx265.a;;
 	esac
+	# x265 names its version with `git describe`, and a shallow checkout (CI's) has no
+	# tags: it then reads "unknown", and on Windows cannot version its resource file at
+	# all. Tag the pinned commit locally with the version .gitmodules records for it.
+	x265_version=$(git -C "$root" config -f .gitmodules submodule.third_party/x265.version || true)
+	if [ -e "$root/third_party/x265/.git" ] && [ -n "$x265_version" ] && ! git -C "$root/third_party/x265" describe --tags --exact-match >/dev/null 2>&1; then
+		git -C "$root/third_party/x265" tag "$x265_version" HEAD
+	fi
 	build x265-main10 "$root/third_party/x265/source" "$deps/x265-main10" \
 		"${x265_options[@]}" -DHIGH_BIT_DEPTH=ON -DEXPORT_C_API=OFF
 	main10="$deps/x265-main10/lib/$x265_lib"
