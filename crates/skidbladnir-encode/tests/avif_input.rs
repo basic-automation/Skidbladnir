@@ -192,8 +192,9 @@ fn refuses_what_is_not_an_avif() {
 ///
 /// The fixtures are **lossless**, so the expected pixels are known without any reference
 /// decoder: the source PNG put through the `image` crate's own crop, rotate and flip — an
-/// implementation independent of ours. `avifdec`, which applies the same properties, must
-/// then agree exactly as well. `irot` n is n quarter turns *anticlockwise*; `imir` 0 flips
+/// implementation independent of ours. `avifdec` must then agree exactly as well where it
+/// applies the properties (libavif 1.4.2 does; 1.0.4, on Ubuntu 24.04, ignores them and is
+/// reported rather than trusted). `irot` n is n quarter turns *anticlockwise*; `imir` 0 flips
 /// top-to-bottom and 1 left-to-right (as `avifenc --help` documents them).
 /// A transform as the `image` crate performs it, for the expected side of the comparison.
 type Expected = fn(&image::RgbaImage) -> image::RgbaImage;
@@ -229,6 +230,7 @@ fn honours_crop_rotation_and_mirror() {
 	add("crop, irot 1, imir 0", &["--crop", "10,0,20,48", "--irot", "1", "--imir", "0"], |img| imageops::flip_vertical(&imageops::rotate270(&imageops::crop_imm(img, 10, 0, 20, 48).to_image())));
 
 	let mut failures = Vec::new();
+	let mut ignored = 0;
 	for (index, (name, flags, expected)) in cases.iter().enumerate() {
 		let avif = dir.join(format!("{index}.avif"));
 		let mut args = vec!["-s", "10", "-l"];
@@ -246,12 +248,22 @@ fn honours_crop_rotation_and_mirror() {
 			let png = dir.join(format!("{index}.png"));
 			run(avifdec, &["-d", "8", &avif_str, &png.to_string_lossy()]);
 			let theirs = image::open(&png).expect("read avifdec's PNG").into_rgba8();
-			if theirs.dimensions() != (width, height) || theirs.as_raw() != &ours {
+			if theirs == source {
+				// Older libavif (1.0.4, Ubuntu 24.04's) shows the stored image and ignores the
+				// transforms entirely, so it cannot referee them; the exact check above still
+				// holds. Newer ones (1.4.2) apply them and must agree.
+				ignored += 1;
+			} else if theirs.dimensions() != (width, height) || theirs.as_raw() != &ours {
 				failures.push(format!("{name}: avifdec shows {:?}, we show {width}x{height}{}", theirs.dimensions(), if theirs.dimensions() == (width, height) { " with different pixels" } else { "" }));
 			}
 		}
 	}
 	let _ = fs::remove_dir_all(&dir);
 	assert!(failures.is_empty(), "AVIF TRANSFORMS FAILED:\n{}", failures.join("\n"));
-	eprintln!("AVIF TRANSFORMS OK: {} files shown with their crop, rotation and mirror, exactly{}", cases.len(), if avifdec.is_some() { ", matching avifdec" } else { "" });
+	let referee = match (&avifdec, ignored) {
+		(None, _) => String::new(),
+		(Some(_), 0) => ", matching avifdec".to_owned(),
+		(Some(_), n) => format!("; this avifdec ignores transforms ({n} files shown untransformed), so only the exact check applied"),
+	};
+	eprintln!("AVIF TRANSFORMS OK: {} files shown with their crop, rotation and mirror, exactly{referee}", cases.len());
 }

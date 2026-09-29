@@ -675,7 +675,10 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       **Gate:** `honours_crop_rotation_and_mirror` in `tests/avif_input.rs` — lossless
       `avifenc` fixtures for each `irot`, each `imir` axis, a crop and all three combined,
       checked **exactly** against the `image` crate's own rotate/flip/crop of the source (an
-      independent implementation) *and* against `avifdec`. Mutation-tested: clockwise
+      independent implementation) *and* against `avifdec` where it applies them — found by
+      CI: Ubuntu 24.04's libavif 1.0.4 `avifdec` ignores all three and shows the stored
+      image, so there it is reported, not trusted (1.4.2 on Arch applies them and agrees
+      exactly). Mutation-tested: clockwise
       rotation fails `irot` 1 and 3; swapped mirror axes fail both `imir`.
 - [ ] AVIF input refuses grid (tiled) images — `avif-parse` does not support `grid` items.
       Some cameras tile large captures. Needs the grid's tiles decoded and stitched.
