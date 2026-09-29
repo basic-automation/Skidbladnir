@@ -239,6 +239,12 @@ fn link_libheif(jpeg: &Libjpeg) {
 	// libheif builds it: the reader uses designated initializers, which MSVC refuses before.
 	let mut reader = cc::Build::new();
 	reader.cpp(true).std("c++20").file(manifest.join("native/heic_jpeg.cc")).include(manifest.join("../../third_party/libheif/heifio")).include(manifest.join("../../third_party/libheif/libheif")).warnings(false);
+	// On MSVC, C++ objects must agree on the C runtime, and libjxl's (from `jpegxl-src`) are
+	// built against the static one. Nothing this file allocates is freed on the other side:
+	// it hands out and takes back its own memory (`skid_heic_jpeg_release`, `_free`).
+	if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+		reader.static_crt(true);
+	}
 	jpeg.include(&mut reader);
 	println!("cargo:rerun-if-changed=native/heic_jpeg.cc");
 	if built {

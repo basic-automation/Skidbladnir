@@ -69,6 +69,15 @@ void avifImageFixXMP(avifImage * image)
 #undef jpeg_stdio_src
 #undef fprintf
 #undef printf
+// avifutil.c's too, referenced only by avifJPEGWrite, which comes along with the reader
+// and is never called: the app writes no JPEG. MSVC's linker wants it defined anyway.
+avifResult avifApplyTransforms(avifRGBImage * dstView, avifRGBImage * srcImage, const avifImage * avif)
+{
+	(void)dstView;
+	(void)srcImage;
+	(void)avif;
+	return AVIF_RESULT_NOT_IMPLEMENTED;
+}
 
 #define INVALID_QUALITY (-1)
 #define DEFAULT_QUALITY 60
