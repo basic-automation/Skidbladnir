@@ -467,6 +467,57 @@ prettier subset.
       missing ICC segment is refused as `cwebp` refuses it. Mutation-tested: unsorted ICC
       segments, a missing `VP8X` alpha flag, no RIFF padding, `ICCP` after the image and
       last-EXIF-wins each fail it.
+- [ ] **The comparison view — the best image comparison there is** (owner request,
+      2026-09-28; the model is Upscayl's before/after slider with zoom, taken further). The
+      preview today is two static images side by side at fit-to-width, which cannot show
+      the artefacts the advanced controls exist to trade off. Slices, each landable alone:
+      1. **A real viewer.** One full-size viewport instead of two thumbnails; 100% means
+         one image pixel per *device* pixel (`devicePixelRatio`-aware), and above 100% pixels
+         are drawn nearest-neighbour (`image-rendering: pixelated`), never smoothed — a
+         smoothed zoom hides exactly the ringing and blocking being judged.
+      2. **Wipe slider**, Upscayl-style: both images registered pixel for pixel in one
+         viewport, a draggable divider between them, horizontal or vertical, keyboard-
+         operable (arrow keys step, Shift steps further) and labelled for screen readers.
+      3. **Synchronised zoom and pan** in every mode: wheel/pinch zooms about the cursor,
+         drag pans, presets for Fit, 1:1, 2x, 4x, 8x, 16x, 32x, and the two sides can never
+         drift apart. Side by side stays as a mode, with its viewports locked together.
+      4. **Loupe magnifier**: a lens that follows the cursor at its own magnification
+         (independent of the page zoom), split down the middle or showing A and B as twin
+         lenses, with an optional pixel grid from 8x and a readout of both pixels' RGBA and
+         their difference under the cursor.
+      5. **Flicker (A/B blink)**: hold a key to show the original, release for the encode,
+         or blink on a timer — the fastest way to see a subtle shift in colour or detail.
+      6. **Difference view**: an amplified absolute-difference heatmap (x1 to x32), with the
+         error computed in the Rust core from the decoded pixels, not by the webview.
+      7. **Numbers beside the pictures**: PSNR, SSIM and a perceptual metric (SSIMULACRA2 or
+         butteraugli; choose on licence and on agreement with the reference tools), computed
+         in Rust. PSNR is checkable against `cwebp -print_psnr`, so it gets a parity test;
+         the others against their reference implementations.
+      8. **What you see is what the format decodes to.** AVIF and JPEG XL already decode in
+         Rust and reach the webview as lossless WebP; do the same for every format so no
+         side depends on the web engine's decoder or colour management, and state how a
+         kept ICC profile is shown.
+      9. **Compare settings within a format — variants.** Snapshot the current settings as a
+         named variant; keep a tray of them for the same source; pick any two (or the
+         original) as A and B; a table of size, saving, metrics and encode time for all of
+         them; one click applies a variant's settings to the panel or saves it as a preset.
+     10. **Compare across formats.** The same source through WebP, AVIF, JPEG XL and HEIC
+         with each format's current settings, any two in the viewer and all four in the
+         table. Two fair-fight helpers: **match size** (search each format's quality for the
+         same byte size, then compare the pictures) and **match quality** (search for the
+         same perceptual score, then compare the sizes).
+     11. **Rate–distortion curve**: sweep quality for one or more formats and plot size
+         against the metric; clicking a point loads that encode as a variant.
+     12. **Scale.** Base64 `data:` URLs and the 24-megapixel refusal do not fit a viewer
+         meant for zooming into large photos: serve the decoded images through a Tauri
+         custom protocol, render tiles, and encode previews off the UI thread with
+         cancellation when settings change mid-encode. A "preview a region" option can make
+         huge images fast, but it changes the encoder's decisions near the region's edges,
+         so it must say so and never be the default.
+     13. **Verified like everything else**: the zoom/pan/registration maths unit-tested,
+         the modes driven over WebDriver (including that A and B stay registered at 32x),
+         axe-clean, and screenshots re-captured. Designed in the Nanna design (Figma and
+         Nuxt UI components) before it is built.
 - [ ] Keep metadata in **animated** WebP output (`gif2webp -metadata` keeps ICC and XMP
       from a GIF's application extensions), and in AVIF, JPEG XL and HEIC output, which
       each carry ICC and EXIF in their own way. Only still WebP output keeps it today.
