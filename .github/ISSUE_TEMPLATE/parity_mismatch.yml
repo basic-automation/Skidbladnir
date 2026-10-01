@@ -1,0 +1,135 @@
+name: Parity mismatch
+description: Skidbladnir wrote different bytes from cwebp, avifenc, cjxl or heif-enc for the same input and options.
+title: "Parity: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a still image, Skidbladnir is meant to write the same bytes as the reference tool given the same input file and the same options. CI checks this against the real tools, built from the same sources. This form collects what it takes to reproduce a case where the bytes differ.
+
+        Before you file, read [What "every option" means](https://github.com/basic-automation/Skidbladnir#what-every-option-means) in the README. It lists the tool versions Skidbladnir matches and the documented exceptions. A different version of a tool, or a tool linked against a different libjpeg or libpng, writes different bytes. The GPL edition's HEIC (x265) is not compared byte for byte.
+
+        Everything you write or attach here is public.
+
+  - type: dropdown
+    id: tool
+    attributes:
+      label: Reference tool
+      options:
+        - cwebp
+        - img2webp
+        - gif2webp
+        - webpmux
+        - avifenc
+        - cjxl
+        - heif-enc
+    validations:
+      required: true
+
+  - type: textarea
+    id: tool-version
+    attributes:
+      label: Reference tool version and origin
+      description: |
+        Paste what the tool prints for its version: `cwebp -version`, `avifenc --version`, `cjxl --version` or `heif-enc --version`.
+        Then say where the tool came from: a package (which distribution, or Homebrew), a release download, or built from source (which commit, and which libjpeg and libpng it links).
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Reference command line
+      description: The exact command you ran, copied from the terminal. If you ran it on a different machine from Skidbladnir, say which.
+      placeholder: cwebp -q 80 -m 6 -sharp_yuv input.png -o reference.webp
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Skidbladnir version
+      description: Open **App settings** (the gear at the bottom of the format rail) and copy the line at the bottom of it. It names the edition and the encoder versions.
+      placeholder: Skidbladnir 1.0.0 · libwebp encoder 1.6.0 · decoder 1.6.0 · libavif 1.4.2 …
+    validations:
+      required: true
+
+  - type: dropdown
+    id: edition
+    attributes:
+      label: Edition
+      options:
+        - Standard (Skidbladnir_*)
+        - GPL (Skidbladnir-GPL_*)
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Operating system and architecture
+      options:
+        - Windows, x64
+        - Windows on Arm (running the x64 build)
+        - macOS, Apple Silicon (aarch64)
+        - macOS, Intel (x64)
+        - Linux, x86_64
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: settings
+    attributes:
+      label: Skidbladnir settings
+      description: |
+        Every control you set, with the flag its label shows. Or save them as a preset (the **+** next to Presets) and paste that preset from `presets.json`:
+        - Windows: `%APPDATA%\com.basicautomation.skidbladnir\presets.json`
+        - macOS: `~/Library/Application Support/com.basicautomation.skidbladnir/presets.json`
+        - Linux: `~/.config/com.basicautomation.skidbladnir/presets.json`
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: input-file
+    attributes:
+      label: Input file
+      description: Attach the input file, or link to it, and attach both outputs if you can. Zip them first if GitHub does not accept the file type. Without the input file, a mismatch usually cannot be reproduced. If you cannot share it, describe it as closely as you can (format, dimensions, bit depth, transparency, colour profile, metadata, the program that made it).
+    validations:
+      required: true
+
+  - type: textarea
+    id: comparison
+    attributes:
+      label: Comparison of the two outputs
+      description: |
+        Paste the `cmp` output and the SHA-256 of both files, with their sizes.
+        - `cmp reference.webp skidbladnir.webp`
+        - SHA-256: `sha256sum` on Linux, `shasum -a 256` on macOS, `Get-FileHash` in PowerShell on Windows
+      placeholder: |
+        $ cmp reference.webp skidbladnir.webp
+        reference.webp skidbladnir.webp differ: byte 41, line 1
+        $ sha256sum reference.webp skidbladnir.webp
+        …
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: For example, whether the bytes match with other options or another input file.
+
+  - type: checkboxes
+    id: checked
+    attributes:
+      label: Before filing
+      options:
+        - label: I read what parity covers and its exceptions in the README, and this case is not one of them.
+          required: true

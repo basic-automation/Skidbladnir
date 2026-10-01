@@ -1,0 +1,164 @@
+name: Bug report
+description: Something went wrong in Skidbladnir, its installer or its updater.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting it. Please look through the [open issues](https://github.com/basic-automation/Skidbladnir/issues) first.
+
+        - If a file comes out different from what `cwebp`, `avifenc`, `cjxl` or `heif-enc` writes with the same options, use the **Parity mismatch** form instead.
+        - If it is a security problem, do not file it here. Report it privately, as [SECURITY.md](https://github.com/basic-automation/Skidbladnir/blob/master/SECURITY.md) describes.
+        - Everything you write or attach here is public.
+
+  - type: input
+    id: version
+    attributes:
+      label: Skidbladnir version
+      description: Open **App settings** (the gear at the bottom of the format rail) and copy the line at the bottom of it. It names the edition and the encoder versions. The short version is also at the bottom of the sidebar.
+      placeholder: Skidbladnir 1.0.0 · libwebp encoder 1.6.0 · decoder 1.6.0 · libavif 1.4.2 …
+    validations:
+      required: true
+
+  - type: dropdown
+    id: edition
+    attributes:
+      label: Edition
+      description: The GPL edition says "GPL edition" next to the version at the bottom of the sidebar, and its installers are named Skidbladnir-GPL_*.
+      options:
+        - Standard (Skidbladnir_*)
+        - GPL (Skidbladnir-GPL_*)
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Operating system and architecture
+      options:
+        - Windows, x64
+        - Windows on Arm (running the x64 build)
+        - macOS, Apple Silicon (aarch64)
+        - macOS, Intel (x64)
+        - Linux, x86_64
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: Operating system version
+      placeholder: Windows 11 24H2, macOS 15.4, Ubuntu 24.04, Fedora 42 …
+    validations:
+      required: true
+
+  - type: dropdown
+    id: installer
+    attributes:
+      label: How you installed it
+      options:
+        - Windows installer (setup.exe)
+        - macOS disk image (.dmg)
+        - Linux .deb
+        - Linux AppImage
+        - Built from source
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: updated
+    attributes:
+      label: Did this version arrive through the in-app updater?
+      options:
+        - No, I downloaded and installed it
+        - Yes, through Install and restart
+        - Not sure
+
+  - type: dropdown
+    id: input-format
+    attributes:
+      label: Input format
+      description: The kind of file you converted. Pick every one that shows the problem.
+      multiple: true
+      options:
+        - PNG
+        - JPEG
+        - TIFF
+        - WebP (still)
+        - WebP (animated)
+        - AVIF
+        - JPEG XL
+        - HEIC or HEIF
+        - GIF (still)
+        - GIF (animated)
+        - PNM or PAM (PGM, PPM, PAM)
+        - PFM
+        - Not about a conversion
+    validations:
+      required: true
+
+  - type: dropdown
+    id: output-format
+    attributes:
+      label: Output format
+      multiple: true
+      options:
+        - WebP
+        - Animated WebP
+        - AVIF
+        - JPEG XL
+        - HEIC
+        - Not about a conversion
+    validations:
+      required: true
+
+  - type: textarea
+    id: settings
+    attributes:
+      label: Settings
+      description: |
+        The controls you changed from their defaults, with the flag each label shows, for example `-q 80 -m 6 -sharp_yuv`.
+        Or save them as a preset (the **+** next to Presets) and paste that preset from `presets.json`:
+        - Windows: `%APPDATA%\com.basicautomation.skidbladnir\presets.json`
+        - macOS: `~/Library/Application Support/com.basicautomation.skidbladnir/presets.json`
+        - Linux: `~/.config/com.basicautomation.skidbladnir/presets.json`
+
+        Remove any file paths you would rather not share.
+      render: text
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, step by step, and what happened. Quote any message the window showed word for word.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: sample
+    attributes:
+      label: Sample file
+      description: |
+        If you can share the input file, drag it into this box. Zip it first if GitHub does not accept the file type. Attachments are public.
+        If you cannot share it, describe it: dimensions, bit depth, transparency, colour profile or metadata, and the program that made it.
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        If the app crashed or closed by itself:
+        - Linux: start it from a terminal and paste what it prints.
+        - macOS: paste the start of the crash report (Console, then Crash Reports).
+        - Windows: in Event Viewer, under Windows Logs, Application, paste the Application Error entry for skidbladnir.exe.
+      render: text
