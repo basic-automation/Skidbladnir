@@ -206,6 +206,97 @@ jobs:
             echo "::warning::the hardened runtime is on, so library validation may refuse the ad hoc signed libheif"
           fi
 
+      - name: The macOS app starts, and a screenshot shows its window
+        # No person has opened a macOS build yet. This runs the bundled app's own
+        # executable from inside the signed bundle, fails if it exits within 15 seconds
+        # (a dyld or library-validation error ends it at once), and keeps a screenshot
+        # and the app's output so a person can see what macOS drew. The Intel app runs
+        # under Rosetta on this Apple silicon runner. The bundle is not quarantined here,
+        # so Gatekeeper is not involved; the next step looks at that.
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          out="$RUNNER_TEMP/macos-launch"
+          mkdir -p "$out"
+          executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")
+          binary="$APP/Contents/MacOS/$executable"
+          lipo -info "$binary"
+          if [ "${{ matrix.target }}" = x86_64-apple-darwin ] && ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+            echo "::warning::Rosetta is not installed on this runner, so the Intel app was not launched"
+            exit 0
+          fi
+          "$binary" > "$out/app.log" 2>&1 &
+          pid=$!
+          for second in $(seq 1 15); do
+            sleep 1
+            # Gone, or exited and not yet reaped (a zombie still answers kill -0).
+            if ! kill -0 "$pid" 2>/dev/null || [ "$(ps -o stat= -p "$pid" 2>/dev/null | cut -c1)" = Z ]; then
+              status=0
+              wait "$pid" || status=$?
+              cat "$out/app.log"
+              echo "::error::the app exited after ${second}s with status $status"
+              exit 1
+            fi
+            if [ "$second" = 10 ]; then
+              # perl's alarm bounds it, in case macOS stops to ask for screen-recording
+              # permission. Without that permission the picture shows only the desktop.
+              perl -e 'alarm 20; exec @ARGV' screencapture -x "$out/window.png" || echo "::warning::screencapture failed"
+            fi
+          done
+          echo "still running after 15s"
+          kill "$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true
+          cat "$out/app.log"
+
+      - name: What Gatekeeper says about a downloaded copy (report only)
+        # A browser marks a download with the com.apple.quarantine attribute, and Gatekeeper
+        # judges only marked apps. This marks a copy the same way, prints Gatekeeper's
+        # verdicts, then opens the copy as a double-click would and screenshots whatever
+        # dialog appears, so the README's first-launch steps can be matched to what macOS
+        # actually says. It never fails the job.
+        if: ${{ !cancelled() && runner.os == 'macOS' && env.APP != '' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          out="$RUNNER_TEMP/macos-launch"
+          mkdir -p "$out" "$RUNNER_TEMP/gatekeeper"
+          copy="$RUNNER_TEMP/gatekeeper/$(basename "$APP")"
+          ditto "$APP" "$copy"
+          xattr -w com.apple.quarantine "0081;$(printf '%x' "$(date +%s)");Safari;$(uuidgen)" "$copy"
+          echo "== com.apple.quarantine: $(xattr -p com.apple.quarantine "$copy")"
+          echo "== spctl --status"
+          spctl --status
+          echo "== spctl --assess --type execute -vv, the quarantined copy"
+          spctl --assess --type execute -vv "$copy"
+          echo "== spctl --assess -vv, the bundle as built"
+          spctl --assess -vv "$APP"
+          if command -v syspolicy_check >/dev/null; then
+            echo "== syspolicy_check distribution"
+            syspolicy_check distribution "$copy"
+          fi
+          dmg=$(find "$(dirname "$(dirname "$APP")")/dmg" -name '*.dmg' 2>/dev/null | head -1)
+          if [ -n "$dmg" ]; then
+            echo "== spctl --assess --type open, $(basename "$dmg")"
+            spctl --assess --type open --context context:primary-signature -vv "$dmg"
+          fi
+          echo "== open the quarantined copy"
+          open "$copy"
+          sleep 10
+          perl -e 'alarm 20; exec @ARGV' screencapture -x "$out/gatekeeper.png"
+          pkill -f "$(basename "$APP")/Contents/MacOS/"
+          echo "== syspolicyd's log"
+          log show --last 2m --style compact --predicate 'process == "syspolicyd"' 2>/dev/null | tail -40
+          exit 0
+
+      - uses: actions/upload-artifact@v7
+        # Not named skidbladnir-*: the manifest job merges every artifact of that name.
+        if: ${{ !cancelled() && runner.os == 'macOS' }}
+        with:
+          name: macos-launch-${{ matrix.platform }}-${{ matrix.edition }}
+          path: ${{ runner.temp }}/macos-launch/
+          if-no-files-found: warn
+
       - name: Collect the artifacts
         shell: bash
         run: |
