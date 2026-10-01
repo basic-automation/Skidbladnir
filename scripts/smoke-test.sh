@@ -306,6 +306,17 @@ check "previews an animation the webview can show" \
 	 const shown=await new Promise(res => { const i=new Image(); i.onload=()=>res(i.naturalWidth + 'x' + i.naturalHeight); i.onerror=()=>res('not displayable'); i.src=p.encoded; });
 	 return p.frames + ' frames, shown ' + shown" '3 frames, shown 24x16'
 
+# HEIC from a lossy WebP (heif-enc's reader takes its YCbCr planes as they are) and from a
+# HEIC (decoded in its own colourspace, metadata kept): the WebP and HEIC written above.
+mkdir -p "$scratch/to-heic"
+for source in smoke.webp smoke.heic; do
+	check "converts $source to HEIC" \
+		"const I=window.__TAURI_INTERNALS__;
+		 const s=await I.invoke('default_settings'); s.format='heic';
+		 const r=await I.invoke('convert_image', { settings: s, input: '$out_dir/$source', outputDirectory: '$(app_path "$scratch/to-heic")' });
+		 return r.outputPath.split(/[\\\\/]/).pop() + ' ' + r.width + 'x' + r.height" "smoke.heic 48x48"
+done
+
 # PNM, PAM and PFM input: recognised by content, and converted to WebP (as cwebp reads PNM)
 # and to JPEG XL (as cjxl reads all three).
 "$PY" - "$scratch" <<'PNM'
