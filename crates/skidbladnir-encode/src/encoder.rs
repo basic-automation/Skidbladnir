@@ -614,6 +614,28 @@ fn yuv_picture(webp: &[u8], keep_alpha: bool) -> Result<Picture, EncodeError> {
 	Ok(picture)
 }
 
+/// A lossy WebP decoded straight to its YUV 4:2:0 planes, as `heif-enc`'s WebP reader
+/// takes it (`heifio/decoder_webp.cc`): width, height, whether there is alpha, and the
+/// planes tightly packed — Y, U, V and, with alpha, A.
+pub(crate) fn webp_yuv420_planes(webp: &[u8]) -> Option<(u32, u32, bool, Vec<Vec<u8>>)> {
+	let picture = yuv_picture(webp, true).ok()?;
+	let p = &picture.0;
+	let (width, height) = (usize::try_from(p.width).ok()?, usize::try_from(p.height).ok()?);
+	let (uv_width, uv_height) = (width.div_ceil(2), height.div_ceil(2));
+	// SAFETY: each plane was allocated by WebPPictureAlloc with `rows` rows of `stride`
+	// bytes, of which the first `columns` are the image; the picture outlives the copies.
+	let copy = |plane: *const u8, stride: c_int, columns: usize, rows: usize| -> Option<Vec<u8>> {
+		let stride = usize::try_from(stride).ok()?;
+		(!plane.is_null()).then(|| (0..rows).flat_map(|row| unsafe { std::slice::from_raw_parts(plane.add(row * stride), columns) }.iter().copied()).collect())
+	};
+	let mut planes = vec![copy(p.y, p.y_stride, width, height)?, copy(p.u, p.uv_stride, uv_width, uv_height)?, copy(p.v, p.uv_stride, uv_width, uv_height)?];
+	let alpha = !p.a.is_null();
+	if alpha {
+		planes.push(copy(p.a, p.a_stride, width, height)?);
+	}
+	Some((u32::try_from(width).ok()?, u32::try_from(height).ok()?, alpha, planes))
+}
+
 /// Run `WebPEncode` on a prepared picture, with progress and cancellation, and return the
 /// file it wrote.
 fn encode_picture(config: &WebPConfig, mut picture: Picture, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {

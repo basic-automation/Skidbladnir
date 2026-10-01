@@ -84,8 +84,8 @@ struct SkidHeicInput {
 	height: u32,
 	layout: c_int,
 	has_alpha: c_int,
-	planes: [*const u8; 2],
-	strides: [usize; 2],
+	planes: [*const u8; 4],
+	strides: [usize; 4],
 	icc: *const u8,
 	icc_size: usize,
 	exif: *const u8,
@@ -96,6 +96,10 @@ struct SkidHeicInput {
 	jpeg: *const u8,
 	jpeg_size: usize,
 	ten_bit: c_int,
+	heif: *const u8,
+	heif_size: usize,
+	keep_exif: c_int,
+	keep_xmp: c_int,
 }
 
 #[repr(C)]
@@ -238,6 +242,8 @@ enum Layout {
 	Gray { alpha: bool },
 	/// Interleaved RGB, or RGBA when `alpha`.
 	Rgb { alpha: bool },
+	/// YCbCr 4:2:0 planes (`Y`, `Cb`, `Cr`), and an alpha plane when `alpha`: a lossy WebP.
+	Yuv420 { alpha: bool },
 }
 
 /// What `heif-enc`'s readers make of an input file, before the encoder sees it.
@@ -256,7 +262,7 @@ struct Input {
 impl Input {
 	/// Whether the image built from this input has an alpha channel.
 	const fn has_alpha(&self) -> bool {
-		matches!(self.layout, Layout::Gray { alpha: true } | Layout::Rgb { alpha: true })
+		matches!(self.layout, Layout::Gray { alpha: true } | Layout::Rgb { alpha: true } | Layout::Yuv420 { alpha: true })
 	}
 
 	/// The source's samples in this layout.
@@ -272,6 +278,8 @@ impl Input {
 			}
 			Layout::Rgb { alpha: true } => vec![source.pixels.clone()],
 			Layout::Rgb { alpha: false } => vec![pixels.iter().flat_map(|p| [p[0], p[1], p[2]]).collect()],
+			// Only a lossy WebP is laid out this way, from its own planes (`Self::webp`).
+			Layout::Yuv420 { .. } => Vec::new(),
 		}
 	}
 
@@ -330,6 +338,21 @@ impl Input {
 		let xmp = app1(b"http://ns.adobe.com/xap/1.0/", 29);
 		let orientation = exif.as_deref().map_or(1, exif_orientation);
 		Self { layout, planes: Self::samples(source, layout), icc: jpeg_icc(&markers), exif: exif.filter(|exif| !exif.is_empty()), xmp: xmp.filter(|xmp| !xmp.is_empty()), orientation }
+	}
+
+	/// `heifio/decoder_webp.cc`: a lossy WebP decoded straight to its YCbCr 4:2:0 planes and
+	/// alpha, never through RGB; a lossless one to RGB(A), which is [`Self::other`]. The
+	/// metadata is the file's `ICCP`, `EXIF` and `XMP ` chunks either way. A cropped or
+	/// resized WebP is no longer the file's planes, and goes through RGB too.
+	fn webp(source: &SourceImage) -> Self {
+		let lossy = crate::inspect::inspect_webp(&source.bytes).is_some_and(|info| info.compression == crate::inspect::WebpCompression::Lossy && !info.has_animation);
+		match lossy.then(|| crate::encoder::webp_yuv420_planes(&source.bytes)).flatten() {
+			Some((width, height, alpha, planes)) if (width, height) == (source.width, source.height) => {
+				let metadata = crate::metadata::webp_chunks(&source.bytes);
+				Self { layout: Layout::Yuv420 { alpha }, planes, icc: metadata.icc, exif: metadata.exif, xmp: metadata.xmp, orientation: 1 }
+			}
+			_ => Self::other(source),
+		}
 	}
 
 	/// A format `heif-enc` does not read here: its samples as they are, and the metadata
@@ -414,10 +437,13 @@ pub fn encode(job: &EncodeJob, source: &SourceImage, on_progress: &mut dyn FnMut
 	if !on_progress(0) {
 		return Err(EncodeError::Cancelled);
 	}
+	let ten_bit = HEIC_X265 && settings.bit_depth == HeicBitDepth::Ten && !settings.lossless;
 	let mut input = match source.format {
 		_ if source.bytes.is_empty() => Input::other(&source),
 		SourceFormat::Png => Input::png(&source),
 		SourceFormat::Jpeg => Input::jpeg(&source),
+		// 10-bit input is made from pixels, which `heif-enc` cannot do.
+		SourceFormat::Webp if !ten_bit => Input::webp(&source),
 		_ => Input::other(&source),
 	};
 	// Metadata left out is metadata the input never had.
@@ -427,7 +453,6 @@ pub fn encode(job: &EncodeJob, source: &SourceImage, on_progress: &mut dyn FnMut
 			*slot = None;
 		}
 	}
-	let ten_bit = HEIC_X265 && settings.bit_depth == HeicBitDepth::Ten && !settings.lossless;
 	// libheif encodes transparency with a second x265 that does not get the TU inter depth
 	// fixed for a small image (see `x265_parameters`), and placebo's is one x265 refuses.
 	if HEIC_X265 && input.has_alpha() && settings.preset == HeicPreset::Placebo && source.width.min(source.height) < 32 {
@@ -438,7 +463,12 @@ pub fn encode(job: &EncodeJob, source: &SourceImage, on_progress: &mut dyn FnMut
 	// `heif-enc` writes nothing, and the pixels are encoded instead. 10-bit input is made
 	// from pixels, which `heif-enc` cannot do.
 	let jpeg = (source.format == SourceFormat::Jpeg && !source.bytes.is_empty() && matches!(source, Cow::Borrowed(_)) && !ten_bit).then(|| without_jpeg_metadata(&source.bytes, keep));
-	let output = match encode_input(settings, source.width, source.height, &input, jpeg.as_deref(), ten_bit) {
+	// A HEIC as it is goes to `heif-enc`'s HEIF reader (`heifio/decoder_heif.cc`), decoded in
+	// its own colourspace. That reader cannot leave the colour profile out, so with ICC
+	// dropped the pixels are encoded instead.
+	let heif = (source.format == SourceFormat::Heic && !source.bytes.is_empty() && matches!(source, Cow::Borrowed(_)) && !ten_bit && keep.icc).then_some(source.bytes.as_slice());
+	let file = jpeg.as_deref().map(SourceFile::Jpeg).or(heif.map(SourceFile::Heif));
+	let output = match encode_input(settings, source.width, source.height, &input, file, ten_bit) {
 		Err(Refusal::Jpeg(_)) => encode_input(settings, source.width, source.height, &input, None, ten_bit),
 		other => other,
 	}
@@ -450,8 +480,15 @@ pub fn encode(job: &EncodeJob, source: &SourceImage, on_progress: &mut dyn FnMut
 }
 
 /// Why the shim wrote nothing.
+/// A file handed to one of `heif-enc`'s own readers in the shim, rather than as samples.
+#[derive(Clone, Copy)]
+enum SourceFile<'a> {
+	Jpeg(&'a [u8]),
+	Heif(&'a [u8]),
+}
+
 enum Refusal {
-	/// `heif-enc`'s JPEG reader could not read the JPEG.
+	/// `heif-enc`'s JPEG or HEIF reader could not read the file.
 	Jpeg(String),
 	/// Anything else.
 	Other(String),
@@ -518,7 +555,12 @@ pub(crate) fn x265_parameters(s: &HeicSettings, (width, height): (u32, u32)) -> 
 	parameters
 }
 
-fn encode_input(s: &HeicSettings, width: u32, height: u32, input: &Input, jpeg: Option<&[u8]>, ten_bit: bool) -> Result<Vec<u8>, Refusal> {
+fn encode_input(s: &HeicSettings, width: u32, height: u32, input: &Input, file: Option<SourceFile<'_>>, ten_bit: bool) -> Result<Vec<u8>, Refusal> {
+	let (jpeg, heif) = match file {
+		Some(SourceFile::Jpeg(bytes)) => (Some(bytes), None),
+		Some(SourceFile::Heif(bytes)) => (None, Some(bytes)),
+		None => (None, None),
+	};
 	if c_int::try_from(width).is_err() || c_int::try_from(height).is_err() {
 		return Err(Refusal::Other(format!("{width}x{height} is too large for HEIC")));
 	}
@@ -529,12 +571,14 @@ fn encode_input(s: &HeicSettings, width: u32, height: u32, input: &Input, jpeg: 
 	let (icc, icc_size) = bytes(input.icc.as_ref());
 	let (exif, exif_size) = bytes(input.exif.as_ref());
 	let (xmp, xmp_size) = bytes(input.xmp.as_ref());
-	let (layout, has_alpha, row) = match input.layout {
-		Layout::Gray { alpha } => (0, alpha, width as usize),
-		Layout::Rgb { alpha } => (1, alpha, width as usize * if alpha { 4 } else { 3 }),
+	let (w, uv) = (width as usize, width.div_ceil(2) as usize);
+	let (layout, has_alpha, strides) = match input.layout {
+		Layout::Gray { alpha } => (0, alpha, [w, w, 0, 0]),
+		Layout::Rgb { alpha } => (1, alpha, [w * if alpha { 4 } else { 3 }, w, 0, 0]),
+		Layout::Yuv420 { alpha } => (2, alpha, [w, uv, uv, w]),
 	};
 	let plane = |i: usize| input.planes.get(i).map_or(ptr::null(), Vec::as_ptr);
-	let raw = SkidHeicInput { width, height, layout, has_alpha: c_int::from(has_alpha), planes: [plane(0), plane(1)], strides: [row, width as usize], icc, icc_size, exif, exif_size, xmp, xmp_size, orientation: c_int::from(input.orientation), jpeg: jpeg.map_or(ptr::null(), <[u8]>::as_ptr), jpeg_size: jpeg.map_or(0, <[u8]>::len), ten_bit: c_int::from(ten_bit) };
+	let raw = SkidHeicInput { width, height, layout, has_alpha: c_int::from(has_alpha), planes: [plane(0), plane(1), plane(2), plane(3)], strides, icc, icc_size, exif, exif_size, xmp, xmp_size, orientation: c_int::from(input.orientation), jpeg: jpeg.map_or(ptr::null(), <[u8]>::as_ptr), jpeg_size: jpeg.map_or(0, <[u8]>::len), ten_bit: c_int::from(ten_bit), heif: heif.map_or(ptr::null(), <[u8]>::as_ptr), heif_size: heif.map_or(0, <[u8]>::len), keep_exif: c_int::from(s.metadata.exif), keep_xmp: c_int::from(s.metadata.xmp) };
 
 	// Kvazaar's lossless is its `-p lossless=true`; x265's is `-L`.
 	let parameters: Vec<(String, String)> = if HEIC_X265 {

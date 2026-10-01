@@ -1,0 +1,15 @@
+# One C runtime on Windows: the static one.
+#
+# libjxl (built by `jpegxl-src`) is compiled against the static MSVC runtime, so the C++
+# that links with it must be too (crates/skidbladnir-encode/build.rs). Rust links the
+# dynamic runtime by default, and the two met in one process: the linker warned
+# "LNK4098: defaultlib 'libcmt.lib' conflicts with use of other libs" on every test
+# binary. `+crt-static` puts Rust on the static runtime as well; `cc` follows it for the
+# C it compiles, and build.rs sets the CMake-built libraries to match. libheif is a
+# separate DLL and keeps its own (dynamic) runtime, which nothing crosses: it hands out
+# and takes back its own memory.
+#
+# A RUSTFLAGS environment variable replaces these flags instead of adding to them, so CI,
+# which sets RUSTFLAGS, repeats `+crt-static` for its Windows jobs (.github/workflows/ci.yml).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

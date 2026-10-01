@@ -48,6 +48,12 @@ pub enum SourceFormat {
 	/// GIF, still or animated, read the way libwebp's `gif2webp` reads one
 	/// ([`crate::gif_input`]).
 	Gif,
+	/// Binary PNM: a graymap (`P5`), pixmap (`P6`) or PAM (`P7`), read the way `cwebp`
+	/// reads one ([`crate::pnm`]).
+	Pnm,
+	/// PFM, the floating-point PNM (`PF`, `Pf`), read the way `cjxl` reads it
+	/// ([`crate::pnm::pfm`]).
+	Pfm,
 }
 
 impl SourceFormat {
@@ -66,6 +72,8 @@ impl SourceFormat {
 			[_, _, _, _, b'f', b't', b'y', b'p', ..] if is_heic_ftyp(bytes) => Some(Self::Heic),
 			[0xff, 0x0a, ..] | [0, 0, 0, 0x0c, b'J', b'X', b'L', b' ', 0x0d, 0x0a, 0x87, 0x0a, ..] => Some(Self::Jxl),
 			[b'G', b'I', b'F', b'8', b'7' | b'9', b'a', ..] => Some(Self::Gif),
+			[b'P', b'5'..=b'7', b' ' | b'\t' | b'\r' | b'\n', ..] => Some(Self::Pnm),
+			[b'P', b'F' | b'f', b' ' | b'\t' | b'\r' | b'\n', ..] => Some(Self::Pfm),
 			_ => None,
 		}
 	}
@@ -82,6 +90,8 @@ impl SourceFormat {
 			Self::Jxl => "JPEG XL",
 			Self::Heic => "HEIC",
 			Self::Gif => "GIF",
+			Self::Pnm => "PNM",
+			Self::Pfm => "PFM",
 		}
 	}
 }
@@ -222,6 +232,25 @@ pub struct AnimatedSource {
 	pub animation: crate::animation::Animation,
 	/// `img2webp`'s spacing for an animated WebP, `gif2webp`'s for a GIF.
 	pub keyframes: crate::animation::Keyframes,
+	/// The metadata the source carries: a GIF's ICC profile and XMP, as `gif2webp
+	/// -metadata` reads them, or an animated WebP's `ICCP`, `EXIF` and `XMP ` chunks.
+	pub metadata: crate::metadata::Metadata,
+}
+
+impl AnimatedSource {
+	/// Encode it as an animated WebP with `job`'s WebP settings and resize, keeping the
+	/// metadata `job` keeps: for a GIF as `gif2webp -metadata` does (a GIF has no Exif); for
+	/// an animated WebP, which `img2webp` cannot carry metadata through, the chunks set back
+	/// as `webpmux -set` sets them.
+	///
+	/// # Errors
+	///
+	/// As [`crate::animation::encode_with`] and [`crate::animation::with_metadata`].
+	pub fn encode(&self, job: &EncodeJob, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, crate::encoder::EncodeError> {
+		let encoded = crate::animation::encode_with(&job.webp, job.resize, &self.animation, self.keyframes, on_progress)?;
+		let keep = job.webp.metadata;
+		crate::animation::with_metadata(encoded, self.metadata.icc.as_deref().filter(|_| keep.icc), self.metadata.exif.as_deref().filter(|_| keep.exif), self.metadata.xmp.as_deref().filter(|_| keep.xmp))
+	}
 }
 
 /// Decode `bytes` for the animation encoder if that is how they convert to WebP: an
@@ -240,11 +269,11 @@ pub fn animated_source(path: &Path, bytes: &[u8]) -> Result<Option<AnimatedSourc
 	let failed = |format: SourceFormat, detail: String| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail };
 	if SourceFormat::sniff(bytes) == Some(SourceFormat::Gif) {
 		let animation = crate::gif_input::decode(bytes).map_err(|detail| failed(SourceFormat::Gif, detail))?;
-		return Ok(Some(AnimatedSource { animation, keyframes: Keyframes::Gif }));
+		return Ok(Some(AnimatedSource { animation, keyframes: Keyframes::Gif, metadata: crate::gif_input::metadata(bytes) }));
 	}
 	if is_animated_webp(bytes) {
 		let animation = crate::animation::decode(bytes).ok_or_else(|| failed(SourceFormat::Webp, "libwebp could not read the animation".to_owned()))?;
-		return Ok(Some(AnimatedSource { animation, keyframes: Keyframes::Libwebp }));
+		return Ok(Some(AnimatedSource { animation, keyframes: Keyframes::Libwebp, metadata: crate::metadata::webp_chunks(bytes) }));
 	}
 	Ok(None)
 }
@@ -284,12 +313,25 @@ pub fn decode(path: &Path, bytes: Vec<u8>) -> Result<SourceImage, SourceError> {
 			}
 			Decoded::rgba((animation.width, animation.height, animation.frames.swap_remove(0).pixels))
 		}
+		SourceFormat::Pnm => {
+			let pnm = crate::pnm::decode(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?;
+			Decoded { width: pnm.header.width, height: pnm.header.height, pixels: pnm.pixels, deep: pnm.deep, gray: pnm.header.gray(), has_alpha: pnm.header.alpha() }
+		}
+		SourceFormat::Pfm => {
+			let image = crate::pnm::pfm(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?;
+			let (pixels, deep) = crate::pnm::pfm_rgba(&image);
+			Decoded { width: image.width, height: image.height, pixels, deep: Some(deep), gray: image.gray, has_alpha: false }
+		}
 		// libjpeg-turbo, as every reference tool decodes JPEG; a CMYK JPEG, which cwebp and
 		// cjxl refuse, falls through to the `image` crate.
 		SourceFormat::Jpeg if let Some(jpeg) = crate::jpeg::decode(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })? => Decoded::jpeg(&jpeg),
 		SourceFormat::Png | SourceFormat::Jpeg | SourceFormat::Tiff => {
 			let image = image::load_from_memory(&bytes).map_err(|error| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: error.to_string() })?;
-			Decoded::from_image(image, format, format == SourceFormat::Png && png_has_trns(&bytes))
+			let mut decoded = Decoded::from_image(image, format, format == SourceFormat::Png && png_has_trns(&bytes));
+			if format == SourceFormat::Tiff && tiff_alpha_is_associated(&bytes) {
+				decoded.unmultiply();
+			}
+			decoded
 		}
 	};
 
@@ -333,6 +375,44 @@ impl Decoded {
 		let rgba = to_rgba8(image, format);
 		Self { width: rgba.width(), height: rgba.height(), pixels: rgba.into_raw(), deep, gray, has_alpha }
 	}
+}
+
+impl Decoded {
+	/// Un-premultiply associated alpha the way `cwebp` does after libtiff has read a TIFF
+	/// (`imageio/tiffdec.c`, `MultARGBRow`): 24-bit fixed point, `(c * (255 << 24) / a +
+	/// 2^23) >> 24` clamped, and black under alpha 0. The 16-bit samples, which no reference
+	/// reads, are un-multiplied exactly, rounding to nearest.
+	fn unmultiply(&mut self) {
+		const HALF: u32 = 1 << 23;
+		for pixel in self.pixels.as_chunks_mut::<4>().0 {
+			let alpha = u32::from(pixel[3]);
+			if alpha == 255 {
+				continue;
+			}
+			let scale = (255_u32 << 24).checked_div(alpha).unwrap_or(0);
+			for colour in &mut pixel[..3] {
+				*colour = u8::try_from(((u32::from(*colour) * scale + HALF) >> 24).min(255)).unwrap_or(u8::MAX);
+			}
+		}
+		if let Some(deep) = &mut self.deep {
+			for pixel in deep.as_chunks_mut::<4>().0 {
+				let alpha = u64::from(pixel[3]);
+				if alpha == 65_535 {
+					continue;
+				}
+				for colour in &mut pixel[..3] {
+					*colour = (u64::from(*colour) * 65_535 + alpha / 2).checked_div(alpha).map_or(0, |v| u16::try_from(v.min(65_535)).unwrap_or(u16::MAX));
+				}
+			}
+		}
+	}
+}
+
+/// Whether a TIFF declares its one extra sample *associated* (premultiplied) alpha —
+/// `ExtraSamples` (tag 338) of exactly one value, 1 — which is when `cwebp` un-multiplies.
+fn tiff_alpha_is_associated(bytes: &[u8]) -> bool {
+	use tiff::{decoder::Decoder, tags::Tag};
+	Decoder::new(std::io::Cursor::new(bytes)).ok().and_then(|mut decoder| decoder.get_tag_u16_vec(Tag::ExtraSamples).ok()).is_some_and(|extra| extra == [1])
 }
 
 /// Whether a PNG has a `tRNS` chunk, which makes an RGB or grayscale PNG transparent.
@@ -744,10 +824,7 @@ pub fn encode_file_with_progress(settings: &EncodeJob, input: &Path, output: &Pa
 	// unless there is only one frame to keep (a still GIF), which `decode` hands over as a
 	// still.
 	let (encoded, fallback) = match (animated_source(input, &bytes)?, settings.format) {
-		(Some(source), OutputFormat::Webp) => {
-			let AnimatedSource { animation, keyframes } = source;
-			(crate::animation::encode_with(&settings.webp, settings.resize, &animation, keyframes, on_progress)?, (animation.width, animation.height))
-		}
+		(Some(source), OutputFormat::Webp) => (source.encode(settings, on_progress)?, (source.animation.width, source.animation.height)),
 		(Some(source), _) if source.animation.frames.len() > 1 => return Err(SourceError::Animated { path: input.to_path_buf() }.into()),
 		_ => {
 			let image = decode(input, bytes)?;
@@ -845,6 +922,13 @@ mod tests {
 		assert_eq!(SourceFormat::sniff(b"\xff\x0a\x00\x00...."), Some(SourceFormat::Jxl), "a bare JPEG XL codestream");
 		assert_eq!(SourceFormat::sniff(b"\0\0\0\x0cJXL \r\n\x87\n\0\0"), Some(SourceFormat::Jxl), "a JPEG XL container");
 		assert_eq!(SourceFormat::sniff(b"GIF89a......"), Some(SourceFormat::Gif));
+		assert_eq!(SourceFormat::sniff(b"P5\n64 48\n255\n"), Some(SourceFormat::Pnm), "a binary graymap");
+		assert_eq!(SourceFormat::sniff(b"P6 64 48 255\n"), Some(SourceFormat::Pnm), "a binary pixmap");
+		assert_eq!(SourceFormat::sniff(b"P7\nWIDTH 1\n"), Some(SourceFormat::Pnm), "a PAM");
+		assert_eq!(SourceFormat::sniff(b"P3\n1 1\n255\n"), None, "cwebp reads no plain (ASCII) PNM");
+		assert_eq!(SourceFormat::sniff(b"P6x"), None);
+		assert_eq!(SourceFormat::sniff(b"PF\n64 48\n-1.0\n"), Some(SourceFormat::Pfm), "a colour PFM");
+		assert_eq!(SourceFormat::sniff(b"Pf 64 48 1\n"), Some(SourceFormat::Pfm), "a gray PFM");
 		assert_eq!(SourceFormat::sniff(b"BM6\x00\x00\x00......"), None, "BMP is not accepted");
 		assert_eq!(SourceFormat::sniff(b"RIFF\x00\x00\x00\x00WAVEfmt "), None, "a RIFF container that is not WebP");
 		assert_eq!(SourceFormat::sniff(b"\x89PN"), None, "a truncated header must not match");

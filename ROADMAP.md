@@ -317,9 +317,18 @@ The Electron app shells out to `cwebp.exe`. The Rust port should not.
       Pinned both ways by `unassociated_alpha_tiff_keeps_its_colours`: ours lossless equals
       the source; `cwebp`'s equals it premultiplied, and the test says what to do if a
       libtiff or libwebp release changes that.
-- [ ] **Associated-alpha (premultiplied) TIFF input.** `cwebp` un-multiplies it; whether the
-      `image` crate's decoder does is unchecked, and an `magick`-written associated-alpha
-      fixture reads back oddly even in `magick`. Needs a trustworthy fixture first.
+- [x] **Associated-alpha (premultiplied) TIFF input** (fixed 2026-10-01). **It diverged:**
+      the `image` crate hands the stored, premultiplied samples back, and Skidbladnir encoded
+      them as straight colour, darkening every semi-transparent pixel — 272 of 276
+      conversions differed from `cwebp`. `cwebp` gets them from libtiff as stored and
+      un-multiplies them itself (`imageio/tiffdec.c`, `MultARGBRow`: 24-bit fixed point,
+      black under alpha 0) when `ExtraSamples` is exactly `[1]`; `source.rs` now does the
+      same, and un-multiplies the 16-bit samples exactly for the other formats. The fixture
+      problem was solved by writing the TIFFs byte by byte in the test rather than with
+      `magick`. **Gate:** `matches_reference_cwebp_through_an_associated_alpha_tiff` — 8- and
+      16-bit, every alpha value 0-255 present, x the 138-setting surface: 276 of 276
+      byte-identical. Mutation: plain rounded division instead of the fixed-point form fails
+      79; no un-multiply fails 272.
 
 ## Phase 3 — Frontend parity (Nuxt + Tailwind)
 
@@ -589,12 +598,28 @@ prettier subset.
       `keeps_exif_in_avif` — libavif's `avifdec --info` reports the source's EXIF at its exact
       size, and no ICC or XMP; none with nothing kept. Mutation-tested: dropping
       `with_exif` fails it. The window offers only the EXIF toggle for AVIF.
-- [ ] **ICC profile and XMP in AVIF output.** `ravif` 0.13 has `with_exif` and nothing else
-      <https://docs.rs/ravif/latest/ravif/struct.Encoder.html>, and the `avif-serialize` 0.8
-      container writer beneath it has no ICC (`colr` of type `prof`) or XMP support. Needs an
-      upstream change, or writing the boxes ourselves after `ravif`.
-- [ ] Keep metadata in **animated** WebP output (`gif2webp -metadata` keeps ICC and XMP
-      from a GIF's application extensions; `img2webp` has no `-metadata`).
+- [x] **ICC profile and XMP in AVIF output** — closed by Phase 8's move from `ravif` to
+      libavif + libaom (0.14.0): the ICC profile, Exif and XMP go in as `avifenc` puts them,
+      held to `avifenc` by `tests/avif_parity.rs` and checked by `keeps_metadata_in_avif`.
+      (Left unticked when 0.14.0 shipped; ticked 2026-10-01.)
+- [x] **Keep a GIF's ICC profile and XMP in animated WebP output**, as `gif2webp -metadata`
+      (2026-10-01). `gif_input::metadata` reads the first `ICCRGBG1012` and `XMP DataXMP`
+      application extensions as `gifdec.c`'s `GIFReadMetadata` does (an XMP packet keeps its
+      sub-blocks' length bytes and loses the 257-byte magic trailer), and
+      `animation::with_metadata` re-muxes ICCP then XMP with libwebp's mux. The WebP panel's
+      ICC and XMP toggles are `gif2webp`'s `-metadata icc,xmp` for a GIF. **Gate:**
+      `matches_reference_gif2webp_keeping_metadata` in `tests/gif.rs` — 20 of 20 whole
+      conversions byte-identical to `gif2webp -metadata`; mutation: keeping the trailer
+      fails 6, last-wins fails 2.
+- [x] Metadata from an **animated WebP** source into animated WebP output (2026-10-01).
+      `img2webp` has no `-metadata`, so the reference is the command-line route: re-encode,
+      then `webpmux -set icc|exif|xmp`. The source's `ICCP`, `EXIF` and `XMP ` chunks are
+      read as `cwebp` reads a still WebP's (`metadata::webp_chunks`) and set back with
+      libwebp's mux under the WebP panel's three toggles. **Gate:**
+      `keeps_an_animations_metadata_as_webpmux_sets_it` in `tests/animation.rs` — a source
+      made with `webpmux -set`, five choices x lossless/lossy: 10 of 10 byte-identical.
+      Mutation: dropping Exif fails 4. `webpmux` joins the reference tools
+      (`scripts/build-reference-tools.sh`, CI's parity job).
 - [x] `cargo tauri build` green on **Linux** for `.deb` — **this was not actually blocked
       on `patchelf`.** Only the AppImage target needs it; `cargo tauri build --bundles deb`
       produces a valid 3.8 MB `Skidbladnir_<version>_amd64.deb` on the dev host today,
@@ -721,7 +746,15 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
         "coming soon" claim has already been struck.
       Revisit JPEG XL once Chrome ships it unflagged — that single event moves it from
       16% to usable, and it is the trigger to re-open this item.
-- [ ] **JPEG XL is close to its trigger — prepare, do not build yet.** Mozilla announced
+- [ ] **Chrome turns JPEG XL on by default — update the README when it ships.** The JPEG XL
+      project's news page (25 September 2026) says JPEG XL is set to be enabled by default
+      in Chrome 155 stable, due early October. When it is out, re-word the README's "JPEG XL
+      files open in Safari, and in Firefox and Chrome as each enables it" gap to what is
+      actually shipped, and re-check Firefox's status the same way.
+      <https://jpegxl.com/news/>
+- [x] **JPEG XL is close to its trigger — prepare, do not build yet.** *Superseded:* the
+      owner asked for JPEG XL ahead of Chrome, and it shipped in 0.10.0 on libjxl (see
+      "JPEG XL output and input" below), with `cjxl`'s whole surface since 0.14.0. Mozilla announced
       (August 2026) that Firefox is shipping JPEG XL, decoded by Google Research's Rust
       `jxl-rs`, and that "Chrome are also intending to ship", expecting cross-browser
       support "before the end of the year". Chrome has not unflagged it yet, so the trigger
@@ -904,10 +937,20 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       favour of a trait. Still an alpha — no change to the decision.
       <https://github.com/tauri-apps/tauri/releases>
       Re-checked 2026-09-28: `2.12.0` and `3.0.0-alpha.3` are still the newest; no change.
+      Re-checked 2026-10-01: `2.12.1` (30 September; taken this run) and `3.0.0-alpha.4`
+      (1 October). Still an alpha; no change.
+- [ ] **Drop `macos-private-api`.** Tauri 2.12.1 no longer needs the `macos-private-api`
+      feature (or `macOSPrivateAPI` in `tauri.conf.json`) for transparency or fullscreen on
+      macOS (tauri-apps/tauri#16166). Skidbladnir enables the feature only for its frameless
+      `transparent` window, and the private API is what keeps an app out of the Mac App
+      Store. Remove the feature from the workspace `tauri` dependency once a macOS build
+      confirms the window still draws transparent — which, since no macOS build has been
+      launched, waits on the macOS first-launch item.
+      <https://github.com/tauri-apps/tauri/releases/tag/tauri-v2.12.1>
 - [x] Confirm the encoder is current. **No libwebp upgrade is pending:** 1.6.0
       (9 July 2025) is still the newest release, and it is exactly what `libwebp-sys`
       vendors and what the parity test compares against, so the parity claim is against
-      current upstream. Re-check each run. Re-checked 2026-09-25, 2026-09-27 and 2026-09-28: still 1.6.0.
+      current upstream. Re-check each run. Re-checked 2026-09-25, 2026-09-27, 2026-09-28 and 2026-10-01: still 1.6.0.
       <https://github.com/webmproject/libwebp/tags>
 - [x] Strike the JPEG 2000 claim from the README — done; the Status section now lists
       WebP as the only output format rather than promising JPEG 2000.
@@ -1073,6 +1116,39 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       opt-level`, re-running the parity gates to prove the output is unchanged) or run the
       app's animation encodes on a thread with a stated stack size — not raise
       `RUST_MIN_STACK` in CI to hide it.
+      **Measured 2026-10-01, and the stack-depth hypothesis does not hold on Linux:** each of
+      the three test bodies (and a lossy animation encode) runs on a main thread limited by
+      `ulimit -s` to **under 50 KiB**, with libwebp's C at `-O0` (debug) and at `-O3` alike —
+      versus the 1 MiB / 2 MiB Windows gives a main / test thread. Two things the failing
+      run's log does show: the three tests are exactly those that decode *lossless* (VP8L)
+      data through `WebPAnimDecoder` (`a_still_webp_decodes_as_one_frame` never touches
+      `WebPAnimEncoder`), and those test binaries link with
+      `LNK4098: defaultlib 'libcmt.lib' conflicts with use of other libs` — a static and a
+      dynamic C runtime in one process (`native/heic_jpeg.cc` is built `static_crt(true)` to
+      match libjxl's; see the next item). Revised next step: make the CRT consistent, then
+      reproduce on the Windows runner (a dispatch-only job running `tests/animation.rs` in a
+      loop); only if it still overflows, measure there. **The CRT is now consistent**
+      (0.15.0, below); the overflow did not recur in that PR's Windows runs, which proves
+      little for an intermittent failure — keep watching before ticking.
+- [x] **One C runtime on Windows** (2026-10-01): everything on the static runtime —
+      `.cargo/config.toml` `+crt-static` for `x86_64-pc-windows-msvc`, and
+      `CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded` for libjpeg-turbo, libaom and libavif in
+      `build.rs`; libheif stays a DLL on its own runtime. **Trap found:** CI's
+      workflow-wide `RUSTFLAGS` *replaces* the config's target rustflags, so the first CI
+      run built the dynamic runtime and went green meaninglessly (`LNK4098` still there);
+      CI's Windows jobs now set the flag in `RUSTFLAGS` themselves, while `release.yml` (no
+      `RUSTFLAGS`) takes it from the config. Verified by CI run 36895266768: `LNK4098` 0
+      times (was 3), both editions' Windows suites green (263 passed on the standard), and
+      the installed NSIS app passes the Windows smoke test. Not run on a Windows machine
+      outside CI. *Original item:* The MSVC test binaries link both `libcmt` (static CRT:
+      libjxl from `jpegxl-src`, and `native/heic_jpeg.cc` to match it) and the dynamic CRT
+      the Rust toolchain and the other `cc`-built C use, which the linker warns about
+      (`LNK4098`, seen in run 36521408006). Two CRTs mean two heaps and two sets of CRT
+      state in one process; nothing is known to cross between them, but it is the kind of
+      thing that produces failures like the intermittent overflow above. Either build every
+      C/C++ dependency against the static CRT (`+crt-static` for the Windows target) or
+      libjxl against the dynamic one, and re-run the Windows parity, smoke and installer
+      jobs.
 
 ## Phase 8 — Reference-CLI parity
 
@@ -1115,9 +1191,73 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       cases in all. Malformed metadata that `cwebp -metadata` refuses is still refused.
       The one result not reproduced is 0.13's deliberate divergence: `cwebp` premultiplies
       a straight-alpha TIFF through libtiff, and Skidbladnir keeps its colours.
-- [ ] More input formats the tools read: PNM/PAM (all four), PFM (`cjxl`), GIF (`cjxl`),
-      Y4M (`avifenc`, `heif-enc`), PGX and EXR (`cjxl`), raw pixels (`heif-enc --raw`,
-      `cwebp -s`), and `heif-enc`'s WebP and HEIF input.
+- [x] **PNM/PAM input** (2026-10-01): binary `P5`, `P6` and `P7`, read by
+      `src/pnm.rs` as libwebp 1.6.0's `imageio/pnmdec.c` reads them (line-at-a-time header,
+      `(v * 255 + maxval / 2) / maxval`) and handed to libjxl as `cjxl`'s
+      `lib/extras/dec/pnm.cc` hands them over (`log2(maxval + 1)` bits,
+      `JXL_BIT_DEPTH_FROM_CODESTREAM`, perceptual sRGB). **Gate:** `tests/pnm.rs` — 143 of 143
+      byte-identical to `cwebp`, 20 of 20 to `cjxl`; `cwebp`'s refusals (`P1`-`P4`, a
+      one-line header, truncation) checked against `cwebp`. `cwebp` reads no `P1`-`P4`, and
+      neither does `cjxl`, so no reference exists for them.
+- [x] **PFM input** (2026-10-01), as `cjxl` reads it: 32-bit floats handed to libjxl as
+      they are (bottom-up rows, the scale's sign as byte order). **Gate:**
+      `matches_cjxl_reading_pfm` — 12 of 12 byte-identical. Other formats get it clamped to
+      0..1 at 8/16 bits, with no reference to match (only `cjxl` reads PFM).
+- [ ] **libjxl 0.12.0 fails a lossless float encode at effort 3** ("Residual overflow",
+      `enc_encoding.cc:314`) — `cjxl` itself fails the same PFM, so the PFM gate pins that
+      both refuse it. It matches libjxl's open issue #4902, "Lossless fp32 encoding fails
+      when the image mixes negative and positive values" (a suspected 0.12.0 regression;
+      the fixture's samples run from -0.05 to 1.06), and #4905 reports the same error with
+      patches. Check whether a libjxl release fixes it before the next libjxl bump, and
+      turn the pin into a parity case then.
+      <https://github.com/libjxl/libjxl/issues/4902> ·
+      <https://github.com/libjxl/libjxl/issues/4905>
+- [x] **A still GIF into JPEG XL, as `cjxl` reads it** (2026-10-01). `cjxl` reads GIF with
+      its own reader (`lib/extras/dec/gif.cc`): three colour channels, alpha only when a
+      pixel is transparent, perceptual sRGB — and it counts GIF a lossy input, so with no
+      `-d`/`-q` it encodes losslessly. Skidbladnir took the generic path (relative intent,
+      distance 1). **Gate:** `matches_cjxl_reading_a_still_gif` in `tests/gif.rs` — four
+      still GIFs (opaque, transparent index, local palette + interlaced, a loop extension) x
+      five settings including no target: 20 of 20 byte-identical to `cjxl`. Mutation: the
+      generic path fails 16, the distance-1 default fails 8.
+- [x] **TIFF into HEIC, held to `heif-enc`** (2026-10-01; test only, nothing needed
+      changing): `heif-enc` reads TIFF with libtiff (`heifio/decoder_tiff.cc`).
+      `matches_heif_enc_across_tiff_inputs` — 8-bit RGB (plain and LZW) and straight-alpha
+      RGBA x two settings: 6 of 6 byte-identical. A 16-bit TIFF is refused by Kvazaar in
+      `heif-enc` too.
+- [x] **WebP into HEIC, held to `heif-enc`** (fixed 2026-10-01). `heif-enc` reads a *lossy*
+      WebP straight into YCbCr 4:2:0 planes (`heifio/decoder_webp.cc`: `WebPDecode` into
+      `MODE_YUV(A)`, never RGB), where Skidbladnir went through RGB — 4 of 8 conversions
+      differed (every lossy one). A lossy WebP now reaches the shim as its own 4:2:0 planes
+      (`encoder::webp_yuv420_planes`, the same decode the `cwebp` route uses, and a third
+      input layout in `native/heic_shim.c`). **Gate:** `matches_heif_enc_across_webp_inputs`
+      — lossless and lossy, with and without alpha, and an odd-sized lossy one: 9 of 9
+      byte-identical. GPL edition: the same input path, built and checked by CI only.
+- [x] **HEIC into HEIC, held to `heif-enc`** (fixed 2026-10-01). `heif-enc` decodes a HEIF
+      input with libheif in the file's own colourspace and chroma, NCLX passed through and
+      transformations applied, and keeps its first Exif and XMP blocks
+      (`heifio/decoder_heif.cc`). Skidbladnir decoded to RGB and **dropped the source's Exif
+      and XMP**. The shim now loads an untouched HEIC itself, as that reader does
+      (`load_heif` in `native/heic_shim.c`); the window's Exif/XMP toggles still leave
+      them out. With the ICC toggle off, the pixels go through RGB (the reader cannot drop
+      a profile). **Gate:** `matches_heif_enc_across_heic_inputs` — sources written by
+      `heif-enc` (RGB, RGBA, gray, odd size, every kind of metadata) x two settings: 10 of
+      10 byte-identical, plus a direct check that Exif/XMP are kept and left out as asked.
+      Mutation: the old route fails it (on the dropped metadata first). AVIF-in-HEIF input
+      is not covered: neither our libheif nor the reference `heif-enc` decodes AV1.
+- [ ] (owner decision) **Premultiplied-alpha TIFF into HEIC.** Since 2026-10-01 an
+      associated-alpha TIFF is un-multiplied as `cwebp` does, for every format. Reading
+      `heifio/decoder_tiff.cc`, `heif-enc` instead takes associated alpha as plain alpha
+      (it un-multiplies nothing unless `--premultiplied-alpha` marks the image), so its
+      HEIC of such a TIFF is darker where semi-transparent — the mirror image of the
+      straight-alpha exception kept for `cwebp`. **Run 2026-10-01:** a 16x16 TIFF stored as
+      premultiplied (100, 50, 25) at alpha 128 — straight colour (200, 100, 50), which is
+      how ImageMagick reads it — comes out of `heif-enc -e kvazaar -q 100` and `heif-dec`
+      as (100, 50, 25) at alpha 128. Decide whether HEIC keeps true colours (as now) or
+      follows `heif-enc`, then pin it with a test either way.
+- [ ] More input formats the tools read: animated GIF and APNG into `cjxl` (with the
+      multi-image work below), Y4M (`avifenc`, `heif-enc`), PGX and EXR (`cjxl`), raw pixels
+      (`heif-enc --raw`, `cwebp -s`), and `heif-enc`'s WebP and HEIF input.
 
 **Multi-image features the tools have, deferred by the owner (2026-09-28):**
 

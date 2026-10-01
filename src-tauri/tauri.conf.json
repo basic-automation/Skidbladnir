@@ -49,7 +49,7 @@
     },
     "category": "Graphics and Design",
     "shortDescription": "Convert images to next-generation formats.",
-    "longDescription": "Skidbladnir converts images to WebP, AVIF, JPEG XL and HEIC. For WebP it exposes the encoder's full control surface: modes, quality, alpha quality, compression method, segments, spatial noise shaping, filtering, target size and PSNR, multi-pass, partition limit, sharp YUV, low memory, resize and multi-threading. For AVIF: quality, alpha quality, speed, bit depth, colour model and the colour of transparent pixels. For JPEG XL: quality, effort, lossless and lossless JPEG recompression. For HEIC: quality, and in the GPL edition x265's lossless, chroma, bit depth, preset, tune and rate controls."
+    "longDescription": "Skidbladnir converts images to WebP, AVIF, JPEG XL and HEIC with every option of each format's reference encoder, cwebp, avifenc, cjxl and heif-enc, and writes the same bytes those tools write. It reads PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC, GIF, PNM and PFM, converts animated GIF and WebP to animated WebP, keeps colour profiles and metadata the way each tool does, and previews the result before anything is written."
   },
   "plugins": {
     "updater": {

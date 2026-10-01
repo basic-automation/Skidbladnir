@@ -234,3 +234,80 @@ fn matches_heif_enc_across_jpeg_inputs() {
 	encode_file(&job, &rgb, &run.dir.join("rgb-ours.heic")).expect("an RGB-coded JPEG still encodes");
 	finish(&run, "JPEG inputs");
 }
+
+/// TIFF input, which `heif-enc` reads with libtiff (`heifio/decoder_tiff.cc`). 8-bit only:
+/// Kvazaar refuses the deeper input `heif-enc` makes of a 16-bit TIFF.
+#[test]
+fn matches_heif_enc_across_tiff_inputs() {
+	let Some(mut run) = prepare() else { return };
+	let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+	for name in ["tiff-rgb8.tif", "tiff-rgb8-lzw.tif", "tiff-rgba8.tif"] {
+		for (setting, settings) in [("default", d()), ("quality 30", HeicSettings { quality: 30, ..d() })] {
+			run.compare(&format!("{name}, {setting}"), &fixtures.join(name), &settings);
+		}
+	}
+	finish(&run, "TIFF inputs");
+}
+
+/// WebP input, which `heif-enc` reads with libwebp (`heifio/decoder_webp.cc`): lossless and
+/// lossy, with and without alpha, written here by libwebp itself.
+#[test]
+fn matches_heif_enc_across_webp_inputs() {
+	use skidbladnir_encode::{RgbaImage, encode_rgba, settings::WebpSettings};
+
+	let Some(mut run) = prepare() else { return };
+	let (width, height) = (W, H);
+	let rgba = rows(4, 8);
+	let opaque: Vec<u8> = rgba.chunks(4).flat_map(|p| [p[0], p[1], p[2], 255]).collect();
+	for (name, pixels, settings) in [("lossless, alpha", &rgba, WebpSettings { lossless: true, exact: true, ..WebpSettings::default() }), ("lossless, opaque", &opaque, WebpSettings { lossless: true, ..WebpSettings::default() }), ("lossy, alpha", &rgba, WebpSettings::default()), ("lossy, opaque", &opaque, WebpSettings::default())] {
+		let webp = encode_rgba(&settings.into(), &RgbaImage { width, height, pixels }).expect("libwebp encodes the fixture");
+		let input = run.dir.join(format!("{}.webp", name.replace([',', ' '], "_")));
+		fs::write(&input, webp).expect("write the fixture");
+		for (setting, heic) in [("default", d()), ("quality 30", HeicSettings { quality: 30, ..d() })] {
+			run.compare(&format!("{name}, {setting}"), &input, &heic);
+		}
+	}
+	// Odd dimensions, so the 4:2:0 planes round up.
+	let (odd_w, odd_h) = (61_u32, 45_u32);
+	let odd: Vec<u8> = (0..odd_h).flat_map(|y| (0..odd_w).flat_map(move |x| [u8::try_from(x * 4).expect("byte"), u8::try_from(y * 5).expect("byte"), 120, u8::try_from(255 - x).expect("byte")])).collect();
+	let webp = encode_rgba(&WebpSettings::default().into(), &RgbaImage { width: odd_w, height: odd_h, pixels: &odd }).expect("libwebp encodes the fixture");
+	let input = run.dir.join("odd.webp");
+	fs::write(&input, webp).expect("write the fixture");
+	run.compare("lossy, alpha, 61x45", &input, &d());
+	finish(&run, "WebP inputs");
+}
+
+/// HEIC input, which `heif-enc` decodes with libheif in the file's own colourspace
+/// (`heifio/decoder_heif.cc`). The sources are written by `heif-enc` itself, from PNGs with
+/// and without alpha, gray, an odd size, and every kind of metadata.
+#[test]
+fn matches_heif_enc_across_heic_inputs() {
+	use skidbladnir_encode::settings::HeicMetadata;
+
+	let Some(mut run) = prepare() else { return };
+	let (odd_w, odd_h) = (61_u32, 45_u32);
+	let odd_rows: Vec<u8> = (0..odd_h).flat_map(|y| (0..odd_w).flat_map(move |x| [u8::try_from((x * 3 + y) % 256).expect("byte"), u8::try_from(x * 4 % 256).expect("byte"), u8::try_from(y * 5 % 256).expect("byte"), u8::try_from((x + y) * 2 % 256).expect("byte")])).collect();
+	let pngs: Vec<(&str, Vec<u8>)> = vec![("rgb", png(W, H, 8, 2, &rows(3, 8), &[], &[])), ("rgba", png(W, H, 8, 6, &rows(4, 8), &[], &[])), ("gray", png(W, H, 8, 0, &rows(1, 8), &[], &[])), ("odd size rgba", png(odd_w, odd_h, 8, 6, &odd_rows, &[], &[])), ("every kind of metadata", png(W, H, 8, 6, &rows(4, 8), &[chunk(*b"iCCP", &[b"test\0\0".as_slice(), &zlib(&icc(false))].concat()), chunk(*b"eXIf", &exif()), itxt("XML:com.adobe.xmp", b"<x:xmpmeta/>")], &[]))];
+	for (name, bytes) in pngs {
+		let png_path = run.dir.join("source.png");
+		fs::write(&png_path, &bytes).expect("write the PNG");
+		let heic = run.dir.join(format!("{}.heic", name.replace(' ', "_")));
+		let made = Command::new(&run.heif_enc).args(["-e", "kvazaar", "-q", "70"]).arg(&png_path).arg("-o").arg(&heic).env("LD_LIBRARY_PATH", &run.lib).env("DYLD_LIBRARY_PATH", &run.lib).output().expect("run heif-enc");
+		assert!(made.status.success(), "heif-enc could not make the {name} source: {}", String::from_utf8_lossy(&made.stderr));
+		run.compare(&format!("{name}, defaults"), &heic, &d());
+		run.compare(&format!("{name}, -q 30 --color-profile auto"), &heic, &HeicSettings { quality: 30, color_profile: ColorProfile::Auto, ..d() });
+		// heif-enc keeps every block it reads; leaving them out is the window's choice, not a
+		// heif-enc option, so it is checked directly: the blocks are there, then gone.
+		if name == "every kind of metadata" {
+			let has = |settings: &HeicSettings, needle: &[u8]| {
+				let out = run.dir.join("metadata.heic");
+				skidbladnir_encode::source::encode_file(&EncodeJob { format: OutputFormat::Heic, heic: settings.clone(), ..Default::default() }, &heic, &out).expect("our conversion");
+				fs::read(&out).expect("read ours").windows(needle.len()).any(|window| window == needle)
+			};
+			let none = HeicSettings { metadata: HeicMetadata { icc: true, exif: false, xmp: false }, ..d() };
+			assert!(has(&d(), b"<x:xmpmeta/>") && has(&d(), &exif()[..8]), "a HEIC source's XMP and Exif are kept by default");
+			assert!(!has(&none, b"<x:xmpmeta/>") && !has(&none, &exif()[..8]), "a HEIC source's XMP and Exif are left out when asked");
+		}
+	}
+	finish(&run, "HEIC inputs");
+}
