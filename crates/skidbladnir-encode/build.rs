@@ -102,7 +102,7 @@ impl Libjpeg {
 			return Self { includes: library.include_paths.clone(), static_dir: None, system: Some(library) };
 		}
 		// The static library alone; SIMD when NASM is there, which only changes the speed.
-		let built = cmake::Config::new(&source).profile("Release").define("ENABLE_SHARED", "OFF").define("ENABLE_STATIC", "ON").define("WITH_JPEG8", "ON").define("WITH_TURBOJPEG", "OFF").define("WITH_TOOLS", "OFF").define("WITH_TESTS", "OFF").define("CMAKE_POSITION_INDEPENDENT_CODE", "ON").define("CMAKE_INSTALL_LIBDIR", "lib").build();
+		let built = static_crt_on_msvc(&mut cmake::Config::new(&source)).profile("Release").define("ENABLE_SHARED", "OFF").define("ENABLE_STATIC", "ON").define("WITH_JPEG8", "ON").define("WITH_TURBOJPEG", "OFF").define("WITH_TOOLS", "OFF").define("WITH_TESTS", "OFF").define("CMAKE_POSITION_INDEPENDENT_CODE", "ON").define("CMAKE_INSTALL_LIBDIR", "lib").build();
 		Self { includes: vec![built.join("include")], static_dir: Some(built.join("lib")), system: None }
 	}
 
@@ -162,6 +162,7 @@ fn link_libavif(jpeg: &Libjpeg) {
 	// libaom: static, no tools, tests, docs or examples. The decoder is built too, because
 	// `avifenc -d 12,8` reconstructs the primary image to encode the residual beside it.
 	let mut aom_config = cmake::Config::new(third_party.join("aom"));
+	static_crt_on_msvc(&mut aom_config);
 	if let Some(arch) = apple_cross(&mut aom_config) {
 		aom_config.define("AOM_TARGET_CPU", arch);
 	}
@@ -175,6 +176,7 @@ fn link_libavif(jpeg: &Libjpeg) {
 	let placeholder = PathBuf::from(env::var("OUT_DIR").expect("cargo sets OUT_DIR")).join(if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") { "sharpyuv.lib" } else { "libsharpyuv.a" });
 	std::fs::write(&placeholder, b"").expect("write the sharpyuv placeholder");
 	let mut avif_config = cmake::Config::new(third_party.join("libavif"));
+	static_crt_on_msvc(&mut avif_config);
 	apple_cross(&mut avif_config);
 	let avif = avif_config
 		.profile("Release")
@@ -240,8 +242,9 @@ fn link_libheif(jpeg: &Libjpeg) {
 	let mut reader = cc::Build::new();
 	reader.cpp(true).std("c++20").file(manifest.join("native/heic_jpeg.cc")).include(manifest.join("../../third_party/libheif/heifio")).include(manifest.join("../../third_party/libheif/libheif")).warnings(false);
 	// On MSVC, C++ objects must agree on the C runtime, and libjxl's (from `jpegxl-src`) are
-	// built against the static one. Nothing this file allocates is freed on the other side:
-	// it hands out and takes back its own memory (`skid_heic_jpeg_release`, `_free`).
+	// built against the static one — as is everything else, since `.cargo/config.toml`
+	// sets `+crt-static` for Windows. It hands out and takes back its own memory
+	// (`skid_heic_jpeg_release`, `_free`).
 	if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
 		reader.static_crt(true);
 	}
@@ -276,6 +279,18 @@ fn link_libheif(jpeg: &Libjpeg) {
 		pkg_config::Config::new().atleast_version("1.23").probe("libheif").expect("probed above");
 		println!("cargo:rustc-cfg=skidbladnir_system_libheif");
 	}
+}
+
+/// On MSVC with `+crt-static` (`.cargo/config.toml`), build a library made with `cmake`
+/// against the static C runtime too. The default there is the dynamic one
+/// (`CMAKE_MSVC_RUNTIME_LIBRARY`, policy `CMP0091`) whatever flags `cmake-rs` passes, so it
+/// is set explicitly.
+fn static_crt_on_msvc(config: &mut cmake::Config) -> &mut cmake::Config {
+	let static_crt = env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") && env::var("CARGO_CFG_TARGET_FEATURE").is_ok_and(|features| features.split(',').any(|feature| feature == "crt-static"));
+	if static_crt {
+		config.static_crt(true).define("CMAKE_MSVC_RUNTIME_LIBRARY", "MultiThreaded");
+	}
+	config
 }
 
 fn link_libjxl() {
