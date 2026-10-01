@@ -27,7 +27,9 @@
 
 use gif::{ColorOutput, DecodeOptions, DisposalMethod, Repeat};
 
-use crate::animation::{Animation, Frame};
+use crate::{
+	animation::{Animation, Frame}, metadata::Metadata
+};
 
 /// Decode a GIF into full-canvas RGBA frames with `gif2webp`'s timing, loop count and
 /// background.
@@ -132,6 +134,69 @@ pub fn is_animated(bytes: &[u8]) -> bool {
 		}
 	}
 	false
+}
+
+/// The ICC profile and XMP packet a GIF carries, read as `gif2webp` reads them for
+/// `-metadata` (its `gif2webp.c` and `gifdec.c`'s `GIFReadMetadata`): from application
+/// extensions identified as `ICCRGBG1012` and `XMP DataXMP`, the **first** of each kind in
+/// the file. A profile is its sub-blocks' data. An XMP packet keeps each sub-block's length
+/// byte, because GIF's XMP encoding writes the packet raw and lets its bytes double as
+/// lengths, and loses its last 257 bytes, the "magic trailer" that makes that work.
+///
+/// The walk stops at the trailer or at anything malformed, keeping what it found; the
+/// frames are the decoder's business, not this one's. A GIF has no Exif.
+#[must_use]
+pub fn metadata(bytes: &[u8]) -> Metadata {
+	/// The sub-blocks starting at `at`, each with its length byte, and where they end.
+	fn sub_blocks(bytes: &[u8], mut at: usize) -> Option<(Vec<&[u8]>, usize)> {
+		let mut blocks = Vec::new();
+		loop {
+			let length = usize::from(*bytes.get(at)?);
+			if length == 0 {
+				return Some((blocks, at + 1));
+			}
+			blocks.push(bytes.get(at..at + 1 + length)?);
+			at += 1 + length;
+		}
+	}
+	/// The size of a colour table a packed-fields byte announces.
+	fn table(flags: u8) -> usize {
+		if flags & 0x80 == 0 { 0 } else { 3 << ((flags & 7) + 1) }
+	}
+
+	let mut metadata = Metadata::default();
+	let Some(&screen) = bytes.get(10) else { return metadata };
+	let mut at = 13 + table(screen);
+	loop {
+		match bytes.get(at) {
+			Some(0x21) => {
+				let Some(&label) = bytes.get(at + 1) else { break };
+				let Some((blocks, next)) = sub_blocks(bytes, at + 2) else { break };
+				at = next;
+				// An application extension whose identifier block is the usual 11 bytes.
+				let Some((identifier, data)) = blocks.split_first().filter(|(first, _)| label == 0xff && first.len() == 12) else { continue };
+				match &identifier[1..] {
+					b"ICCRGBG1012" if metadata.icc.is_none() => metadata.icc = Some(data.iter().flat_map(|block| block[1..].iter().copied()).collect()),
+					b"XMP DataXMP" if metadata.xmp.is_none() => {
+						let mut xmp = data.concat();
+						if xmp.len() > 257 {
+							xmp.truncate(xmp.len() - 257);
+						}
+						metadata.xmp = Some(xmp);
+					}
+					_ => {}
+				}
+			}
+			// An image: its descriptor, local colour table and LZW code size, then its data.
+			Some(0x2c) => {
+				let Some(&flags) = bytes.get(at + 9) else { break };
+				let Some((_, next)) = sub_blocks(bytes, at + 10 + table(flags) + 1) else { break };
+				at = next;
+			}
+			_ => break,
+		}
+	}
+	metadata
 }
 
 /// `gif2webp`'s `GIFGetBackgroundColor`, as `0xAARRGGBB`.

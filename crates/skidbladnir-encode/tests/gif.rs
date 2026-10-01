@@ -201,3 +201,130 @@ fn matches_reference_gif2webp() {
 	assert!(mismatches.is_empty(), "GIF PARITY FAILED for {} of {compared} conversions:\n{}", mismatches.len(), mismatches.join("\n"));
 	eprintln!("GIF PARITY OK: {compared} conversions byte-identical to gif2webp");
 }
+
+/// An application extension carrying `payload` the way its kind is written into a GIF: an
+/// ICC profile in length-prefixed sub-blocks, an XMP packet raw, followed by XMP's 258-byte
+/// "magic trailer" (`0x01`, `0xff` down to `0x00`, then the block terminator), which lets the
+/// packet's own bytes double as sub-block lengths.
+fn app_extension(identifier: &[u8; 11], payload: &[u8], xmp: bool) -> Vec<u8> {
+	let mut out = vec![0x21, 0xff, 11];
+	out.extend_from_slice(identifier);
+	if xmp {
+		out.extend_from_slice(payload);
+		out.push(0x01);
+		out.extend((0..=255_u8).rev());
+		out.push(0);
+	} else {
+		for block in payload.chunks(255) {
+			out.push(u8::try_from(block.len()).expect("at most 255"));
+			out.extend_from_slice(block);
+		}
+		out.push(0);
+	}
+	out
+}
+
+/// `gif` with `extensions` placed after its header and global colour table, or after its
+/// first image when `after_first_image` is set (`gif2webp` reads extensions anywhere).
+fn with_extensions(gif: &[u8], extensions: &[Vec<u8>], after_first_image: bool) -> Vec<u8> {
+	let flags = gif[10];
+	let mut at = 13 + if flags & 0x80 == 0 { 0 } else { 3 << ((flags & 7) + 1) };
+	if after_first_image {
+		// Skip extensions up to the first image, then the image itself.
+		loop {
+			match gif[at] {
+				0x21 => {
+					at += 2;
+					while gif[at] != 0 {
+						at += 1 + usize::from(gif[at]);
+					}
+					at += 1;
+				}
+				0x2c => {
+					let local = gif[at + 9];
+					at += 10 + if local & 0x80 == 0 { 0 } else { 3 << ((local & 7) + 1) } + 1;
+					while gif[at] != 0 {
+						at += 1 + usize::from(gif[at]);
+					}
+					at += 1;
+					break;
+				}
+				other => panic!("unexpected GIF block {other:#x}"),
+			}
+		}
+	}
+	[&gif[..at], &extensions.concat(), &gif[at..]].concat()
+}
+
+/// `gif2webp -metadata`: the ICC profile and XMP a GIF carries in application extensions,
+/// kept or not, through the whole conversion (`encode_file`), against `gif2webp` itself.
+#[test]
+fn matches_reference_gif2webp_keeping_metadata() {
+	use skidbladnir_encode::{
+		settings::{EncodeJob, WebpMetadata}, source::encode_file
+	};
+
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let linked = skidbladnir_encode::encoder::linked_encoder_version();
+	let Some(gif2webp) = reference_gif2webp().filter(|tool| reference_version(tool) == Some(linked)) else {
+		let message = "GIF METADATA PARITY NOT RUN: no gif2webp of the linked libwebp version.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+
+	let profile: Vec<u8> = (0..700_u32).map(|i| u8::try_from(i * 7 % 251).expect("byte")).collect();
+	let other_profile = vec![9_u8; 40];
+	let packet = b"<?xpacket begin='' id='W5M0MpCehiHzreSzNTczkc9d'?><x:xmpmeta xmlns:x='adobe:ns:meta/'><rdf:RDF/></x:xmpmeta><?xpacket end='w'?>".to_vec();
+	let icc = |payload: &[u8]| app_extension(b"ICCRGBG1012", payload, false);
+	let xmp = |payload: &[u8]| app_extension(b"XMP DataXMP", payload, true);
+	let base = fixtures();
+	let (still, animated) = (&base.iter().find(|(name, _)| name.contains("still")).expect("a still fixture").1, &base[0].1);
+	let sources = [("ICC and XMP, animated", with_extensions(animated, &[icc(&profile), xmp(&packet)], false)), ("XMP then ICC after the first frame", with_extensions(animated, &[xmp(&packet), icc(&profile)], true)), ("two of each: the first wins", with_extensions(still, &[icc(&profile), xmp(&packet), icc(&other_profile), xmp(b"<x/>")], false)), ("ICC only", with_extensions(still, &[icc(&profile)], false))];
+	let keep = |exif: bool, icc: bool, xmp: bool| WebpMetadata { exif, icc, xmp };
+	let settings = [("none", keep(false, false, false)), ("icc", keep(false, true, false)), ("xmp", keep(false, false, true)), ("all", keep(false, true, true)), ("none", keep(true, false, false))];
+
+	let dir = env::temp_dir().join(format!("skidbladnir-gif-metadata-{}", std::process::id()));
+	let _ = fs::remove_dir_all(&dir);
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+	let mut compared = 0;
+	let mut mismatches = Vec::new();
+	for (source_name, gif_bytes) in &sources {
+		let input = dir.join("input.gif");
+		fs::write(&input, gif_bytes).expect("write the GIF");
+		for (flag, metadata) in settings {
+			let job = EncodeJob::from(WebpSettings { lossless: true, exact: true, metadata, ..Default::default() });
+			let theirs = dir.join("reference.webp");
+			let run = Command::new(&gif2webp).args(["-metadata", flag]).arg(&input).arg("-o").arg(&theirs).output().expect("run gif2webp");
+			assert!(run.status.success(), "gif2webp failed on {source_name} / -metadata {flag}: {}", String::from_utf8_lossy(&run.stderr));
+			let ours = dir.join("ours.webp");
+			encode_file(&job, &input, &ours).expect("our conversion");
+			let (theirs, ours) = (fs::read(&theirs).expect("read theirs"), fs::read(&ours).expect("read ours"));
+			compared += 1;
+			if ours != theirs {
+				mismatches.push(format!("{source_name} / -metadata {flag} ({metadata:?}): ours {} bytes, gif2webp {} bytes", ours.len(), theirs.len()));
+			}
+			// The chunks are really there when asked for, so the gate cannot pass vacuously.
+			let has = |fourcc: &[u8]| theirs.windows(4).any(|window| window == fourcc);
+			let carries_xmp = !source_name.contains("ICC only");
+			assert_eq!((has(b"ICCP"), has(b"XMP ")), (metadata.icc, metadata.xmp && carries_xmp), "{source_name} / -metadata {flag}: gif2webp's chunks");
+		}
+	}
+	let _ = fs::remove_dir_all(&dir);
+	assert!(mismatches.is_empty(), "GIF METADATA PARITY FAILED for {} of {compared} conversions:\n{}", mismatches.len(), mismatches.join("\n"));
+	eprintln!("GIF METADATA PARITY OK: {compared} conversions byte-identical to gif2webp -metadata");
+}
+
+/// The reader on its own: the first of each kind, a profile without its length bytes, a
+/// packet without its trailer.
+#[test]
+fn reads_gif_metadata_as_gif2webp_does() {
+	let base = fixtures();
+	let gif = with_extensions(&base[0].1, &[app_extension(b"ICCRGBG1012", &[1; 300], false), app_extension(b"XMP DataXMP", b"<x/>", true), app_extension(b"ICCRGBG1012", &[2; 3], false)], true);
+	let metadata = gif_input::metadata(&gif);
+	assert_eq!(metadata.icc.as_deref(), Some(&[1_u8; 300][..]));
+	assert_eq!(metadata.xmp.as_deref(), Some(&b"<x/>"[..]));
+	assert_eq!(metadata.exif, None);
+	assert_eq!(gif_input::metadata(&base[0].1), skidbladnir_encode::metadata::Metadata::default(), "a GIF without the extensions has none");
+	assert_eq!(gif_input::metadata(&gif[..gif.len() - 1]).icc.as_deref(), Some(&[1_u8; 300][..]), "a truncated GIF keeps what was read");
+}

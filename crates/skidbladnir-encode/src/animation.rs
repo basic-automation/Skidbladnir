@@ -35,7 +35,7 @@
 
 use std::ffi::c_int;
 
-use libwebp_sys::{WEBP_CSP_MODE, WEBP_DEMUX_ABI_VERSION, WEBP_MUX_ABI_VERSION, WebPAnimDecoder, WebPAnimDecoderDelete, WebPAnimDecoderGetInfo, WebPAnimDecoderGetNext, WebPAnimDecoderHasMoreFrames, WebPAnimDecoderNewInternal, WebPAnimDecoderOptions, WebPAnimDecoderOptionsInitInternal, WebPAnimEncoder, WebPAnimEncoderAdd, WebPAnimEncoderAssemble, WebPAnimEncoderDelete, WebPAnimEncoderNewInternal, WebPAnimEncoderOptions, WebPAnimEncoderOptionsInitInternal, WebPAnimInfo, WebPData, WebPDataClear};
+use libwebp_sys::{WEBP_CSP_MODE, WEBP_DEMUX_ABI_VERSION, WEBP_MUX_ABI_VERSION, WebPAnimDecoder, WebPAnimDecoderDelete, WebPAnimDecoderGetInfo, WebPAnimDecoderGetNext, WebPAnimDecoderHasMoreFrames, WebPAnimDecoderNewInternal, WebPAnimDecoderOptions, WebPAnimDecoderOptionsInitInternal, WebPAnimEncoder, WebPAnimEncoderAdd, WebPAnimEncoderAssemble, WebPAnimEncoderDelete, WebPAnimEncoderNewInternal, WebPAnimEncoderOptions, WebPAnimEncoderOptionsInitInternal, WebPAnimInfo, WebPData, WebPDataClear, WebPMux, WebPMuxAssemble, WebPMuxCreateInternal, WebPMuxDelete, WebPMuxError, WebPMuxSetChunk};
 
 use crate::{
 	encoder::{EncodeError, RgbaImage, argb_picture, build_config, resize_picture}, settings::{Resize, WebpSettings}
@@ -94,6 +94,51 @@ impl Drop for Assembled {
 	fn drop(&mut self) {
 		// SAFETY: a zeroed WebPData is valid to clear, and so is one libwebp filled.
 		unsafe { WebPDataClear(&mut self.0) }
+	}
+}
+
+/// Owns a `WebPMux`.
+struct Mux(*mut WebPMux);
+
+impl Drop for Mux {
+	fn drop(&mut self) {
+		// SAFETY: the pointer came from WebPMuxCreateInternal and is deleted once.
+		unsafe { WebPMuxDelete(self.0) }
+	}
+}
+
+/// Add an ICC profile and an XMP packet to an encoded animation as `gif2webp -metadata`
+/// does: the file re-muxed by libwebp's mux with an `ICCP` and an `XMP ` chunk, which also
+/// sets the `VP8X` flags. With neither (or only empty ones, which libwebp's mux refuses), the
+/// file is returned as it is.
+///
+/// # Errors
+///
+/// [`EncodeError::Libwebp`] if libwebp's mux refuses the file or a chunk.
+pub fn with_metadata(encoded: Vec<u8>, icc: Option<&[u8]>, xmp: Option<&[u8]>) -> Result<Vec<u8>, EncodeError> {
+	let chunks: Vec<(&std::ffi::CStr, &[u8])> = [(c"ICCP", icc), (c"XMP ", xmp)].into_iter().filter_map(|(fourcc, payload)| payload.filter(|payload| !payload.is_empty()).map(|payload| (fourcc, payload))).collect();
+	if chunks.is_empty() {
+		return Ok(encoded);
+	}
+	// SAFETY: every WebPData points into a live slice for the call that reads it, and the
+	// mux copies what it keeps (`copy_data` 1); the mux and its output are owned by guards.
+	unsafe {
+		let data = WebPData { bytes: encoded.as_ptr(), size: encoded.len() };
+		let mux = Mux(WebPMuxCreateInternal(&raw const data, 1, WEBP_MUX_ABI_VERSION.cast_signed()));
+		if mux.0.is_null() {
+			return Err(EncodeError::Libwebp("WebPMuxCreate"));
+		}
+		for (fourcc, payload) in chunks {
+			let chunk = WebPData { bytes: payload.as_ptr(), size: payload.len() };
+			if WebPMuxSetChunk(mux.0, fourcc.as_ptr(), &raw const chunk, 1) != WebPMuxError::WEBP_MUX_OK {
+				return Err(EncodeError::Libwebp("WebPMuxSetChunk"));
+			}
+		}
+		let mut assembled = Assembled(std::mem::zeroed::<WebPData>());
+		if WebPMuxAssemble(mux.0, &raw mut assembled.0) != WebPMuxError::WEBP_MUX_OK || assembled.0.bytes.is_null() {
+			return Err(EncodeError::Libwebp("WebPMuxAssemble"));
+		}
+		Ok(std::slice::from_raw_parts(assembled.0.bytes, assembled.0.size).to_vec())
 	}
 }
 

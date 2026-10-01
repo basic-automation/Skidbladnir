@@ -131,7 +131,7 @@ fn preview_animation(settings: &EncodeJob, input: &Path, source_bytes: u64, sour
 		return Err(format!("{refusal} (an animation counts every frame: {frames} frames of {}x{})", animation.width, animation.height));
 	}
 
-	let encoded = animation::encode_with(&settings.webp, settings.resize, animation, source.keyframes, &mut |_| true).map_err(|error| error.to_string())?;
+	let encoded = source.encode(settings, &mut |_| true).map_err(|error| error.to_string())?;
 	let original = animation::encode(&lossless(settings.resize).webp, settings.resize, animation, &mut |_| true).map_err(|error| error.to_string())?;
 
 	let (width, height) = dimensions(&encoded).unwrap_or((animation.width, animation.height));
