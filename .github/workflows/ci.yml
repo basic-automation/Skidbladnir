@@ -249,9 +249,10 @@ jobs:
         # Released builds are what the claim is about, so the comparison is too.
         # cmyk_jpeg rides along because it checks that cwebp still REFUSES a CMYK JPEG, the
         # one input Skidbladnir converts to WebP and cwebp does not. animation is animated
-        # WebP against img2webp, gif is GIF input against gif2webp, and metadata is
-        # `-metadata` against cwebp.
-        run: cargo test --release --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_parity --test jxl_parity --test heic_parity --test animation --test gif --test metadata -- --nocapture
+        # WebP against img2webp, gif is GIF input against gif2webp (and a still GIF against
+        # cjxl), metadata is `-metadata` against cwebp, and pnm is PNM/PAM against cwebp and
+        # cjxl and PFM against cjxl.
+        run: cargo test --release --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_parity --test jxl_parity --test heic_parity --test animation --test gif --test metadata --test pnm -- --nocapture
 
   # Drives the real window over WebDriver. Separate from the compile matrix because it
   # needs a display, a WebKit driver and a full release build, and because a flaky display
