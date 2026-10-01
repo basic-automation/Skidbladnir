@@ -611,9 +611,15 @@ prettier subset.
       `matches_reference_gif2webp_keeping_metadata` in `tests/gif.rs` — 20 of 20 whole
       conversions byte-identical to `gif2webp -metadata`; mutation: keeping the trailer
       fails 6, last-wins fails 2.
-- [ ] Metadata from an **animated WebP** source into animated WebP output. `img2webp` has
-      no `-metadata`, so there is no reference conversion; `webpmux -get`/`-set` is the
-      nearest thing to hold it to. Until then an animated WebP's ICCP/EXIF/XMP are dropped.
+- [x] Metadata from an **animated WebP** source into animated WebP output (2026-10-01).
+      `img2webp` has no `-metadata`, so the reference is the command-line route: re-encode,
+      then `webpmux -set icc|exif|xmp`. The source's `ICCP`, `EXIF` and `XMP ` chunks are
+      read as `cwebp` reads a still WebP's (`metadata::webp_chunks`) and set back with
+      libwebp's mux under the WebP panel's three toggles. **Gate:**
+      `keeps_an_animations_metadata_as_webpmux_sets_it` in `tests/animation.rs` — a source
+      made with `webpmux -set`, five choices x lossless/lossy: 10 of 10 byte-identical.
+      Mutation: dropping Exif fails 4. `webpmux` joins the reference tools
+      (`scripts/build-reference-tools.sh`, CI's parity job).
 - [x] `cargo tauri build` green on **Linux** for `.deb` — **this was not actually blocked
       on `patchelf`.** Only the AppImage target needs it; `cargo tauri build --bundles deb`
       produces a valid 3.8 MB `Skidbladnir_<version>_amd64.deb` on the dev host today,

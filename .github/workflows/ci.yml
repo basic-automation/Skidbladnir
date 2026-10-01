@@ -238,8 +238,8 @@ jobs:
 
       - name: Build the reference encoders
         run: |
-          if [ -x build/reference/bin/cjxl ]; then
-            printf '%s\n' "SKIDBLADNIR_REFERENCE_CWEBP=$PWD/build/reference/bin/cwebp" "SKIDBLADNIR_REFERENCE_IMG2WEBP=$PWD/build/reference/bin/img2webp" "SKIDBLADNIR_REFERENCE_GIF2WEBP=$PWD/build/reference/bin/gif2webp" "SKIDBLADNIR_REFERENCE_AVIFENC=$PWD/build/reference/bin/avifenc" "SKIDBLADNIR_REFERENCE_CJXL=$PWD/build/reference/bin/cjxl" "SKIDBLADNIR_REFERENCE_HEIF_ENC=$PWD/build/reference/heif/bin/heif-enc" >> "$GITHUB_ENV"
+          if [ -x build/reference/bin/cjxl ] && [ -x build/reference/bin/webpmux ]; then
+            printf '%s\n' "SKIDBLADNIR_REFERENCE_CWEBP=$PWD/build/reference/bin/cwebp" "SKIDBLADNIR_REFERENCE_IMG2WEBP=$PWD/build/reference/bin/img2webp" "SKIDBLADNIR_REFERENCE_GIF2WEBP=$PWD/build/reference/bin/gif2webp" "SKIDBLADNIR_REFERENCE_WEBPMUX=$PWD/build/reference/bin/webpmux" "SKIDBLADNIR_REFERENCE_AVIFENC=$PWD/build/reference/bin/avifenc" "SKIDBLADNIR_REFERENCE_CJXL=$PWD/build/reference/bin/cjxl" "SKIDBLADNIR_REFERENCE_HEIF_ENC=$PWD/build/reference/heif/bin/heif-enc" >> "$GITHUB_ENV"
           else
             scripts/build-reference-tools.sh >> "$GITHUB_ENV"
           fi

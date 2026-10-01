@@ -232,15 +232,16 @@ pub struct AnimatedSource {
 	pub animation: crate::animation::Animation,
 	/// `img2webp`'s spacing for an animated WebP, `gif2webp`'s for a GIF.
 	pub keyframes: crate::animation::Keyframes,
-	/// The ICC profile and XMP `gif2webp -metadata` would copy; none for an animated WebP,
-	/// since `img2webp` copies none.
+	/// The metadata the source carries: a GIF's ICC profile and XMP, as `gif2webp
+	/// -metadata` reads them, or an animated WebP's `ICCP`, `EXIF` and `XMP ` chunks.
 	pub metadata: crate::metadata::Metadata,
 }
 
 impl AnimatedSource {
 	/// Encode it as an animated WebP with `job`'s WebP settings and resize, keeping the
-	/// ICC profile and XMP that `job` keeps, as `gif2webp -metadata icc,xmp` does. (Exif is
-	/// not a `gif2webp` choice: a GIF has none.)
+	/// metadata `job` keeps: for a GIF as `gif2webp -metadata` does (a GIF has no Exif); for
+	/// an animated WebP, which `img2webp` cannot carry metadata through, the chunks set back
+	/// as `webpmux -set` sets them.
 	///
 	/// # Errors
 	///
@@ -248,7 +249,7 @@ impl AnimatedSource {
 	pub fn encode(&self, job: &EncodeJob, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, crate::encoder::EncodeError> {
 		let encoded = crate::animation::encode_with(&job.webp, job.resize, &self.animation, self.keyframes, on_progress)?;
 		let keep = job.webp.metadata;
-		crate::animation::with_metadata(encoded, self.metadata.icc.as_deref().filter(|_| keep.icc), self.metadata.xmp.as_deref().filter(|_| keep.xmp))
+		crate::animation::with_metadata(encoded, self.metadata.icc.as_deref().filter(|_| keep.icc), self.metadata.exif.as_deref().filter(|_| keep.exif), self.metadata.xmp.as_deref().filter(|_| keep.xmp))
 	}
 }
 
@@ -272,7 +273,7 @@ pub fn animated_source(path: &Path, bytes: &[u8]) -> Result<Option<AnimatedSourc
 	}
 	if is_animated_webp(bytes) {
 		let animation = crate::animation::decode(bytes).ok_or_else(|| failed(SourceFormat::Webp, "libwebp could not read the animation".to_owned()))?;
-		return Ok(Some(AnimatedSource { animation, keyframes: Keyframes::Libwebp, metadata: crate::metadata::Metadata::default() }));
+		return Ok(Some(AnimatedSource { animation, keyframes: Keyframes::Libwebp, metadata: crate::metadata::webp_chunks(bytes) }));
 	}
 	Ok(None)
 }

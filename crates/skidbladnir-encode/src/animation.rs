@@ -107,16 +107,16 @@ impl Drop for Mux {
 	}
 }
 
-/// Add an ICC profile and an XMP packet to an encoded animation as `gif2webp -metadata`
-/// does: the file re-muxed by libwebp's mux with an `ICCP` and an `XMP ` chunk, which also
-/// sets the `VP8X` flags. With neither (or only empty ones, which libwebp's mux refuses), the
-/// file is returned as it is.
+/// Add an ICC profile, Exif and an XMP packet to an encoded animation as `gif2webp
+/// -metadata` and `webpmux -set` do: the file re-muxed by libwebp's mux with `ICCP`, `EXIF`
+/// and `XMP ` chunks, which also sets the `VP8X` flags. With none (or only empty ones, which
+/// libwebp's mux refuses), the file is returned as it is.
 ///
 /// # Errors
 ///
 /// [`EncodeError::Libwebp`] if libwebp's mux refuses the file or a chunk.
-pub fn with_metadata(encoded: Vec<u8>, icc: Option<&[u8]>, xmp: Option<&[u8]>) -> Result<Vec<u8>, EncodeError> {
-	let chunks: Vec<(&std::ffi::CStr, &[u8])> = [(c"ICCP", icc), (c"XMP ", xmp)].into_iter().filter_map(|(fourcc, payload)| payload.filter(|payload| !payload.is_empty()).map(|payload| (fourcc, payload))).collect();
+pub fn with_metadata(encoded: Vec<u8>, icc: Option<&[u8]>, exif: Option<&[u8]>, xmp: Option<&[u8]>) -> Result<Vec<u8>, EncodeError> {
+	let chunks: Vec<(&std::ffi::CStr, &[u8])> = [(c"ICCP", icc), (c"EXIF", exif), (c"XMP ", xmp)].into_iter().filter_map(|(fourcc, payload)| payload.filter(|payload| !payload.is_empty()).map(|payload| (fourcc, payload))).collect();
 	if chunks.is_empty() {
 		return Ok(encoded);
 	}

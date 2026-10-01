@@ -4,7 +4,8 @@
 # not between versions:
 #
 #   cwebp     third_party/libwebp (the libwebp libwebp-sys vendors), with img2webp and
-#             gif2webp beside it, the references for animated WebP and GIF input
+#             gif2webp beside it, the references for animated WebP and GIF input, and
+#             webpmux, the reference for the metadata chunks of an animated WebP
 #   avifenc   third_party/libavif and third_party/aom, no libyuv (scripts/build-reference-avifenc.sh)
 #   cjxl      the libjxl the jpegxl-src crate carries
 #   heif-enc  third_party/libheif with Kvazaar (scripts/build-libheif.sh --with-heif-enc)
@@ -44,11 +45,11 @@ cmake -S "$root/third_party/libjpeg-turbo" -B "$work/jpeg" "${common[@]}" -DENAB
 cmake --build "$work/jpeg" --parallel "$jobs" >/dev/null
 cmake --install "$work/jpeg" >/dev/null
 
-echo "==> cwebp, img2webp, gif2webp" >&2
+echo "==> cwebp, img2webp, gif2webp, webpmux" >&2
 # WEBP_LINK_STATIC off: libwebp's CMake leaves TIFF out of a statically linked cwebp.
-cmake -S "$root/third_party/libwebp" -B "$work/libwebp" "${common[@]}" -DBUILD_SHARED_LIBS=OFF -DWEBP_LINK_STATIC=OFF -DWEBP_BUILD_CWEBP=ON -DWEBP_BUILD_DWEBP=OFF -DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_GIF2WEBP=ON -DWEBP_BUILD_IMG2WEBP=ON -DWEBP_BUILD_VWEBP=OFF -DWEBP_BUILD_WEBPINFO=OFF -DWEBP_BUILD_WEBPMUX=OFF -DWEBP_BUILD_EXTRAS=OFF "-DCMAKE_PREFIX_PATH=$jpeg" >/dev/null
-cmake --build "$work/libwebp" --parallel "$jobs" --target cwebp img2webp gif2webp >/dev/null
-for tool in cwebp img2webp gif2webp; do
+cmake -S "$root/third_party/libwebp" -B "$work/libwebp" "${common[@]}" -DBUILD_SHARED_LIBS=OFF -DWEBP_LINK_STATIC=OFF -DWEBP_BUILD_CWEBP=ON -DWEBP_BUILD_DWEBP=OFF -DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_GIF2WEBP=ON -DWEBP_BUILD_IMG2WEBP=ON -DWEBP_BUILD_VWEBP=OFF -DWEBP_BUILD_WEBPINFO=OFF -DWEBP_BUILD_WEBPMUX=ON -DWEBP_BUILD_EXTRAS=OFF "-DCMAKE_PREFIX_PATH=$jpeg" >/dev/null
+cmake --build "$work/libwebp" --parallel "$jobs" --target cwebp img2webp gif2webp webpmux >/dev/null
+for tool in cwebp img2webp gif2webp webpmux; do
 	[ -x "$work/libwebp/$tool" ] || { echo "$tool was not built (gif2webp needs giflib's development files)" >&2; exit 1; }
 	cp "$work/libwebp/$tool" "$prefix/bin/$tool"
 done
@@ -69,6 +70,7 @@ cp "$work/libjxl/tools/cjxl" "$prefix/bin/cjxl"
 echo "SKIDBLADNIR_REFERENCE_CWEBP=$prefix/bin/cwebp"
 echo "SKIDBLADNIR_REFERENCE_IMG2WEBP=$prefix/bin/img2webp"
 echo "SKIDBLADNIR_REFERENCE_GIF2WEBP=$prefix/bin/gif2webp"
+echo "SKIDBLADNIR_REFERENCE_WEBPMUX=$prefix/bin/webpmux"
 echo "SKIDBLADNIR_REFERENCE_AVIFENC=$prefix/bin/avifenc"
 echo "SKIDBLADNIR_REFERENCE_CJXL=$prefix/bin/cjxl"
 echo "SKIDBLADNIR_REFERENCE_HEIF_ENC=$prefix/heif/bin/heif-enc"

@@ -308,3 +308,73 @@ fn matches_reference_img2webp() {
 	assert!(mismatches.is_empty(), "ANIMATION PARITY FAILED for {} of {compared} cases:\n{}", mismatches.len(), mismatches.join("\n"));
 	eprintln!("ANIMATION PARITY OK: {compared} cases byte-identical to img2webp");
 }
+
+/// An animated WebP's own ICC profile, Exif and XMP, kept as asked. `img2webp`, the
+/// reference for re-encoding an animation, cannot carry metadata, so the reference is the
+/// command-line route a user would take: re-encode, then `webpmux -set` each kept chunk.
+/// The source is made with `webpmux -set` too, so neither side's chunks are of our making.
+#[test]
+fn keeps_an_animations_metadata_as_webpmux_sets_it() {
+	use skidbladnir_encode::{
+		settings::{EncodeJob, WebpMetadata}, source::encode_file
+	};
+
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let webpmux = env::var_os("SKIDBLADNIR_REFERENCE_WEBPMUX").map(PathBuf::from).filter(|path| path.is_file()).or_else(|| Command::new("webpmux").arg("-version").output().ok().filter(|out| out.status.success()).map(|_| PathBuf::from("webpmux")));
+	let linked = skidbladnir_encode::encoder::linked_encoder_version();
+	let version = webpmux.as_ref().and_then(|tool| {
+		let out = Command::new(tool).arg("-version").output().ok()?;
+		let text = String::from_utf8_lossy(&out.stdout).into_owned();
+		let mut parts = text.lines().next()?.trim().split('.').map(str::parse::<i32>);
+		match (parts.next(), parts.next(), parts.next()) {
+			(Some(Ok(a)), Some(Ok(b)), Some(Ok(c))) => Some((a, b, c)),
+			_ => None,
+		}
+	});
+	let Some(webpmux) = webpmux.filter(|_| version == Some(linked)) else {
+		let message = "ANIMATION METADATA PARITY NOT RUN: no webpmux of the linked libwebp version. Set SKIDBLADNIR_REFERENCE_WEBPMUX.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+
+	let dir = env::temp_dir().join(format!("skidbladnir-animation-metadata-{}", std::process::id()));
+	let _ = fs::remove_dir_all(&dir);
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+	let set = |kind: &str, payload: &Path, input: &Path, output: &Path| {
+		let run = Command::new(&webpmux).args(["-set", kind]).arg(payload).arg(input).arg("-o").arg(output).output().expect("run webpmux");
+		assert!(run.status.success(), "webpmux -set {kind}: {}", String::from_utf8_lossy(&run.stderr));
+	};
+	let payloads = [("icc", dir.join("profile.icc"), (0..900_u32).map(|i| u8::try_from(i * 13 % 256).expect("byte")).collect::<Vec<u8>>()), ("exif", dir.join("data.exif"), b"MM\0*\0\0\0\x08\0\0\0\0\0\0".to_vec()), ("xmp", dir.join("data.xmp"), b"<x:xmpmeta xmlns:x='adobe:ns:meta/'/>".to_vec())];
+	let source = dir.join("source.webp");
+	fs::copy(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/animated.webp"), &source).expect("copy the fixture");
+	for (kind, path, bytes) in &payloads {
+		fs::write(path, bytes).expect("write the payload");
+		set(kind, path, &source, &source);
+	}
+
+	let keep = |exif: bool, icc: bool, xmp: bool| WebpMetadata { exif, icc, xmp };
+	let mut mismatches = Vec::new();
+	let choices = [keep(false, false, false), keep(false, true, false), keep(true, false, false), keep(false, false, true), keep(true, true, true)];
+	for (settings_name, base) in [("lossless", WebpSettings { lossless: true, exact: true, ..Default::default() }), ("lossy", WebpSettings::default())] {
+		let plain = dir.join("plain.webp");
+		encode_file(&EncodeJob::from(WebpSettings { metadata: WebpMetadata::default(), ..base.clone() }), &source, &plain).expect("our conversion");
+		for metadata in choices {
+			let expected = dir.join("expected.webp");
+			fs::copy(&plain, &expected).expect("copy");
+			for ((kind, path, _), kept) in payloads.iter().zip([metadata.icc, metadata.exif, metadata.xmp]) {
+				if kept {
+					set(kind, path, &expected, &expected);
+				}
+			}
+			let ours = dir.join("ours.webp");
+			encode_file(&EncodeJob::from(WebpSettings { metadata, ..base.clone() }), &source, &ours).expect("our conversion");
+			if fs::read(&ours).expect("read ours") != fs::read(&expected).expect("read webpmux's") {
+				mismatches.push(format!("{settings_name}, {metadata:?}"));
+			}
+		}
+	}
+	let _ = fs::remove_dir_all(&dir);
+	assert!(mismatches.is_empty(), "{} of 10 diverged from webpmux -set:\n{}", mismatches.len(), mismatches.join("\n"));
+	eprintln!("ANIMATION METADATA PARITY OK: 10 conversions byte-identical to re-encoding then webpmux -set");
+}
