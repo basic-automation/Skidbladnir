@@ -306,6 +306,29 @@ check "previews an animation the webview can show" \
 	 const shown=await new Promise(res => { const i=new Image(); i.onload=()=>res(i.naturalWidth + 'x' + i.naturalHeight); i.onerror=()=>res('not displayable'); i.src=p.encoded; });
 	 return p.frames + ' frames, shown ' + shown" '3 frames, shown 24x16'
 
+# PNM, PAM and PFM input: recognised by content, and converted to WebP (as cwebp reads PNM)
+# and to JPEG XL (as cjxl reads all three).
+"$PY" - "$scratch" <<'PNM'
+import struct, sys
+d, w, h = sys.argv[1], 20, 12
+open(d + '/netpbm-p6.ppm', 'wb').write(b'P6\n%d %d\n255\n' % (w, h) + bytes((x * 12 + c * 40) % 256 for y in range(h) for x in range(w) for c in range(3)))
+open(d + '/netpbm-pam.pam', 'wb').write(b'P7\nWIDTH %d\nHEIGHT %d\nDEPTH 4\nMAXVAL 65535\nTUPLTYPE RGB_ALPHA\nENDHDR\n' % (w, h) + b''.join(struct.pack('>HHHH', x * 3000, y * 5000, 30000, 65535 - x * 1000) for y in range(h) for x in range(w)))
+open(d + '/netpbm-pfm.pfm', 'wb').write(b'PF\n%d %d\n-1.0\n' % (w, h) + b''.join(struct.pack('<fff', x / w, y / h, 0.5) for y in range(h) for x in range(w)))
+PNM
+mkdir -p "$scratch/from-netpbm"
+for kind in p6:ppm:PNM pam:pam:PNM pfm:pfm:PFM; do
+	IFS=: read -r name extension format <<< "$kind"
+	check "reads $format input (.$extension)" \
+		"const I=window.__TAURI_INTERNALS__;
+		 const input='$(app_path "$scratch/netpbm-$name.$extension")', out='$(app_path "$scratch/from-netpbm")';
+		 const found=await I.invoke('inspect_dropped_paths', { paths: [input] });
+		 const s=await I.invoke('default_settings');
+		 const w=await I.invoke('convert_image', { settings: s, input, outputDirectory: out });
+		 s.format='jxl';
+		 const j=await I.invoke('convert_image', { settings: s, input, outputDirectory: out });
+		 return found[0].format + ' ' + [w, j].map(r => r.outputPath.split(/[\\\\/]/).pop() + ' ' + r.width + 'x' + r.height).join(' ')" "$format netpbm-$name.webp 20x12 netpbm-$name.jxl 20x12"
+done
+
 echo
 if [ "$failures" -gt 0 ]; then
 	echo "$failures check(s) failed."
