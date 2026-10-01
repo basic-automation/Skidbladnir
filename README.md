@@ -27,14 +27,16 @@ For a still image, every option of `cwebp`, `avifenc` (with libaom), `cjxl` and
 as those tools built from the same library versions, checked in CI against the real tools,
 with the exceptions listed under [What "every option" means](#what-every-option-means).
 
+![The Skidbladnir window with AVIF selected: avifenc's options as controls labelled with their flags — colour and alpha quality, speed, lossless and target size, then bit depth, YUV format and range, premultiplied alpha and sharp YUV, then colour signalling, content light level, and the ICC profile, Exif and XMP taken from the input, left out or read from a file](resources/images/screenshot-avif.webp)
+
+*AVIF selected: `avifenc`'s options, each labelled with its flag.*
+
+<details>
+<summary>With WebP selected: the whole panel, and a preview</summary>
+
 ![The Skidbladnir window with WebP selected: the format rail, the queue, destination and presets sidebar, and every cwebp option as a control labelled with its flag — compression, targets, presets and lossless levels, transparency, lossy tuning, metadata, performance, crop and resize — with a preview of the result beside the original](resources/images/screenshot.webp)
 
 *WebP selected, with a file previewed: every `cwebp` option, each labelled with its flag.*
-
-<details>
-<summary>With AVIF selected</summary>
-
-![The Skidbladnir window with AVIF selected: avifenc's options as controls labelled with their flags — colour and alpha quality, speed, lossless and target size, then bit depth, YUV format and range, premultiplied alpha and sharp YUV, then colour signalling, content light level, and the ICC profile, Exif and XMP taken from the input, left out or read from a file](resources/images/screenshot-avif.webp)
 
 </details>
 
