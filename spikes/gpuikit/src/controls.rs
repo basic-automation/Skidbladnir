@@ -303,6 +303,14 @@ impl Skid {
 	#[allow(clippy::too_many_arguments)]
 	pub fn choice<T: Copy + PartialEq + 'static>(&mut self, id: &str, label: &str, help_text: Option<&str>, items: &[(T, &str, Option<&str>)], selected: T, vertical: bool, cards: bool, disabled: bool, set: impl Fn(&mut Self, T) + 'static, window: &Window, cx: &mut Context<Self>) -> AnyElement {
 		let set: Rc<dyn Fn(&mut Self, T)> = Rc::new(set);
+		// Reka's radio group is one tab stop, the chosen item, and the arrow keys move the
+		// choice within it.
+		let values: Rc<Vec<T>> = Rc::new(items.iter().map(|(value, _, _)| *value).collect());
+		let handles: Rc<Vec<FocusHandle>> = Rc::new((0..items.len()).map(|index| self.focus_handle_for(&format!("{id}-{index}"), cx)).collect());
+		let current = values.iter().position(|value| *value == selected);
+		for (index, handle) in handles.iter().enumerate() {
+			let _ = handle.clone().tab_stop(current.map_or(index == 0, |current| current == index));
+		}
 		let mut group = div().flex().when(vertical, |group| group.flex_col().gap(px(2.))).when(!vertical && !cards, |group| group.flex_wrap().gap(px(4.))).when(cards, |group| group.gap(px(16.)));
 		for (index, (value, item_label, description)) in items.iter().enumerate() {
 			let value = *value;
@@ -333,9 +341,21 @@ impl Skid {
 							this.changed(cx);
 						}
 					}))
-					.on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-						if matches!(event.keystroke.key.as_str(), "space") && !disabled {
-							key_set(this, value);
+					.on_key_down(cx.listener({
+						let values = Rc::clone(&values);
+						let handles = Rc::clone(&handles);
+						move |this, event: &KeyDownEvent, window, cx| {
+							if disabled {
+								return;
+							}
+							let target = match event.keystroke.key.as_str() {
+								"space" => index,
+								"right" | "down" => (index + 1) % values.len(),
+								"left" | "up" => (index + values.len() - 1) % values.len(),
+								_ => return,
+							};
+							key_set(this, values[target]);
+							window.focus(&handles[target], cx);
 							this.changed(cx);
 							cx.stop_propagation();
 						}
@@ -357,17 +377,28 @@ impl Skid {
 		let current = items.iter().find(|(value, _)| *value == selected).map(|(_, label)| label.clone()).unwrap_or_default();
 		let set: Rc<dyn Fn(&mut Self, T)> = Rc::new(set);
 		let toggle_id = popup_id.clone();
+		let key_id = popup_id.clone();
+		let selected_index = items.iter().position(|(value, _)| *value == selected).unwrap_or(0);
 		let menu = open.then(|| {
 			// USelect's menu: the trigger's width, 8px below it, or above it when there is not
 			// room below and there is more above, as Reka's collision handling decides.
 			let trigger = self.bounds_of(&popup_id);
 			let mut list = div().flex().flex_col().p(px(4.));
 			let mut height: f32 = 8.;
+			let highlight = self.menu_highlight;
+			self.menu_actions.clear();
 			for (index, (value, label)) in items.iter().enumerate() {
 				let value = *value;
 				let chosen = value == selected;
+				let lit = highlight == Some(index);
 				height += if chosen { 28. } else { 27. };
 				let set = Rc::clone(&set);
+				let action_set = Rc::clone(&set);
+				self.menu_actions.push(Rc::new(move |this: &mut Skid, _: &mut Window, cx: &mut Context<Skid>| {
+					action_set(this, value);
+					this.popup = None;
+					this.changed(cx);
+				}));
 				list = list.child(
 					div()
 						.id(ElementId::Name(format!("{popup_id}-{index}").into()))
@@ -377,10 +408,14 @@ impl Skid {
 						.gap(px(6.))
 						.p(px(6.))
 						.xs()
-						.text_color(c(FG))
-						.hover(|item| item.text_color(c(BRIGHT)))
-						.child(div().absolute().top(px(1.)).left(px(1.)).right(px(1.)).bottom(px(1.)).rounded(px(9.)).invisible().group_hover(format!("{popup_id}-{index}"), |pad| pad.visible().bg(ca(FIELD, 0.5))))
-						.group(format!("{popup_id}-{index}"))
+						.text_color(c(if lit { BRIGHT } else { FG }))
+						.when(lit, |item| item.child(div().absolute().top(px(1.)).left(px(1.)).right(px(1.)).bottom(px(1.)).rounded(px(9.)).bg(ca(FIELD, 0.5))))
+						.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+							if *hovered {
+								this.menu_highlight = Some(index);
+								cx.notify();
+							}
+						}))
 						.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
 							set(this, value);
 							this.popup = None;
@@ -419,9 +454,20 @@ impl Skid {
 			.when(disabled, |trigger| trigger.opacity(0.75))
 			.child(self.record(&popup_id))
 			.track_focus(&focus)
-			.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-				if !disabled {
+			.on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+				if !disabled && !std::mem::take(&mut this.swallow_click) {
 					this.popup = if matches!(&this.popup, Some(Popup::Select(open)) if *open == toggle_id) { None } else { Some(Popup::Select(toggle_id.clone())) };
+					// Opened from the keyboard, Reka highlights the chosen item.
+					this.menu_highlight = matches!(event, ClickEvent::Keyboard(_)).then_some(selected_index);
+					cx.notify();
+				}
+			}))
+			.on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+				let closed = !matches!(&this.popup, Some(Popup::Select(open)) if *open == key_id);
+				if closed && !disabled && matches!(event.keystroke.key.as_str(), "down" | "up") {
+					this.popup = Some(Popup::Select(key_id.clone()));
+					this.menu_highlight = Some(selected_index);
+					cx.stop_propagation();
 					cx.notify();
 				}
 			}))
@@ -706,16 +752,17 @@ pub trait Press: Sized {
 impl Press for gpui::Stateful<gpui::Div> {
 	fn press(self, skid: &mut Skid, id: &str, ring: Ring, radius: f32, handler: impl Fn(&mut Skid, &mut Window, &mut Context<Skid>) + 'static, window: &Window, cx: &mut Context<Skid>) -> Self {
 		let focus = skid.focus_handle_for(&format!("press-{id}"), cx);
-		let visible = Skid::ring_visible(&focus, window);
-		let handler = Rc::new(handler);
-		let on_key = Rc::clone(&handler);
+		// A dropdown menu takes focus into itself when it opens, so its trigger shows no
+		// outline meanwhile; a select's trigger keeps it.
+		let menu_has_focus = id == "queue" && skid.popup == Some(Popup::QueueMenu);
+		let visible = Skid::ring_visible(&focus, window) && !menu_has_focus;
+		// gpui clicks a focused element itself on Enter or Space (on key-up), so the click
+		// handler is the keyboard handler too.
 		self.relative()
 			.track_focus(&focus)
-			.on_click(cx.listener(move |this, _: &ClickEvent, window, cx| handler(this, window, cx)))
-			.on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-				if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-					on_key(this, window, cx);
-					cx.stop_propagation();
+			.on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+				if !std::mem::take(&mut this.swallow_click) {
+					handler(this, window, cx);
 				}
 			}))
 			.when(visible, |button| button.child(ring.element(radius)))

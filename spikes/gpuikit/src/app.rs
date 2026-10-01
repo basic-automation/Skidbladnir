@@ -89,6 +89,15 @@ pub struct Skid {
 	pub preview_stale: bool,
 	pub sidebar_collapsed: bool,
 	pub popup: Option<Popup>,
+	/// The highlighted item of the open menu: set by the pointer, or by the keyboard, which
+	/// starts it on the chosen item (a select) or the first (the queue menu) when the menu
+	/// is opened from the keyboard, as Reka does.
+	pub menu_highlight: Option<usize>,
+	/// What each item of the open menu does, rebuilt as the menu renders, for Enter and Space.
+	pub menu_actions: Vec<Rc<dyn Fn(&mut Skid, &mut Window, &mut Context<Skid>)>>,
+	/// Set when Enter or Space chose a menu item: the key-up that follows would otherwise
+	/// click the still-focused trigger and open the menu again.
+	pub swallow_click: bool,
 	/// The WebP panel's own state: the `-preset` and `-z` pickers.
 	pub webp_preset: skidbladnir_encode::settings::Preset,
 	pub lossless_level: u8,
@@ -168,6 +177,9 @@ impl Skid {
 			preview_stale: false,
 			sidebar_collapsed: false,
 			popup: None,
+			menu_highlight: None,
+			menu_actions: Vec::new(),
+			swallow_click: false,
 			webp_preset: skidbladnir_encode::settings::Preset::Photo,
 			lossless_level: 6,
 			webp_preset_error: String::new(),
@@ -190,7 +202,8 @@ impl Skid {
 	}
 
 	/// Debugging aids for comparing the two windows state by state: `SKID_FORMAT` picks the
-	/// output format (not saved), `SKID_OPEN` opens a pop-up (`settings`, `queue`,
+	/// output format (not saved), `SKID_INPUTS` queues files as a drop would, `SKID_PREVIEW`
+	/// runs the preview, `SKID_OPEN` opens a pop-up (`settings`, `queue`,
 	/// `preset-form`, or a select's id such as `select-webp-preset`), `SKID_SCROLL` scrolls
 	/// the settings column to that many pixels.
 	fn debug_state(mut self, cx: &mut Context<Self>) -> Self {
@@ -202,12 +215,19 @@ impl Skid {
 				_ => OutputFormat::Webp,
 			};
 		}
+		if let Ok(inputs) = std::env::var("SKID_INPUTS") {
+			let paths: Vec<PathBuf> = std::env::split_paths(&inputs).collect();
+			self.dropped(&ExternalPaths(paths.into()), cx);
+		}
+		if std::env::var_os("SKID_PREVIEW").is_some() {
+			self.run_preview(cx);
+		}
 		let open = std::env::var("SKID_OPEN").ok();
 		let scroll = std::env::var("SKID_SCROLL").ok().and_then(|value| value.parse::<f32>().ok());
 		if open.is_some() || scroll.is_some() {
 			// After the window has settled, so the triggers' bounds are known.
 			cx.spawn(async move |this, cx| {
-				cx.background_executor().timer(std::time::Duration::from_millis(1500)).await;
+				cx.background_executor().timer(std::time::Duration::from_millis(if std::env::var_os("SKID_PREVIEW").is_some() { 6000 } else { 1500 })).await;
 				this.update(cx, |this, cx| {
 					if let Some(offset) = scroll {
 						this.scroll.set_offset(point(px(0.), px(-offset)));
@@ -633,7 +653,8 @@ impl Skid {
 		if let Some(format) = format {
 			for (value, name, label) in [(OutputFormat::Webp, "iconoir--webp-format", "WebP"), (OutputFormat::Avif, "vscode-icons--file-type-avif", "AVIF"), (OutputFormat::Jxl, "skid--jxl-format", "JPEG XL"), (OutputFormat::Heic, "bi--filetype-heic", "HEIC")] {
 				let checked = value == format;
-				let focus = self.focus_handle_for(&format!("format-{label}"), cx);
+				// One tab stop for the group, the chosen format; the arrows move between them.
+				let focus = self.focus_handle_for(&format!("format-{label}"), cx).tab_stop(checked);
 				let ring = Self::ring_visible(&focus, window);
 				// The AVIF mark is multicoloured: gpui's `svg()` paints a single tint, so it is
 				// drawn as an image instead, as the webview draws it.
@@ -652,6 +673,21 @@ impl Skid {
 						.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
 							this.job().format = value;
 							this.changed(cx);
+						}))
+						.on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+							const ORDER: [(OutputFormat, &str); 4] = [(OutputFormat::Webp, "WebP"), (OutputFormat::Avif, "AVIF"), (OutputFormat::Jxl, "JPEG XL"), (OutputFormat::Heic, "HEIC")];
+							let index = ORDER.iter().position(|(format, _)| *format == value).unwrap_or(0);
+							let target = match event.keystroke.key.as_str() {
+								"space" => index,
+								"down" | "right" => (index + 1) % 4,
+								"up" | "left" => (index + 3) % 4,
+								_ => return,
+							};
+							this.job().format = ORDER[target].0;
+							let handle = this.focus_handle_for(&format!("format-{}", ORDER[target].1), cx);
+							window.focus(&handle, cx);
+							this.changed(cx);
+							cx.stop_propagation();
 						}))
 						.child(glyph)
 						.when(ring, |item| item.child(crate::controls::ring(3., ca(ACCENT, 0.25), 0., 0.))),
@@ -809,8 +845,9 @@ impl Skid {
 				div()
 					.relative()
 					.child(
-						sidebar_button("queue", "el--inbox-box", "Queue", &self.queue_folder(), (count > 0).then(|| count.to_string())).child(self.record("queue")).press(self, "queue", Ring::Plain(FG), 12., |this, _, cx|  {
+						sidebar_button("queue", "el--inbox-box", "Queue", &self.queue_folder(), (count > 0).then(|| count.to_string())).child(self.record("queue")).press(self, "queue", Ring::Plain(FG), 12., |this, window, cx|  {
 							this.popup = if this.popup == Some(Popup::QueueMenu) { None } else { Some(Popup::QueueMenu) };
+							this.menu_highlight = window.last_input_was_keyboard().then_some(0);
 							cx.notify();
 						}, window, cx),
 					)
@@ -858,12 +895,29 @@ impl Skid {
 		let trigger = self.bounds_of("queue").unwrap_or_default();
 		// Menu items: `p-1.5 text-sm gap-1.5`, a 20px icon, the text, and a faint fill under the
 		// highlighted item, whose text and icon turn from muted to highlighted.
-		let item = |id: &str, icon_name: Option<&str>| {
-			let group = SharedString::from(format!("{id}-group"));
+		let highlight = self.menu_highlight;
+		self.menu_actions = vec![
+			Rc::new(|this: &mut Skid, _: &mut Window, cx: &mut Context<Skid>| {
+				this.popup = None;
+				this.choose_inputs(cx);
+			}),
+			Rc::new(|this: &mut Skid, _: &mut Window, cx: &mut Context<Skid>| {
+				this.popup = None;
+				this.choose_folder(cx);
+			}),
+			Rc::new(move |this: &mut Skid, _: &mut Window, cx: &mut Context<Skid>| this.set_include_subfolders(!include, cx)),
+		];
+		let item = |id: &str, index: usize, icon_name: Option<&str>| {
+			let lit = highlight == Some(index);
 			div()
 				.id(SharedString::from(id.to_owned()))
-				.group(group.clone())
 				.relative()
+				.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+					if *hovered {
+						this.menu_highlight = Some(index);
+						cx.notify();
+					}
+				}))
 				.flex()
 				.items_start()
 				.gap(px(6.))
@@ -871,10 +925,9 @@ impl Skid {
 				// Nuxt UI's item ends in an empty trailing slot, which still takes a gap.
 				.pr(px(12.))
 				.sm()
-				.text_color(c(FG))
-				.hover(|item| item.text_color(c(BRIGHT)))
-				.child(div().absolute().top(px(1.)).left(px(1.)).right(px(1.)).bottom(px(1.)).rounded(px(9.)).invisible().group_hover(group.clone(), |pad| pad.visible().bg(ca(FIELD, 0.5))))
-				.when_some(icon_name.map(str::to_owned), move |item, name| item.child(div().relative().size(px(20.)).child(icon(&name, 20., c(DIM))).child(div().absolute().top_0().left_0().invisible().group_hover(group, |over| over.visible()).child(icon(&name, 20., c(FG))))))
+				.text_color(c(if lit { BRIGHT } else { FG }))
+				.when(lit, |item| item.child(div().absolute().top(px(1.)).left(px(1.)).right(px(1.)).bottom(px(1.)).rounded(px(9.)).bg(ca(FIELD, 0.5))))
+				.when_some(icon_name.map(str::to_owned), move |item, name| item.child(div().relative().child(icon(&name, 20., c(if lit { FG } else { DIM })))))
 		};
 		let menu = div()
 			.flex()
@@ -884,11 +937,11 @@ impl Skid {
 					.flex()
 					.flex_col()
 					.p(px(4.))
-					.child(item("menu-images", Some("lucide--images")).child(div().relative().child("Choose images…")).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+					.child(item("menu-images", 0, Some("lucide--images")).child(div().relative().child("Choose images…")).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
 						this.popup = None;
 						this.choose_inputs(cx);
 					})))
-					.child(item("menu-folder", Some("lucide--folder-search")).child(div().relative().child("Choose a folder…")).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+					.child(item("menu-folder", 1, Some("lucide--folder-search")).child(div().relative().child("Choose a folder…")).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
 						this.popup = None;
 						this.choose_folder(cx);
 					}))),
@@ -896,7 +949,7 @@ impl Skid {
 			.child(div().h(px(1.)).bg(c(RULE)))
 			.child(
 				div().flex().flex_col().p(px(4.)).child(
-					item("menu-subfolders", None)
+					item("menu-subfolders", 2, None)
 						// Kept open, so the box can be ticked and then a folder chosen.
 						.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.set_include_subfolders(!include, cx)))
 						.child(div().relative().flex_1().child("Include subfolders"))
@@ -1296,11 +1349,32 @@ impl Render for Skid {
 					cx.notify();
 				}),
 			)
-			.on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-				if event.keystroke.key == "escape" && this.popup.is_some() {
-					this.popup = None;
-					cx.notify();
+			.on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+				let menu_open = matches!(this.popup, Some(Popup::QueueMenu | Popup::Select(_)));
+				match event.keystroke.key.as_str() {
+					"escape" if this.popup.is_some() => {
+						this.popup = None;
+						this.menu_highlight = None;
+					}
+					"down" | "up" | "home" | "end" if menu_open => {
+						let last = this.menu_actions.len().saturating_sub(1);
+						this.menu_highlight = Some(match (event.keystroke.key.as_str(), this.menu_highlight) {
+							("down", Some(index)) => (index + 1).min(last),
+							("up", Some(index)) => index.saturating_sub(1),
+							("home" | "down", _) => 0,
+							_ => last,
+						});
+					}
+					"enter" | "space" if menu_open => {
+						if let Some(action) = this.menu_highlight.and_then(|index| this.menu_actions.get(index)).cloned() {
+							this.swallow_click = true;
+							action(this, window, cx);
+						}
+					}
+					_ => return,
 				}
+				cx.stop_propagation();
+				cx.notify();
 			}))
 			.on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.dropped(paths, cx)))
 			.child(
