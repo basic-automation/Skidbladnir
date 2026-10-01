@@ -303,14 +303,17 @@ same source as the library the app links (`scripts/build-reference-tools.sh`). P
   printing statistics — have no control, and neither do `cwebp`'s dump and map outputs.
 
 Where a tool refuses an input — `cwebp` a CMYK JPEG, `heif-enc` an RGB-coded one —
-Skidbladnir converts it anyway. One result is deliberately not reproduced: `cwebp` reads a
-TIFF with straight (unassociated) alpha premultiplied, through libtiff, and darkens its
-semi-transparent pixels; Skidbladnir keeps the colours the file holds. One more case is
-open: a TIFF with premultiplied (associated) alpha, converted to HEIC. Skidbladnir
-un-multiplies it, as `cwebp` does. `heif-enc`'s TIFF reader, judging by its source, takes
-that alpha as straight, which would make its HEIC darker where the image is
-semi-transparent. That has not yet been run against `heif-enc`, and which result HEIC
-should give is still to be decided ([ROADMAP.md](ROADMAP.md), Phase 8).
+Skidbladnir converts it anyway. Two results differ from the reference tool, both for a
+TIFF with transparency:
+
+- **Straight (unassociated) alpha, to WebP**, deliberately: `cwebp` reads such a TIFF
+  premultiplied, through libtiff, and darkens its semi-transparent pixels; Skidbladnir
+  keeps the colours the file holds.
+- **Premultiplied (associated) alpha, to HEIC**, not yet decided: Skidbladnir
+  un-multiplies it, as `cwebp` does, and keeps the image's true colours. `heif-enc` takes
+  that alpha as straight, so its HEIC is darker where the image is semi-transparent.
+  Whether HEIC should keep the true colours or follow `heif-enc` is still open
+  ([ROADMAP.md](ROADMAP.md), Phase 8).
 
 Besides the byte comparisons, the output is decoded with each format's own tools. AVIF is
 decoded with libavif's `avifdec`, and the tests measure how close the pixels come back and
