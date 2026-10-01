@@ -23,10 +23,9 @@ options in a window, each labelled with the flag it sets, instead of a single qu
 slider.
 
 For a still image, every option of `cwebp`, `avifenc` (with libaom), `cjxl` and
-`heif-enc` (with Kvazaar) is a control in the window, and Skidbladnir writes the same
-bytes those tools write when they are built from the same library versions, as CI checks
-against the real tools, apart from the exceptions listed under
-[What "every option" means](#what-every-option-means).
+`heif-enc` (with Kvazaar) is a control in the window, and Skidbladnir writes the same bytes
+as those tools built from the same library versions, checked in CI against the real tools,
+with the exceptions listed under [What "every option" means](#what-every-option-means).
 
 ![The Skidbladnir window with WebP selected: the format rail, the queue, destination and presets sidebar, and every cwebp option as a control labelled with its flag — compression, targets, presets and lossless levels, transparency, lossy tuning, metadata, performance, crop and resize — with a preview of the result beside the original](resources/images/screenshot.webp)
 
@@ -142,9 +141,9 @@ lossless, 4:4:4 and 4:2:2 chroma, 10-bit, and x265's preset, tune and a fixed se
 other tuning controls. Both are free. The licence matters only if you redistribute the
 app; [Editions](#editions) has the details.
 
-Ignore the files the table does not name. The `.app.tar.gz` files are for the in-app
-updater on a Mac. `Skidbladnir-<version>-source.tar.gz` is the complete source with every
-submodule; GitHub's own "Source code" archives leave the submodules out.
+The release page lists other files too; they are not installers. The `.app.tar.gz` files
+are for the in-app updater on a Mac. `Skidbladnir-<version>-source.tar.gz` is the complete
+source with every submodule; GitHub's own "Source code" archives leave the submodules out.
 
 There are no builds for 32-bit systems, Linux on ARM or Windows on ARM. Windows on ARM
 can run x64 programs through emulation, but nobody has tried Skidbladnir there.
@@ -404,7 +403,8 @@ Known gaps:
 - **macOS is experimental.** The `.dmg`s (Apple silicon and Intel) are built by CI, and
   the test suite runs on macOS, but nobody has yet opened the app on a real Mac. The
   standard edition's Windows installer is installed and exercised by CI on every change,
-  and the Linux `.deb` and AppImage have been run.
+  the Linux app (both editions) is launched and driven by CI on every change, and the
+  published `.deb` and AppImage have been run by hand.
 - The app is not code-signed on any platform;
   [Opening it the first time](#opening-it-the-first-time) shows how to get past each
   system's warning.
