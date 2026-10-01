@@ -154,14 +154,16 @@ can run x64 programs through emulation, but nobody has tried Skidbladnir there.
 The installers are not code-signed yet, so Windows and macOS warn before they open an app
 from a developer they cannot identify. This is what to expect, and how to get past it.
 
-**Windows.** Your browser may warn that the file is not commonly downloaded; choose
-**Keep**. When you run the installer, SmartScreen shows *Windows protected your PC*: click
-**More info**, then **Run anyway**. Skidbladnir installs for your account only, in
-`%LOCALAPPDATA%\Skidbladnir`, without administrator rights. If Microsoft's WebView2
-runtime is missing (Windows 10 and 11 normally have it), the installer downloads it. If
-**Smart App Control** is turned on (Windows Security > App & browser control), Windows
-blocks unsigned apps and offers no exception, so Skidbladnir cannot be installed on that
-PC until it is signed.
+**Windows.** Your browser may warn that the file is not commonly downloaded. Keep it
+anyway. In Edge, open the **...** (More actions) menu beside the download, choose
+**Keep**, then **Show more** > **Keep anyway**. In Chrome, choose **Keep** or **Download
+suspicious file**. When you run the installer, SmartScreen shows *Windows protected your
+PC*: click **More info**, then **Run anyway**. Skidbladnir installs for your account
+only, in `%LOCALAPPDATA%\Skidbladnir`, without administrator rights. If Microsoft's
+WebView2 runtime is missing (Windows 10 and 11 normally have it), the installer downloads
+it. If **Smart App Control** is turned on (Windows Security > App & browser control),
+Windows blocks unsigned apps and offers no exception, so Skidbladnir cannot be installed
+on that PC until it is signed.
 
 **macOS (experimental).** The macOS builds are new: CI builds them and runs the test suite
 on macOS, but nobody has opened the app on a real Mac yet, so please
