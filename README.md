@@ -28,15 +28,17 @@ compare the bytes. What that covers and where it stops is spelled out under
 
 - PNG, JPEG (including Photoshop's CMYK), TIFF and WebP (including animated WebP)
 - **AVIF**, **JPEG XL**, **HEIC**, and **GIF**, still or animated
+- **PNM**: binary PGM, PPM and PAM (8 or 16 bits, with or without alpha), and **PFM**
+  floating-point images
 
 **Output formats, each with its reference encoder's whole command line**
 
 | Format | Reference tool | Encoder in the app | Byte-for-byte parity, tested |
 |---|---|---|---|
-| WebP | `cwebp` 1.6.0 | libwebp 1.6.0 | 2,254 cases: every option, through PNG (every colour type, gamma), JPEG, TIFF and WebP files, and `-metadata` |
-| Animated WebP | `img2webp` and `gif2webp` 1.6.0 | libwebp 1.6.0 | 67 cases: animated WebP and GIF input, every setting those tools can express |
+| WebP | `cwebp` 1.6.0 | libwebp 1.6.0 | 2,397 cases: every option, through PNG (every colour type, gamma), JPEG, TIFF, WebP and PNM files, and `-metadata` |
+| Animated WebP | `img2webp` and `gif2webp` 1.6.0 | libwebp 1.6.0 | 87 cases: animated WebP and GIF input, every setting those tools can express, and a GIF's ICC profile and XMP (`gif2webp -metadata`) |
 | AVIF | `avifenc` 1.4.2 | libavif 1.4.2 + libaom 3.15.1 | 191 cases: every option, PNG inputs, JPEG input |
-| JPEG XL | `cjxl` 0.12.0 | libjxl 0.12.0 | 202 cases: every option, PNG inputs, JPEG recompression and decoding |
+| JPEG XL | `cjxl` 0.12.0 | libjxl 0.12.0 | 234 cases: every option, PNG, PNM and PFM inputs, JPEG recompression and decoding |
 | HEIC | `heif-enc -e kvazaar` 1.23.5 | libheif 1.23.5 + Kvazaar 2.3.2 | 147 cases: every option, PNG inputs, JPEG input |
 
 The [GPL edition](#editions) writes HEIC with x265 instead, adding `heif-enc`'s `-L`
@@ -85,9 +87,11 @@ same source as the library the app links (`scripts/build-reference-tools.sh`). P
   animated AVIF, HEIC or JPEG XL, image sequences, `avifenc --layered` and grids assembled
   from several files, `heif-enc` with several inputs or `-T` tiled input, and `cjxl` from
   GIF or APNG. They are queued in [ROADMAP.md](ROADMAP.md), Phase 8.
-- **The input formats Skidbladnir reads**: PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC and
-  GIF. The tools also read PNM/PAM, and some of them PFM, PGX, Y4M, EXR or raw pixels,
-  which Skidbladnir does not yet. JPEG is read through libjpeg-turbo 3.2.0, the way each
+- **The input formats Skidbladnir reads**: PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC,
+  GIF, PNM/PAM and PFM. Some of the tools also read PGX, Y4M, EXR or raw pixels, which
+  Skidbladnir does not yet. PNM is read the way `cwebp` reads it for WebP and the way
+  `cjxl` reads it for JPEG XL (at its own bit depth); PFM is read as `cjxl` reads it, and
+  only `cjxl` reads PFM, so PFM to another format has no reference to match. JPEG is read through libjpeg-turbo 3.2.0, the way each
   tool reads it — including `avifenc`'s and `heif-enc`'s copying of a JPEG's own YCbCr
   planes — and PNG by libpng 1.6's rules, including `cwebp`'s gamma correction. A tool
   linked against a different libjpeg or libpng can decode the same file differently.
@@ -225,7 +229,7 @@ What it can do:
 - Encode each format with its reference encoder's library linked into the binary, with
   every option of the reference command line for a still image, and prove the output
   **byte-for-byte identical** to `cwebp`, `img2webp`, `gif2webp`, `avifenc`, `cjxl` and
-  `heif-enc` across 2,861 cases (see above).
+  `heif-enc` across 3,056 cases (see above).
 - Convert images from a window with every one of those options, labelled with the flag
   it sets, the expert ones in folding sections.
 - Accept files dropped onto the window, sorting out the ones it cannot read by looking
@@ -250,7 +254,8 @@ What it can do:
   animation before converting. Its output is byte-for-byte identical to libwebp's own
   `img2webp` for every setting `img2webp` can express.
 - Convert **GIFs**, still or animated, to WebP exactly as libwebp's own `gif2webp` does —
-  byte for byte, across disposal methods, transparency, timing and loop counts.
+  byte for byte, across disposal methods, transparency, timing and loop counts, and
+  keeping a GIF's ICC profile and XMP when you ask, as `gif2webp -metadata` does.
 - Remember your settings and destination between launches, and save named presets of
   your own.
 - Be driven entirely from the keyboard, with every control labelled for a screen reader.
@@ -261,7 +266,8 @@ What it can do:
   HEIC input with libde265. libheif ships as a separate shared library beside the app,
   with its codec plugins switched off, so the standard edition can never pick up x265
   from your system. Checked by the runner's own libheif (`heif-dec`), a separate build.
-- Read PNG, JPEG, TIFF, WebP, **AVIF**, **JPEG XL**, **HEIC** and **GIF** input,
+- Read PNG, JPEG, TIFF, WebP, **AVIF**, **JPEG XL**, **HEIC**, **GIF**, **PNM/PAM** and
+  **PFM** input,
   identifying the format by its contents rather than by its file extension. JPEGs are
   decoded by libjpeg-turbo, as the reference tools decode them. That includes **CMYK
   JPEGs** as Photoshop writes them, which `cwebp` itself refuses to read. AVIF input is
@@ -297,7 +303,8 @@ Known gaps:
 - An AVIF, JPEG XL or HEIC encode cannot be cancelled mid-file: none of those encoders reports progress, so
   Cancel takes effect when the current file finishes (which is then discarded, not
   written). Animated AVIF is not read.
-- Metadata is kept in still images only, not animations.
+- Metadata is kept in still images, and a GIF's ICC profile and XMP in its animated WebP;
+  an animated WebP re-encoded keeps none (`img2webp`, its reference, copies none).
 - An animation (animated WebP or GIF) converts to WebP only. AVIF, JPEG XL and HEIC
   output refuse it by name rather than keeping just the first frame, because those
   encoders write still images here. A target size or PSNR applies to each frame of an
