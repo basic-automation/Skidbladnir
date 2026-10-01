@@ -234,3 +234,17 @@ fn matches_heif_enc_across_jpeg_inputs() {
 	encode_file(&job, &rgb, &run.dir.join("rgb-ours.heic")).expect("an RGB-coded JPEG still encodes");
 	finish(&run, "JPEG inputs");
 }
+
+/// TIFF input, which `heif-enc` reads with libtiff (`heifio/decoder_tiff.cc`). 8-bit only:
+/// Kvazaar refuses the deeper input `heif-enc` makes of a 16-bit TIFF.
+#[test]
+fn matches_heif_enc_across_tiff_inputs() {
+	let Some(mut run) = prepare() else { return };
+	let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+	for name in ["tiff-rgb8.tif", "tiff-rgb8-lzw.tif", "tiff-rgba8.tif"] {
+		for (setting, settings) in [("default", d()), ("quality 30", HeicSettings { quality: 30, ..d() })] {
+			run.compare(&format!("{name}, {setting}"), &fixtures.join(name), &settings);
+		}
+	}
+	finish(&run, "TIFF inputs");
+}

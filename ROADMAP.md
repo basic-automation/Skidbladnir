@@ -1203,6 +1203,19 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       still GIFs (opaque, transparent index, local palette + interlaced, a loop extension) x
       five settings including no target: 20 of 20 byte-identical to `cjxl`. Mutation: the
       generic path fails 16, the distance-1 default fails 8.
+- [x] **TIFF into HEIC, held to `heif-enc`** (2026-10-01; test only, nothing needed
+      changing): `heif-enc` reads TIFF with libtiff (`heifio/decoder_tiff.cc`).
+      `matches_heif_enc_across_tiff_inputs` — 8-bit RGB (plain and LZW) and straight-alpha
+      RGBA x two settings: 6 of 6 byte-identical. A 16-bit TIFF is refused by Kvazaar in
+      `heif-enc` too.
+- [ ] (owner decision) **Premultiplied-alpha TIFF into HEIC.** Since 2026-10-01 an
+      associated-alpha TIFF is un-multiplied as `cwebp` does, for every format. Reading
+      `heifio/decoder_tiff.cc`, `heif-enc` instead takes associated alpha as plain alpha
+      (it un-multiplies nothing unless `--premultiplied-alpha` marks the image), so its
+      HEIC of such a TIFF is darker where semi-transparent — the mirror image of the
+      straight-alpha exception kept for `cwebp`. Not yet run against `heif-enc`; decide
+      whether HEIC keeps true colours (as now) or follows `heif-enc`, then pin it with a
+      test either way.
 - [ ] More input formats the tools read: animated GIF and APNG into `cjxl` (with the
       multi-image work below), Y4M (`avifenc`, `heif-enc`), PGX and EXR (`cjxl`), raw pixels
       (`heif-enc --raw`, `cwebp -s`), and `heif-enc`'s WebP and HEIF input.
