@@ -358,7 +358,14 @@ jobs:
             echo "no release for $TAG yet; creating a draft release to hold the artifacts"
             gh release create "$TAG" --draft --title "$TAG" --notes "Artifacts attached by CI. Notes pending."
           fi
-          gh release upload "$TAG" dist-artifacts/* --clobber
+          # Everything but the .sig files. The manifest job copies each signature into
+          # latest.json from this job's workflow artifact, and the app reads the signature
+          # from there, so on the release page a .sig is one more file to puzzle over.
+          files=()
+          for file in dist-artifacts/*; do
+            case "$file" in *.sig) ;; *) files+=("$file") ;; esac
+          done
+          gh release upload "$TAG" "${files[@]}" --clobber
 
   # The .deb on the oldest systems it is said to support, beyond the bundle job's version
   # check: apt installs it, resolving its dependencies from that system's own archive, and
@@ -523,16 +530,16 @@ jobs:
           name: updater-manifest
           path: latest*.json
 
-      - name: Publish to the release and the updater branch
+      - name: Publish to the updater branch
+        # Only to the branch, which is what installed copies read. Attached to the release
+        # as well, the manifests were two more files on the release page that nobody
+        # downloads; each release's manifests stay in the branch's history.
         if: ${{ steps.write.outputs.publish == 'true' && !inputs.dry_run }}
         env:
-          GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.write.outputs.tag }}
           VERSION: ${{ steps.write.outputs.version }}
           MANIFESTS: ${{ steps.write.outputs.manifests }}
         run: |
-          gh release upload "$TAG" $MANIFESTS --clobber
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           branch="$RUNNER_TEMP/updater"

@@ -677,8 +677,9 @@ prettier subset.
 - [x] Updater plumbing. `release.yml` builds with `createUpdaterArtifacts` only when the
       signing secret is present (so local and CI builds need no key), and a final
       `manifest` job writes `latest.json` from the signed installers
-      (`scripts/updater-manifest.py`), attaches it to the release, and commits it to the
-      orphan **`updater` branch**, which is what installed copies read. Not
+      (`scripts/updater-manifest.py`) and commits it to the orphan **`updater` branch**,
+      which is what installed copies read. Since 1.0.0 neither the manifests nor the
+      `.sig` files are attached to the release; they were clutter there. Not
       `releases/latest`: that skips prereleases, and every release before 1.0.0 was one.
       From 1.0.0 `release.yml` holds a tag's artifacts in a draft full release, not a
       draft prerelease. A re-run of an older tag never rolls the branch back. Dry runs
