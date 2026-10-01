@@ -221,7 +221,12 @@ jobs:
         # and the app's output so a person can see what macOS drew. The Intel app runs
         # under Rosetta on this Apple silicon runner. The bundle is not quarantined here,
         # so Gatekeeper is not involved; the next step looks at that.
+        #
+        # It takes under a minute. If something hangs (an app that ignores the kill, say),
+        # the timeout fails the leg within minutes, not at the job's six-hour limit while
+        # the manifest job waits for it.
         if: runner.os == 'macOS'
+        timeout-minutes: 3
         shell: bash
         run: |
           out="$RUNNER_TEMP/macos-launch"
@@ -261,8 +266,12 @@ jobs:
         # judges only marked apps. This marks a copy the same way, prints Gatekeeper's
         # verdicts, then opens the copy as a double-click would and screenshots whatever
         # dialog appears, so the README's first-launch steps can be matched to what macOS
-        # actually says. It never fails the job.
+        # actually says. It never fails the job, and it runs before the installers are
+        # attached, so it is bounded: syspolicy_check asks Apple's servers, and spctl,
+        # open or log show could stall. A timeout counts as a failure, which
+        # continue-on-error lets through.
         if: ${{ !cancelled() && runner.os == 'macOS' && env.APP != '' }}
+        timeout-minutes: 5
         continue-on-error: true
         shell: bash
         run: |
