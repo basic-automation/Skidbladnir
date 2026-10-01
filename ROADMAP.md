@@ -1127,8 +1127,20 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       dynamic C runtime in one process (`native/heic_jpeg.cc` is built `static_crt(true)` to
       match libjxl's; see the next item). Revised next step: make the CRT consistent, then
       reproduce on the Windows runner (a dispatch-only job running `tests/animation.rs` in a
-      loop); only if it still overflows, measure there.
-- [ ] **One C runtime on Windows.** The MSVC test binaries link both `libcmt` (static CRT:
+      loop); only if it still overflows, measure there. **The CRT is now consistent**
+      (0.15.0, below); the overflow did not recur in that PR's Windows runs, which proves
+      little for an intermittent failure — keep watching before ticking.
+- [x] **One C runtime on Windows** (2026-10-01): everything on the static runtime —
+      `.cargo/config.toml` `+crt-static` for `x86_64-pc-windows-msvc`, and
+      `CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded` for libjpeg-turbo, libaom and libavif in
+      `build.rs`; libheif stays a DLL on its own runtime. **Trap found:** CI's
+      workflow-wide `RUSTFLAGS` *replaces* the config's target rustflags, so the first CI
+      run built the dynamic runtime and went green meaninglessly (`LNK4098` still there);
+      CI's Windows jobs now set the flag in `RUSTFLAGS` themselves, while `release.yml` (no
+      `RUSTFLAGS`) takes it from the config. Verified by CI run 36895266768: `LNK4098` 0
+      times (was 3), both editions' Windows suites green (263 passed on the standard), and
+      the installed NSIS app passes the Windows smoke test. Not run on a Windows machine
+      outside CI. *Original item:* The MSVC test binaries link both `libcmt` (static CRT:
       libjxl from `jpegxl-src`, and `native/heic_jpeg.cc` to match it) and the dynamic CRT
       the Rust toolchain and the other `cc`-built C use, which the linker warns about
       (`LNK4098`, seen in run 36521408006). Two CRTs mean two heaps and two sets of CRT
