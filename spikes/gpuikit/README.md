@@ -42,6 +42,20 @@ gpuikit says to expect breaking changes in every release.
 - Resident memory with a 1600×1000 image loaded: about 240 MB, in a single process.
 - Encode plus decode of that image at the default settings: 976 ms release, 6078 ms debug.
 
+**Against the Tauri 1.0.0 build** (same machine, same 1600×1000 PNG; the host was under heavy load, so the times are rough, but the ratios held across repeated runs)
+
+| | Tauri 1.0.0 | Spike |
+| --- | --- | --- |
+| Preview cost per settings change (`examples/preview_cost.rs`) | 3.4–3.7 s | 1.0 s |
+| Data sent over IPC per preview | 2.5 MB of base64 JSON | none |
+| Memory (PSS, every process), idle | 357 MB: app 115, WebKit web 196, WebKit network 45 | 117 MB |
+| Memory with the image loaded | not measured (opening needs a mouse) | 139 MB |
+| Launch to window mapped | ~445 ms (AppImage, including the FUSE mount) | ~297 ms |
+
+Most of the preview gap is not the webview. Two-thirds of Tauri's cost is the lossless re-encode of the *original* (about 2.3 s), done again on every change so a webview can display it. Tauri also re-reads and re-decodes the source file each time. The encode itself costs the same in both. Caching the original's `data:` URL in the Tauri app would close most of the gap without a migration.
+
+The window timing flatters Tauri: a mapped Tauri window still has to load the Nuxt bundle before anything shows.
+
 **Problems found**
 
 - **Keyboard access is missing in the controls the app depends on.** In gpuikit 0.9.0, `Switch`, `Slider`, `Select` and `ToggleGroup` have no focus handle. Tab never reaches them and Space and the arrow keys do nothing (checked on screen and in the source). `Button`, `Checkbox`, `TextField`, `Combobox` and `Listbox` are focusable. The current app's settings panel is fully keyboard-operable, so this blocks a migration until it is fixed upstream or worked around.
