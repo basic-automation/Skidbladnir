@@ -5,7 +5,8 @@
 # Needs the third_party/ submodules checked out. The result is cached on the pinned
 # submodule commits, the edition, the build script and the runner image, so a routine run
 # does not rebuild three C/C++ libraries. See scripts/build-libheif.sh for what is built
-# and why.
+# and why. The image's name is an output too: release.yml keys its Rust cache on it, for
+# the same reason.
 name: libheif
 description: Build or restore libheif with the edition's HEVC encoder and libde265, and put it on the library path.
 inputs:
@@ -17,6 +18,10 @@ inputs:
     description: Set for a cross build (x86_64 on an Apple Silicon runner).
     required: false
     default: ""
+outputs:
+  image:
+    description: The runner image (ImageOS, plus the glibc version on Linux), e.g. ubuntu22-glibc2.35.
+    value: ${{ steps.key.outputs.image }}
 runs:
   using: composite
   steps:
@@ -41,6 +46,7 @@ runs:
         if [ "$RUNNER_OS" = Linux ]; then
           image="$image-glibc$(getconf GNU_LIBC_VERSION | cut -d' ' -f2)"
         fi
+        echo "image=$image" >> "$GITHUB_OUTPUT"
         echo "key=libheif-${{ inputs.edition }}-${{ runner.os }}-$image-${{ inputs.target-arch }}-$(git submodule status third_party | awk '{print $1}' | tr -d '+-' | tr '\n' '-')${{ hashFiles('scripts/build-libheif.sh') }}" >> "$GITHUB_OUTPUT"
 
     - name: Restore libheif

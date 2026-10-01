@@ -92,6 +92,7 @@ jobs:
         # Every installer ships this libheif beside the app (tauri.<platform>.conf.json,
         # and tauri.gpl*.conf.json for the GPL edition's). The Intel Mac build is a cross
         # build on an Apple Silicon runner.
+        id: libheif
         uses: ./.github/actions/libheif
         with:
           edition: ${{ matrix.edition }}
@@ -102,8 +103,15 @@ jobs:
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
+        # rust-cache keys on the OS name and the CPU only ("Linux-x64" on every Ubuntu
+        # image). Its target/ keeps what crates.io dependencies' build scripts compiled,
+        # such as libwebp-sys's libwebp, and Cargo reuses that C without looking at the
+        # compiler or the glibc (only the workspace's own crates are cleaned and rebuilt).
+        # A cache from an ubuntu-24.04 run would bring GLIBC_2.38 needs into the 22.04
+        # build. So the key names the runner image, as the libheif cache does, and the
+        # platform, which keeps the two macOS legs (one runner, two targets) apart.
         with:
-          key: ${{ matrix.edition }}
+          key: ${{ matrix.edition }}-${{ matrix.platform }}-${{ steps.libheif.outputs.image }}
 
       - name: Build the frontend
         run: |
