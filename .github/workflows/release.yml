@@ -48,7 +48,11 @@ jobs:
         platform: [linux, windows, macos-arm64, macos-x64]
         edition: [standard, gpl]
         include:
-          - { platform: linux, os: ubuntu-latest, target: "" }
+          # The oldest system the Linux installers support, because they need whatever
+          # glibc and libstdc++ they were built against: Ubuntu 22.04 (glibc 2.35), which
+          # makes Debian 12 (2.36) work too. Built on ubuntu-latest, 0.14.0 needed glibc
+          # 2.39 and did not start on either. The floor is checked after bundling.
+          - { platform: linux, os: ubuntu-22.04, target: "" }
           - { platform: windows, os: windows-latest, target: "" }
           # macos-latest is Apple Silicon, so its native build is aarch64 only. Intel Macs
           # get their own .dmg, cross-built on the same runner.
@@ -65,8 +69,9 @@ jobs:
       - name: Install the Linux system dependencies Tauri needs
         # patchelf is what bundles the AppImage. It is unavailable on the dev host, which
         # is owner-gated there — but it is a plain apt package here, so the AppImage is
-        # produced in CI even though it cannot be produced locally.
-        if: matrix.os == 'ubuntu-latest'
+        # produced in CI even though it cannot be produced locally. Every package here
+        # exists under the same name on Ubuntu 22.04 (jammy).
+        if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev
@@ -150,6 +155,17 @@ jobs:
           fi
           cd src-tauri
           "../$cli" build "${args[@]}"
+
+      - name: The Linux installers need nothing newer than Ubuntu 22.04 has
+        # Reads what the binary and every library in the .deb and the AppImage need from
+        # glibc and libstdc++ (scripts/glibc-floor.py), prints the newest of each, and fails
+        # above glibc 2.35, GLIBCXX_3.4.30 or CXXABI_1.3.13 (GCC 12's libstdc++, which
+        # Ubuntu 22.04 and Debian 12 ship). A build over the floor installs and then does
+        # not start, so it must not reach a release.
+        if: matrix.platform == 'linux'
+        run: |
+          bundle=target/release/bundle
+          python3 scripts/glibc-floor.py --glibc 2.35 --glibcxx 3.4.30 --cxxabi 1.3.13 "$bundle"/deb/*.deb "$bundle"/appimage/*.AppImage
 
       - name: Collect the artifacts
         shell: bash
