@@ -362,6 +362,8 @@ jobs:
           # artifacts rather than losing a green build to an ordering accident. From 1.0.0 a
           # release is a full release, not a prerelease, so that /releases/latest and the
           # repository's "Latest" badge find it; a beta is marked prerelease when published.
+          # Installed copies are not offered a draft: the manifest job waits for it to be
+          # published and re-run.
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             echo "no release for $TAG yet; creating a draft release to hold the artifacts"
             gh release create "$TAG" --draft --title "$TAG" --notes "Artifacts attached by CI. Notes pending."
@@ -470,7 +472,9 @@ jobs:
   # The installed app reads it from the `updater` branch, not from the release. That began
   # because `releases/latest` skips prereleases and every release before 1.0.0 was one; it
   # also means only this job decides what installed copies are offered. The branch holds
-  # only the manifests, and only this job writes to it.
+  # only the manifests, and only this job writes to it. It writes nothing while the tag's
+  # release is a draft, as it is when the tag was pushed on its own: publish the release,
+  # then re-run this job.
   manifest:
     name: updater manifest
     needs: bundle
@@ -507,6 +511,17 @@ jobs:
               exit 1
             fi
             gh release view "$tag" --json body -q .body > notes.md || true
+            # Installed copies download from the release, and a draft's files are not
+            # public: offered a draft, every copy would fail to download the update. So the
+            # manifests are written, but reach the updater branch only once the release is
+            # published. Publish it, then re-run this job; a re-run reuses this run's
+            # installers and signatures, and reads the published notes.
+            draft=$(gh release view "$tag" --json isDraft -q .isDraft 2>/dev/null) || draft=missing
+            case "$draft" in
+              false) echo "public=true" >> "$GITHUB_OUTPUT" ;;
+              true) echo "::warning::$tag is still a draft, so installed copies are not offered it yet. Publish the release, then re-run this job." ;;
+              *) echo "::warning::there is no release for $tag to download it from, so installed copies are not offered it." ;;
+            esac
           fi
           if ! ls dist-artifacts/*.sig >/dev/null 2>&1; then
             echo "::warning::no platform produced updater signatures; no manifest is published and installed copies will not be offered $tag"
@@ -537,12 +552,15 @@ jobs:
         with:
           name: updater-manifest
           path: latest*.json
+          # A re-run of this job, after a draft is published, writes it again.
+          overwrite: true
 
       - name: Publish to the updater branch
         # Only to the branch, which is what installed copies read. Attached to the release
         # as well, the manifests were two more files on the release page that nobody
-        # downloads; each release's manifests stay in the branch's history.
-        if: ${{ steps.write.outputs.publish == 'true' && !inputs.dry_run }}
+        # downloads; each release's manifests stay in the branch's history. Never while
+        # the release is a draft or missing (the step above says why).
+        if: ${{ steps.write.outputs.publish == 'true' && steps.write.outputs.public == 'true' && !inputs.dry_run }}
         env:
           TAG: ${{ steps.write.outputs.tag }}
           VERSION: ${{ steps.write.outputs.version }}

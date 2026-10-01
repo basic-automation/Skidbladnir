@@ -682,8 +682,11 @@ prettier subset.
       `.sig` files are attached to the release; they were clutter there. Not
       `releases/latest`: that skips prereleases, and every release before 1.0.0 was one.
       From 1.0.0 `release.yml` holds a tag's artifacts in a draft full release, not a
-      draft prerelease. A re-run of an older tag never rolls the branch back. Dry runs
-      sign with a throwaway key so the whole path is exercised without publishing.
+      draft prerelease. The manifest job never offers a draft, whose files are not public
+      and would fail to download: publish the release, then re-run that one job, which
+      reuses the run's signed installers. A re-run of an older tag never rolls the branch
+      back. Dry runs sign with a throwaway key so the whole path is exercised without
+      publishing.
       Verified locally: a signed `.deb` built with a throwaway key, served with a
       generated manifest, raised the banner in the real window; a tampered download was
       refused with "signature verification failed". A `release.yml` dry run signed all
