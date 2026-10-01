@@ -621,6 +621,13 @@ prettier subset.
       made with `webpmux -set`, five choices x lossless/lossy: 10 of 10 byte-identical.
       Mutation: dropping Exif fails 4. `webpmux` joins the reference tools
       (`scripts/build-reference-tools.sh`, CI's parity job).
+- [ ] Warn before two inputs in one run would write the same output (`photo.png` and
+      `photo.jpg` both become `photo.webp`), and offer a "Replace existing files" toggle,
+      on by default. Today the later file silently replaces the earlier one.
+- [ ] A "Start from `cwebp`'s defaults" button in the WebP panel
+      (`WebpSettings::libwebp_defaults()`), so matching a plain `cwebp` needs no preset step.
+- [ ] An About and licence view in the window: version, edition, and the bundled
+      `LICENSE`, notices and (GPL edition) `COPYING`, by fixed resource name.
 - [x] `cargo tauri build` green on **Linux** for `.deb` — **this was not actually blocked
       on `patchelf`.** Only the AppImage target needs it; `cargo tauri build --bundles deb`
       produces a valid 3.8 MB `Skidbladnir_<version>_amd64.deb` on the dev host today,
@@ -693,6 +700,28 @@ prettier subset.
       earlier have no updater and must be updated by hand once.
 - [x] First tri-platform release of the Tauri app — **v0.5.0**, a prerelease carrying a
       Windows installer, a macOS `.dmg`, a `.deb` and an AppImage.
+
+**Distribution, deferred past the 1.0.0 launch (2026-10-01):**
+
+- [ ] (owner-gated) Code signing: an Apple Developer ID with notarization, and Windows
+      Authenticode (Azure Artifact Signing or SignPath Foundation) run through
+      `bundle.windows.signCommand` inside the bundle step, so the updater's signatures
+      cover the signed files.
+- [ ] winget (the standard edition only, or give the GPL edition its own identifier
+      first) and Scoop (a bucket of our own now; Extras wants 100+ stars).
+- [ ] AUR `skidbladnir-bin` and AppImageHub, the latter after the AppStream metainfo below.
+- [ ] Flathub: metainfo, an app ID under `io.basicautomation.*` or
+      `io.github.basic_automation.*`, an offline from-source build of every crate, npm
+      package and submodule, and an owner-written manifest under Flathub's AI policy.
+- [ ] A Homebrew cask (after notarization; the official tap also wants 225 stars), Snap
+      (the owner registers the name), and the Microsoft Store (a signed, offline installer).
+- [ ] AppStream metainfo with PNG screenshots, shipped in the `.deb` and the AppImage
+      (`bundle.linux.{deb,appimage}.files`).
+- [ ] (owner decision) A supported way for packagers to turn the update check off: an
+      `updater` cargo feature that keeps the two commands registered, and `FLATPAK_ID`
+      detection. `SKIDBLADNIR_NO_UPDATE_CHECK` is a test hook, not a documented switch.
+- [ ] More platforms: an `rpm` bundle target, a Linux ARM64 leg (`ubuntu-22.04-arm`), and a
+      universal `.dmg`.
 
 ## Phase 6 — Retire Electron
 
@@ -1259,6 +1288,15 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
 - [ ] More input formats the tools read: animated GIF and APNG into `cjxl` (with the
       multi-image work below), Y4M (`avifenc`, `heif-enc`), PGX and EXR (`cjxl`), and raw
       pixels (`heif-enc --raw`, `cwebp -s`).
+- [ ] Animated WebP's own options as controls: `-mixed`, `-min_size`, `-kmin`/`-kmax`,
+      `img2webp -loop`, `gif2webp -loop_compatibility` and `img2webp`'s per-frame options,
+      held to the tools in `tests/animation.rs` and `tests/gif.rs`. The README lists them as
+      not offered until then.
+- [ ] GPL edition: `heif-enc`'s `-p x265:<param>` beyond the fixed set of x265 controls
+      (preset, tune, TU depth, AQ, psy-rd/psy-rdoq, deblock, SAO).
+- [ ] Parity on macOS again. CI ran the parity tests on macOS through v0.13.0; make the
+      `parity` job a matrix over Linux and macOS, so the README's "tested on Linux x86-64"
+      can widen.
 
 **Multi-image features the tools have, deferred by the owner (2026-09-28):**
 
@@ -1328,3 +1366,11 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       the Nuxt frontend's npm tree, the Electron app's npm tree and github-actions, with
       the Tauri and Nuxt crates/packages grouped so they update together instead of
       opening mutually-conflicting PRs. Its PRs are gated by CI, which now exists.
+- [ ] Notices for everything else the installers carry: the Rust crates (`cargo-about`),
+      the frontend bundle (Fira Code's OFL; the CC BY 4.0 subway, iconamoon and codicon
+      icons need attribution or swapping for Lucide), libpng's licence (`png_gamma.rs`
+      reproduces its arithmetic), and the Ubuntu libraries inside the AppImage. Check them
+      in CI beside `third-party-notices.py --check`.
+- [ ] README: a dated "How it compares" table (Squoosh, XnConvert, Converseen/ImageMagick,
+      the raw CLIs; "not stated" for the others' parity), a short demo clip, and an
+      acknowledgements and non-affiliation section.
