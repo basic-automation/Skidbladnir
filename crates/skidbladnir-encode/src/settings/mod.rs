@@ -193,6 +193,13 @@ pub struct EncodeJob {
 	pub jxl: JxlSettings,
 	/// The HEIC controls, likewise.
 	pub heic: HeicSettings,
+	/// Read a TIFF's alpha the way the reference tool does, rather than correctly. Off by
+	/// default. Two tools misread it, in opposite directions: `cwebp` (through libtiff)
+	/// darkens a TIFF with straight alpha by premultiplying it, and `heif-enc` takes a
+	/// TIFF's premultiplied alpha as straight. With this on, Skidbladnir reproduces each
+	/// for its format, byte for byte; `avifenc` and `cjxl` do not read TIFF, so AVIF and
+	/// JPEG XL are unaffected. See [`crate::source::tiff_like_reference`].
+	pub tiff_alpha_like_reference: bool,
 }
 
 impl From<WebpSettings> for EncodeJob {
@@ -223,6 +230,8 @@ impl<'de> Deserialize<'de> for EncodeJob {
 			jxl: JxlSettings,
 			#[serde(default)]
 			heic: HeicSettings,
+			#[serde(default)]
+			tiff_alpha_like_reference: bool,
 			/// 0.12 and 0.13 kept metadata job-wide, off by default.
 			metadata: Option<legacy::KeepMetadata>,
 			#[serde(flatten)]
@@ -231,7 +240,7 @@ impl<'de> Deserialize<'de> for EncodeJob {
 
 		let wire = Wire::deserialize(deserializer)?;
 		let webp = wire.webp.unwrap_or_else(|| if wire.flat.is_empty() { WebpSettings::default() } else { wire.flat.into_settings() });
-		let mut job = Self { format: wire.format, crop: wire.crop, resize: wire.resize, webp, avif: wire.avif, jxl: wire.jxl, heic: wire.heic };
+		let mut job = Self { format: wire.format, crop: wire.crop, resize: wire.resize, webp, avif: wire.avif, jxl: wire.jxl, heic: wire.heic, tiff_alpha_like_reference: wire.tiff_alpha_like_reference };
 		if let Some(keep) = wire.metadata {
 			keep.apply(&mut job);
 		}

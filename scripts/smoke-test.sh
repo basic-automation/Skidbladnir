@@ -317,6 +317,18 @@ for source in smoke.webp smoke.heic; do
 		 return r.outputPath.split(/[\\\\/]/).pop() + ' ' + r.width + 'x' + r.height" "smoke.heic 48x48"
 done
 
+# The TIFF alpha opt-in crosses IPC: off by default, and on, a straight-alpha TIFF converts
+# as cwebp converts it (premultiplied), which is a different file.
+cp "$(dirname "$0")/../crates/skidbladnir-encode/tests/fixtures/tiff-rgba8.tif" "$scratch/straight.tif"
+check "reads TIFF alpha correctly unless asked otherwise" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const s=await I.invoke('default_settings'); s.webp.lossless=true; s.webp.exact=true;
+	 const input='$(app_path "$scratch/straight.tif")';
+	 const off=await I.invoke('preview_encode', { settings: s, input });
+	 const asked=structuredClone(s); asked.tiffAlphaLikeReference=true;
+	 const on=await I.invoke('preview_encode', { settings: asked, input });
+	 return 'default ' + s.tiffAlphaLikeReference + ', on differs ' + (on.encoded !== off.encoded)" 'default false, on differs true'
+
 # PNM, PAM and PFM input: recognised by content, and converted to WebP (as cwebp reads PNM)
 # and to JPEG XL (as cjxl reads all three).
 "$PY" - "$scratch" <<'PNM'

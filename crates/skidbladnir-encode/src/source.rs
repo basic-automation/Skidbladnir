@@ -408,11 +408,51 @@ impl Decoded {
 	}
 }
 
+/// A TIFF's pixels as the reference tool for `format` reads them, where that differs from
+/// reading them correctly (which [`decode`] does): the opt-in
+/// [`EncodeJob::tiff_alpha_like_reference`]. `None` when nothing differs.
+///
+/// - **WebP, straight alpha** (`ExtraSamples` = `[2]`): `cwebp` reads a TIFF through
+///   libtiff's `TIFFReadRGBAImage`, which premultiplies unassociated alpha, and never
+///   un-multiplies it — so each colour becomes `(c * a + 127) / 255`.
+/// - **HEIC, premultiplied alpha** (`ExtraSamples` = `[1]`): `heif-enc`'s TIFF reader
+///   (`heifio/decoder_tiff.cc`) takes the stored samples as straight colour, so they are
+///   handed over as stored, un-multiplied by nothing.
+///
+/// `avifenc` and `cjxl` read no TIFF, and the other combinations are read correctly by
+/// their tool already.
+#[must_use]
+pub fn tiff_like_reference(source: &SourceImage, format: OutputFormat) -> Option<SourceImage> {
+	if source.format != SourceFormat::Tiff || source.bytes.is_empty() || !source.has_alpha {
+		return None;
+	}
+	let extra = tiff_extra_samples(&source.bytes)?;
+	match (format, extra.as_slice()) {
+		(OutputFormat::Webp, [2]) => {
+			let premultiply = |c: u8, a: u8| u8::try_from((u32::from(c) * u32::from(a) + 127) / 255).unwrap_or(u8::MAX);
+			let pixels = source.pixels.as_chunks::<4>().0.iter().flat_map(|&[r, g, b, a]| [premultiply(r, a), premultiply(g, a), premultiply(b, a), a]).collect();
+			Some(SourceImage { pixels, deep: None, ..source.clone() })
+		}
+		(OutputFormat::Heic, [1]) => {
+			let image = image::load_from_memory(&source.bytes).ok()?;
+			let stored = Decoded::from_image(image, SourceFormat::Tiff, false);
+			((stored.width, stored.height) == (source.width, source.height)).then(|| SourceImage { pixels: stored.pixels, deep: stored.deep, ..source.clone() })
+		}
+		_ => None,
+	}
+}
+
+/// A TIFF's `ExtraSamples` (tag 338): 1 for associated (premultiplied) alpha, 2 for
+/// unassociated (straight), 0 unspecified.
+fn tiff_extra_samples(bytes: &[u8]) -> Option<Vec<u16>> {
+	use tiff::{decoder::Decoder, tags::Tag};
+	Decoder::new(std::io::Cursor::new(bytes)).ok()?.get_tag_u16_vec(Tag::ExtraSamples).ok()
+}
+
 /// Whether a TIFF declares its one extra sample *associated* (premultiplied) alpha —
 /// `ExtraSamples` (tag 338) of exactly one value, 1 — which is when `cwebp` un-multiplies.
 fn tiff_alpha_is_associated(bytes: &[u8]) -> bool {
-	use tiff::{decoder::Decoder, tags::Tag};
-	Decoder::new(std::io::Cursor::new(bytes)).ok().and_then(|mut decoder| decoder.get_tag_u16_vec(Tag::ExtraSamples).ok()).is_some_and(|extra| extra == [1])
+	tiff_extra_samples(bytes).is_some_and(|extra| extra == [1])
 }
 
 /// Whether a PNG has a `tRNS` chunk, which makes an RGB or grayscale PNG transparent.

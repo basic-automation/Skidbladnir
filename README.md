@@ -57,13 +57,13 @@ with the exceptions listed under [What "every option" means](#what-every-option-
 
 | Format | Reference tool | Encoder in the app | Byte-for-byte parity, tested |
 |---|---|---|---|
-| WebP | `cwebp` 1.6.0 | libwebp 1.6.0 | 2,673 cases: every option, through PNG (every colour type, gamma), JPEG, TIFF (including premultiplied alpha), WebP and PNM files, and `-metadata` |
+| WebP | `cwebp` 1.6.0 | libwebp 1.6.0 | 2,949 cases: every option, through PNG (every colour type, gamma), JPEG, TIFF (including premultiplied alpha, and straight alpha read as `cwebp` reads it on request), WebP and PNM files, and `-metadata` |
 | Animated WebP | `img2webp`, `gif2webp` and `webpmux` 1.6.0 | libwebp 1.6.0 | 97 cases: animated WebP and GIF input, every Skidbladnir setting those tools can express, and metadata (`gif2webp -metadata`, `webpmux -set`). Their `-mixed`, `-min_size`, `-kmin`/`-kmax`, `-loop`, `-loop_compatibility` and per-frame options are not offered yet |
 | AVIF | `avifenc` 1.4.2 | libavif 1.4.2 + libaom 3.15.1 | 191 cases: every option, PNG inputs, JPEG input |
 | JPEG XL | `cjxl` 0.12.0 | libjxl 0.12.0 | 254 cases: every option, PNG, PNM, PFM and still-GIF inputs, JPEG recompression and decoding |
-| HEIC | `heif-enc -e kvazaar` 1.23.5 | libheif 1.23.5 + Kvazaar 2.3.2 | 172 cases: every option, PNG, JPEG, TIFF (RGB and straight alpha), WebP and HEIC inputs |
+| HEIC | `heif-enc -e kvazaar` 1.23.5 | libheif 1.23.5 + Kvazaar 2.3.2 | 174 cases: every option, PNG, JPEG, TIFF (RGB, straight alpha, and premultiplied alpha read as `heif-enc` reads it on request), WebP and HEIC inputs |
 
-That is 3,387 cases in all. CI runs every one of them on Linux x86-64, for every pull
+That is 3,665 cases in all. CI runs every one of them on Linux x86-64, for every pull
 request and every push to `master`.
 
 The [GPL edition](#editions) writes HEIC with x265 instead, adding `heif-enc`'s `-L`
@@ -307,17 +307,18 @@ same source as the library the app links (`scripts/build-reference-tools.sh`). P
   printing statistics — have no control, and neither do `cwebp`'s dump and map outputs.
 
 Where a tool refuses an input — `cwebp` a CMYK JPEG, `heif-enc` an RGB-coded one —
-Skidbladnir converts it anyway. Two results differ from the reference tool, both for a
-TIFF with transparency:
+Skidbladnir converts it anyway. Two tools misread a TIFF's transparency, and by default
+Skidbladnir reads it correctly instead, keeping the colours the file means:
 
-- **Straight (unassociated) alpha, to WebP**, deliberately: `cwebp` reads such a TIFF
-  premultiplied, through libtiff, and darkens its semi-transparent pixels; Skidbladnir
-  keeps the colours the file holds.
-- **Premultiplied (associated) alpha, to HEIC**, not yet decided: Skidbladnir
-  un-multiplies it, as `cwebp` does, and keeps the image's true colours. `heif-enc` takes
-  that alpha as straight, so its HEIC is darker where the image is semi-transparent.
-  Whether HEIC should keep the true colours or follow `heif-enc` is still open
-  ([ROADMAP.md](ROADMAP.md), Phase 8).
+- **Straight (unassociated) alpha, to WebP:** `cwebp` reads such a TIFF premultiplied,
+  through libtiff, and darkens its semi-transparent pixels.
+- **Premultiplied (associated) alpha, to HEIC:** `heif-enc` takes that alpha as straight,
+  so its HEIC is darker where the image is semi-transparent. (Skidbladnir un-multiplies
+  it, as `cwebp` does.)
+
+To get the tools' results instead, turn on **TIFF input → Read transparency as the
+official tool does**: both are then reproduced byte for byte (tested against `cwebp` and
+`heif-enc`). `avifenc` and `cjxl` do not read TIFF, so AVIF and JPEG XL are unaffected.
 
 Besides the byte comparisons, the output is decoded with each format's own tools. AVIF is
 decoded with libavif's `avifdec`, and the tests measure how close the pixels come back and

@@ -1289,7 +1289,17 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       10 byte-identical, plus a direct check that Exif/XMP are kept and left out as asked.
       Mutation: the old route fails it (on the dropped metadata first). AVIF-in-HEIF input
       is not covered: neither our libheif nor the reference `heif-enc` decodes AV1.
-- [ ] (owner decision) **Premultiplied-alpha TIFF into HEIC.** Since 2026-10-01 an
+- [x] **Decided (owner, 2026-10-01): correct TIFF colours by default, with an opt-in to
+      reproduce the tools.** `EncodeJob::tiff_alpha_like_reference` ("TIFF input → Read
+      transparency as the official tool does", off by default): WebP from a straight-alpha
+      TIFF is premultiplied as `cwebp`/libtiff do, and HEIC from a premultiplied TIFF takes
+      the stored samples as `heif-enc` does. **Gates:**
+      `matches_reference_cwebp_through_a_straight_alpha_tiff_when_asked` (8- and 16-bit x
+      138 settings: 276 of 276 byte-identical to `cwebp`) and
+      `matches_heif_enc_through_a_premultiplied_tiff_when_asked` (2 of 2 to `heif-enc`, and
+      the default checked to differ). Mutation: either branch removed fails 275 of 276 and
+      2 of 2. This also settles the straight-alpha exception below.
+- [x] (owner decision) **Premultiplied-alpha TIFF into HEIC.** Decided above. Since 2026-10-01 an
       associated-alpha TIFF is un-multiplied as `cwebp` does, for every format. Reading
       `heifio/decoder_tiff.cc`, `heif-enc` instead takes associated alpha as plain alpha
       (it un-multiplies nothing unless `--premultiplied-alpha` marks the image), so its
