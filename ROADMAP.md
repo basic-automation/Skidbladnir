@@ -1193,8 +1193,13 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       0..1 at 8/16 bits, with no reference to match (only `cjxl` reads PFM).
 - [ ] **libjxl 0.12.0 fails a lossless float encode at effort 3** ("Residual overflow",
       `enc_encoding.cc:314`) — `cjxl` itself fails the same PFM, so the PFM gate pins that
-      both refuse it. Check whether a later libjxl fixes it before the next libjxl bump,
-      and turn the pin into a parity case then.
+      both refuse it. It matches libjxl's open issue #4902, "Lossless fp32 encoding fails
+      when the image mixes negative and positive values" (a suspected 0.12.0 regression;
+      the fixture's samples run from -0.05 to 1.06), and #4905 reports the same error with
+      patches. Check whether a libjxl release fixes it before the next libjxl bump, and
+      turn the pin into a parity case then.
+      <https://github.com/libjxl/libjxl/issues/4902> ·
+      <https://github.com/libjxl/libjxl/issues/4905>
 - [x] **A still GIF into JPEG XL, as `cjxl` reads it** (2026-10-01). `cjxl` reads GIF with
       its own reader (`lib/extras/dec/gif.cc`): three colour channels, alpha only when a
       pixel is transparent, perceptual sRGB — and it counts GIF a lossy input, so with no
