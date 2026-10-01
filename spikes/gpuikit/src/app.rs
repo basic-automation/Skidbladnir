@@ -9,7 +9,7 @@ use std::{
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use gpui::{
-	AnyElement, AppContext, Bounds, ClickEvent, Context, Entity, ExternalPaths, FocusHandle, Focusable, Image, ImageFormat, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement, PathPromptOptions, Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, StyledImage, Subscription, Window, canvas, div, img, point, prelude::FluentBuilder, px, size, svg
+	AnyElement, AppContext, Bounds, ClickEvent, Context, Entity, ExternalPaths, FocusHandle, Focusable, RenderImage, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement, PathPromptOptions, Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, StyledImage, Subscription, Window, canvas, div, img, point, prelude::FluentBuilder, px, size, svg
 };
 use gpuikit::{elements::input::input, input::InputState};
 
@@ -44,8 +44,8 @@ pub struct Report {
 
 /// A finished preview: the Tauri `Preview`, with both sides decoded for the GPU.
 pub struct PreviewView {
-	pub original: Arc<Image>,
-	pub encoded: Arc<Image>,
+	pub original: Arc<RenderImage>,
+	pub encoded: Arc<RenderImage>,
 	pub source_bytes: u64,
 	pub encoded_bytes: u64,
 	pub width: u32,
@@ -98,6 +98,9 @@ pub struct Skid {
 	/// Set when Enter or Space chose a menu item: the key-up that follows would otherwise
 	/// click the still-focused trigger and open the menu again.
 	pub swallow_click: bool,
+	/// With `SKID_BENCH` set: what is being timed, and since when. Reported once the frame
+	/// that shows its result has been drawn.
+	pub bench: Option<(&'static str, std::time::Instant)>,
 	/// The WebP panel's own state: the `-preset` and `-z` pickers.
 	pub webp_preset: skidbladnir_encode::settings::Preset,
 	pub lossless_level: u8,
@@ -180,6 +183,7 @@ impl Skid {
 			menu_highlight: None,
 			menu_actions: Vec::new(),
 			swallow_click: false,
+			bench: None,
 			webp_preset: skidbladnir_encode::settings::Preset::Photo,
 			lossless_level: 6,
 			webp_preset_error: String::new(),
@@ -219,8 +223,23 @@ impl Skid {
 			let paths: Vec<PathBuf> = std::env::split_paths(&inputs).collect();
 			self.dropped(&ExternalPaths(paths.into()), cx);
 		}
-		if std::env::var_os("SKID_PREVIEW").is_some() {
-			self.run_preview(cx);
+		// The benchmark starts these 1.5s after launch, as it presses them in the old window.
+		let preview = std::env::var_os("SKID_PREVIEW").is_some();
+		let convert = std::env::var_os("SKID_CONVERT").is_some();
+		if preview || convert {
+			cx.spawn(async move |this, cx| {
+				cx.background_executor().timer(std::time::Duration::from_millis(1500)).await;
+				this.update(cx, |this, cx| {
+					if preview {
+						this.run_preview(cx);
+					}
+					if convert {
+						this.convert(cx);
+					}
+				})
+				.ok();
+			})
+			.detach();
 		}
 		let open = std::env::var("SKID_OPEN").ok();
 		let scroll = std::env::var("SKID_SCROLL").ok().and_then(|value| value.parse::<f32>().ok());
@@ -460,6 +479,7 @@ impl Skid {
 
 	fn convert(&mut self, cx: &mut Context<Self>) {
 		let Some(settings) = self.settings.clone() else { return };
+		self.bench = Some(("convert", std::time::Instant::now()));
 		self.busy = true;
 		self.cancelling = false;
 		self.reports.clear();
@@ -589,6 +609,7 @@ impl Skid {
 
 	fn run_preview(&mut self, cx: &mut Context<Self>) {
 		let (Some(settings), Some(path)) = (self.settings.clone(), self.preview_path.clone()) else { return };
+		self.bench = Some(("preview", std::time::Instant::now()));
 		self.previewing = true;
 		self.preview_error.clear();
 		cx.notify();
@@ -598,11 +619,21 @@ impl Skid {
 			// `data:` URLs are decoded here instead of by a webview.
 			let result = cx
 				.background_spawn(async move {
+					let started = std::time::Instant::now();
 					let preview = shell::preview::preview(&settings, &path)?;
+					let encoded_at = started.elapsed();
 					let decode = |url: &str| STANDARD.decode(url.trim_start_matches("data:image/webp;base64,")).map_err(|error| error.to_string());
 					let original = decode(&preview.original)?;
 					let aspect = image_aspect(&original).unwrap_or(1.0);
-					Ok::<_, String>(PreviewView { original: Arc::new(Image::from_bytes(ImageFormat::Webp, original)), encoded: Arc::new(Image::from_bytes(ImageFormat::Webp, decode(&preview.encoded)?)), source_bytes: preview.source_bytes, encoded_bytes: preview.encoded_bytes, width: preview.width, height: preview.height, saving_percent: preview.saving_percent, frames: preview.frames, aspect })
+					// Decoded to pixels here, every frame of an animation included, so the frame
+					// that shows the preview has nothing left to decode — as the webview has
+					// decoded both `<img>`s by the time they appear.
+					let original_texture = texture(&original)?;
+					let encoded_texture = texture(&decode(&preview.encoded)?)?;
+					if std::env::var_os("SKID_BENCH").is_some() {
+						eprintln!("bench preview_breakdown encode_ms {} decode_ms {}", encoded_at.as_millis(), (started.elapsed() - encoded_at).as_millis());
+					}
+					Ok::<_, String>(PreviewView { original: original_texture, encoded: encoded_texture, source_bytes: preview.source_bytes, encoded_bytes: preview.encoded_bytes, width: preview.width, height: preview.height, saving_percent: preview.saving_percent, frames: preview.frames, aspect })
 				})
 				.await;
 			this.update(cx, |this, cx| {
@@ -1191,7 +1222,7 @@ impl Skid {
 			children.push(div().px(px(10.)).xs().text_color(c(ERROR)).child(self.preview_error.clone()).into_any_element());
 		}
 		if let Some(preview) = &self.preview {
-			let figure = |image: Arc<Image>, caption: AnyElement| {
+			let figure = |image: Arc<RenderImage>, caption: AnyElement| {
 				div()
 					.flex()
 					.flex_1()
@@ -1277,6 +1308,14 @@ impl Skid {
 impl Render for Skid {
 	fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
 		crate::controls::print_probes();
+		if std::env::var_os("SKID_BENCH").is_some()
+			&& let Some((what, started)) = self.bench
+			&& ((what == "preview" && self.preview.is_some() && !self.previewing) || (what == "convert" && !self.busy && !self.reports.is_empty()))
+		{
+			self.bench = None;
+			window.on_next_frame(move |_, _| eprintln!("bench {what}_ms {}", started.elapsed().as_millis()));
+			window.request_animation_frame();
+		}
 		if std::env::var_os("SKID_PROBE").is_some() {
 			eprintln!("viewport {:?} scale {}", window.viewport_size(), window.scale_factor());
 		}
@@ -1540,6 +1579,32 @@ fn checkerboard() -> impl IntoElement {
 	)
 	.absolute()
 	.size_full()
+}
+
+/// A WebP decoded to the GPU's BGRA, every frame of an animation with its delay. A still
+/// image is decoded by libwebp, as WebKitGTK decodes it; an animation by image-rs.
+fn texture(webp: &[u8]) -> Result<Arc<RenderImage>, String> {
+	use image::AnimationDecoder as _;
+	if let Ok(still) = source::decode(Path::new("preview.webp"), webp.to_vec()) {
+		let mut pixels = still.pixels;
+		for pixel in pixels.as_chunks_mut::<4>().0 {
+			pixel.swap(0, 2);
+		}
+		let buffer = image::RgbaImage::from_raw(still.width, still.height, pixels).ok_or("the decoded buffer does not match its size")?;
+		return Ok(Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(buffer)])));
+	}
+	let decoder = image::codecs::webp::WebPDecoder::new(std::io::Cursor::new(webp)).map_err(|error| error.to_string())?;
+	let mut frames: smallvec::SmallVec<[image::Frame; 1]> = smallvec::SmallVec::new();
+	for frame in decoder.into_frames() {
+		let frame = frame.map_err(|error| error.to_string())?;
+		let delay = frame.delay();
+		let mut buffer = frame.into_buffer();
+		for pixel in buffer.as_flat_samples_mut().samples.as_chunks_mut::<4>().0 {
+			pixel.swap(0, 2);
+		}
+		frames.push(image::Frame::from_parts(buffer, 0, 0, delay));
+	}
+	Ok(Arc::new(RenderImage::new(frames)))
 }
 
 fn image_aspect(webp: &[u8]) -> Option<f32> {

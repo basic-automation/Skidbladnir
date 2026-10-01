@@ -1,74 +1,185 @@
-# gpuikit spike
+# gpui spike: the Tauri window, rebuilt to match
 
-A throwaway prototype answering one question: **could gpui + [gpuikit](https://github.com/iamnbutler/gpuikit) replace the Tauri webview UI?**
-It is not part of the product. It is its own Cargo workspace, so the root workspace, CI, clippy and `cargo deny` never build it.
+Skidbladnir's whole window, rebuilt with [gpui](https://www.gpui.rs) (and
+[gpuikit](https://github.com/iamnbutler/gpuikit)) to match the installed Tauri build:
+**Skidbladnir-GPL 1.1.0** on Linux (WebKitGTK), Hyprland, at 1.5× scale.
 
-It covers the WebP options panel (17 controls bound directly to `WebpSettings`), open and save through gpui's native file dialogs, debounced background encoding, and the before/after preview as GPU textures.
-It does not cover AVIF, JPEG XL, HEIC, geometry, presets, batches, the updater, the Paleday theme or the frameless window.
+The point was a fair comparison. A smaller mock-up would make any benchmark meaningless, so
+everything the old window draws is here:
+
+- the frame, rail, sidebar and header;
+- all four format panels, plus Crop, Resize and TIFF input;
+- the update banner, preview, progress and results;
+- the queue, settings, preset and select pop-ups;
+- focus outlines, keyboard behaviour and drag-and-drop.
+
+The window's own storage and preview code (`src-tauri/src/{preferences,presets,preview}.rs`)
+is compiled in unchanged, so both apps read the same files and do the same work.
+
+It is its own Cargo workspace. The root workspace, CI and `cargo deny` never build it.
 
 ## Running it
 
-The encode crate needs its submodules, and a prebuilt libheif:
-
 ```sh
-git submodule update --init third_party/aom third_party/libavif third_party/libwebp third_party/libjpeg-turbo third_party/libheif
+git submodule update --init third_party/aom third_party/libavif third_party/libwebp third_party/libjpeg-turbo third_party/libheif third_party/x265 third_party/libde265
+scripts/build-libheif.sh --edition gpl          # once; the reference build is the GPL edition
 cd spikes/gpuikit
-SKIDBLADNIR_LIBHEIF_DIR=../../build/libheif cargo run --release -- path/to/image.png
+SKIDBLADNIR_LIBHEIF_DIR=$PWD/../../build/libheif-gpl cargo run --release --features gpl
 ```
 
-The image argument is optional. Without it, use **Open image…**.
+`SKIDBLADNIR_LIBHEIF_DIR` must be absolute: the encode crate's build script resolves it from
+its own directory.
 
-Use `--release`: the debug build encodes about 6× slower, because libwebp is built unoptimised.
+Debug switches, for putting the window in a given state:
 
-## Pins
+| Variable | Effect |
+| --- | --- |
+| `SKID_FORMAT` | Selects the output format, without saving it |
+| `SKID_INPUTS` | Queues files, as a drop would |
+| `SKID_PREVIEW` | Runs a preview |
+| `SKID_CONVERT` | Runs a conversion |
+| `SKID_OPEN` | Opens a pop-up |
+| `SKID_SCROLL` | Scrolls the window |
+| `SKID_PROBE` | Prints layout bounds |
+| `SKID_BENCH` | Prints timings |
 
-`gpuikit = "=0.9.0"` and `gpui-unofficial = "=1.17.2"`: the pair gpuikit's own lockfile resolves.
-gpuikit says to expect breaking changes in every release.
+## How it was matched
 
-## Findings (2026-10-01, Linux/Wayland, Hyprland)
+The reference is the running 1.1.0 window itself, not the source and not Chromium. WebKitGTK
+lays the same CSS out differently from Chromium (see below), so measurements taken in Chromium
+would have been wrong.
 
-**Worked first time**
+Started with `WEBKIT_INSPECTOR_HTTP_SERVER`, the Tauri window serves WebKit's remote inspector.
+`tools/wk.py` runs JavaScript in it to read every element's computed box, font, colour, focus
+outline and state classes, and to open its pop-ups. The spike's own boxes were then compared
+number for number (`SKID_PROBE`), and both windows were screenshotted in the same states and
+diffed (`tools/`).
 
-- 17 controls, open/save, background encode and preview: about 450 lines in one file. It compiled after a single missing-trait-import fix.
-- No IPC and no TypeScript copy of the settings. Each control's subscription writes the `WebpSettings` field the encoder reads.
-- Open and save use gpui's own `prompt_for_paths` and `prompt_for_new_path`, with no plugin. Their options have **no file-type filter**, which the Tauri dialog has.
-- The preview goes from RGBA straight to a `RenderImage`. There is no lossless-WebP re-wrap and no base64 `data:` URL, and so none of the `MAX_PREVIEW_PIXELS` memory pressure the Tauri preview guards against.
-- Window on screen 483 ms after launch (release build, warm cache).
-- `ldd` shows no WebKitGTK, GTK or libsoup. On Linux only xcb and xkbcommon are linked.
+Checked this way, with old and new side by side:
 
-**Measured**
+- The WebP, AVIF, JPEG XL and HEIC screens, top to bottom.
+- The queue menu, settings popover and select menus, open.
+- A queued image, and a finished preview (images, captions, saving).
+- The keyboard: Tab order, the focus outline each control draws, Enter, Space and the arrow
+  keys in menus and radio groups.
 
-- Release binary: 67 MB, or 52 MB stripped. That includes the statically linked libaom, libavif, libjxl, libwebp and libjpeg-turbo. The 1.0.0 AppImage is 95 MB, but that is a bundle, not a like-for-like number.
-- Resident memory with a 1600×1000 image loaded: about 240 MB, in a single process.
-- Encode plus decode of that image at the default settings: 976 ms release, 6078 ms debug.
+Horizontal positions match to within half a pixel; vertically, see "Not possible" item 1.
 
-**Against the Tauri 1.0.0 build** (same machine, same 1600×1000 PNG; the host was under heavy load, so the times are rough, but the ratios held across repeated runs)
+What it took:
 
-| | Tauri 1.0.0 | Spike |
+- **Tailwind's text line heights as WebKitGTK computes them.** `calc(1 / 0.75)` is 15.99996px,
+  which WebKitGTK truncates to a 15px line box. Chromium makes it 16px.
+- **Fira Code baked from the frontend's own woff2** into static 450 and 600 cuts. gpui can't
+  load woff2 and doesn't apply variable-font weights. The cuts' ascent/descent split is moved
+  0.1em (`tools/shift_baseline.py`) so gpui's baseline lands where WebKitGTK draws it.
+- **Each Nuxt UI control's own focus outline,** measured per control:
+  - 3px of accent at 25% for primary controls;
+  - 3px of near-black at 25% for neutral buttons;
+  - 2px of the text colour on the plain buttons;
+  - violet only on the disclosure.
+- **Reka's keyboard model:**
+  - a radio group is one Tab stop;
+  - gpui's own Enter/Space click is used rather than doubled;
+  - a select opens on its chosen item;
+  - the queue menu opens on its first item;
+  - a dropdown takes focus off its trigger, a select doesn't.
+- **Pop-ups placed as Reka places them:**
+  - selects open 8px below their trigger and exactly as wide, and flip above when there's no
+    room;
+  - the settings popover is bottom-aligned 8px right of the gear;
+  - the queue menu is sized to its content, with the item's empty trailing slot.
+- **CSS line breaking** (`src/css_text.rs`). gpui's wrapper counts the space after a word
+  toward the line, and breaks at any punctuation. CSS lets that space hang and doesn't break
+  at `/`, `(` or `,`. Text is measured with gpui's own shaper and broken the CSS way, so every
+  help paragraph breaks where the old window breaks it.
+
+## gpuikit
+
+Of gpuikit, the matched window uses only `Input`/`InputState` (the text and number fields)
+and `init`.
+
+Its sliders, switches, selects, toggle groups and buttons couldn't be made to match:
+
+- **Sizes and outlines are fixed.** It draws its own, with no way to set Nuxt UI's.
+- **Keyboard access is missing on the controls this window needs.** `Switch`, `Slider`,
+  `Select` and `ToggleGroup` take no focus at all in 0.9.0.
+- **The input has no `text-align`.** The slider readout is right-aligned by sizing the field
+  to its text.
+
+Everything else is plain gpui. The window is about 4,400 lines of Rust, against about 2,100
+lines of Vue that lean on Nuxt UI.
+
+## Not possible (or not done)
+
+1. **Sub-pixel-identical layout at a fractional scale.**
+   - **What differs:** gpui renders at the compositor's fractional scale and snaps every box to
+     whole device pixels, rounding halves down. WebKitGTK renders at 2× and lets the compositor
+     downsample. So a 15px line is 22 device pixels instead of 22.5, and a 1px border is 1
+     instead of 1.5.
+   - **Effect:** stacked content drifts up by up to half a device pixel per line, about 10.7
+     CSS px by the Resize heading. Text is sharper than the old window's downsampled text.
+   - **Fix:** needs a patch to gpui's Wayland backend (render at 2×) or to its rounding. gpui
+     has no setting for either. At 1× or 2× the two would agree.
+2. **Colour transitions.** The old window fades hover colours over 150ms (`transition-colors`).
+   gpui has no style transitions, so hovers switch instantly. Each could be animated by hand;
+   not done.
+3. **The colour chooser.** `<input type="color">` opens GTK's colour dialog. gpui has none, so
+   the Blend background swatch only shows the colour.
+4. **File-type filters in Open.** gpui's `PathPromptOptions` has no filters, so "Choose
+   images…" lists every file.
+5. **Selecting text.** The old window lets paths, the version line and results be selected and
+   copied. gpui text isn't selectable without a custom element; not done.
+6. **Installing updates.** The check and the banner are implemented against the same manifest.
+   Downloading, verifying and swapping the binary is tauri-plugin-updater's, and has no
+   counterpart here (`cargo-packager-updater` is the likely replacement).
+7. **Resizing the frameless window from its edges.** Possible with gpui's `start_window_resize`;
+   not done. Untested under a tiling compositor.
+8. **Number-field stepping.** UInputNumber's arrow-key stepping isn't reproduced on gpuikit's
+   input.
+9. **HEIC compatible-brands tags.** A hand-built tag input. Backspace-to-remove and comma-to-add
+   are missing.
+10. **Screen readers.** Roles and names aren't wired on the hand-built controls. gpui has
+    AccessKit underneath; not done.
+11. **Untested here:**
+    - dragging files over the window (no pointer automation);
+    - macOS and Windows;
+    - the standard (Kvazaar) edition.
+
+## Benchmarks
+
+Both apps were measured on the same machine, in the same tile (1274×691 at 1.5×), with
+update checks off and an isolated config directory (`tools/bench.py`):
+
+- the same preferences and presets;
+- output to a scratch folder;
+- the same inputs: a 1600×1000 RGBA PNG for the preview, six of them for the convert.
+
+Medians of 5 rounds, each round starting fresh processes:
+
+| | Tauri 1.1.0 | gpui spike |
 | --- | --- | --- |
-| Preview cost per settings change (`examples/preview_cost.rs`) | 3.4–3.7 s | 1.0 s |
-| Data sent over IPC per preview | 2.5 MB of base64 JSON | none |
-| Memory (PSS, every process), idle | 357 MB: app 115, WebKit web 196, WebKit network 45 | 117 MB |
-| Memory with the image loaded | not measured (opening needs a mouse) | 139 MB |
-| Launch to window mapped | ~445 ms (AppImage, including the FUSE mount) | ~297 ms |
+| Memory, idle (PSS, all processes) | 350 MB | 109 MB |
+| Memory after a preview | 405 MB | 155 MB |
+| Idle CPU over 10 s | 0.01 s | 0.05 s |
+| Preview, press to both images drawn | ≈ equal (see below) | ≈ equal |
+| Convert six images to WebP | ≈ equal (see below) | ≈ equal |
 
-Most of the preview gap is not the webview. Two-thirds of Tauri's cost is the lossless re-encode of the *original* (about 2.3 s), done again on every change so a webview can display it. Tauri also re-reads and re-decodes the source file each time. The encode itself costs the same in both. Caching the original's `data:` URL in the Tauri app would close most of the gap without a migration.
+TIMINGS
 
-The window timing flatters Tauri: a mapped Tauri window still has to load the Nuxt bundle before anything shows.
+**Memory.** The Tauri figure is the app process plus WebKitGTK's web and network processes,
+plus the AppImage runtime. The spike is one process.
 
-**Problems found**
+**Preview and convert.** These cost the same, because the work is the same code:
 
-- **Keyboard access is missing in the controls the app depends on.** In gpuikit 0.9.0, `Switch`, `Slider`, `Select` and `ToggleGroup` have no focus handle. Tab never reaches them and Space and the arrow keys do nothing (checked on screen and in the source). `Button`, `Checkbox`, `TextField`, `Combobox` and `Listbox` are focusable. The current app's settings panel is fully keyboard-operable, so this blocks a migration until it is fixed upstream or worked around.
-- **A slider thumb at its maximum overshoots the track end** (visible on Near-lossless at 100 and Segments at 4). Cosmetic.
-- **State lives in two places.** gpuikit controls are entities that own their value and emit events. Setting values from code (presets, restoring preferences) means calling `set_value` on each control entity as well as writing the settings struct. Vue's `v-model` keeps one copy. A real port needs a small binding layer to keep the two in step.
-- `Select` reports changes through a callback, not an event like the others, so it needs a `WeakEntity` back to the view.
+- The spike calls the Tauri app's own `preview()` and its convert path, and draws the result.
+- Decoding the two preview images to GPU textures takes the spike about 30ms.
+- Almost all of the roughly 2.7s preview is the lossless re-encode of the *original* image,
+  done so a webview can display it. A gpui app wouldn't need that step; Tauri could cache it.
 
-**Not tested**
+## Assets
 
-- The file dialogs themselves: the run above loaded its image from the command line, because only keyboard input could be scripted here.
-- Saving.
-- macOS and Windows.
-- Screen readers.
-- Theming to Paleday.
-- Frameless window chrome.
-- Animated WebP (gpui's `RenderImage` takes frames with delays, so it should work).
+`assets/fonts` holds Fira Code (SIL OFL 1.1), baked from `@fontsource-variable/fira-code`.
+`assets/icons` holds the same Iconify icons the frontend bundles, under their collections'
+licences: Lucide, Material Symbols, MDI, Iconoir, VS Code Icons, Bootstrap Icons, Codicons,
+Elusive, Subway, IconaMoon, Google Material Icons. `skid--jxl-format.svg` and the logo are the
+app's own.

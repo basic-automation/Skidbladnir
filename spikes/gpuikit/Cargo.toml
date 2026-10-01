@@ -21,7 +21,7 @@ gpuikit = "=0.9.0"
 gpui = { package = "gpui-unofficial", version = "=1.17.2" }
 gpui_platform = { package = "gpui-platform-gpui-unofficial", version = "=1.17.2", features = ["font-kit"] }
 skidbladnir-encode = { path = "../../crates/skidbladnir-encode" }
-image = { version = "0.25", default-features = false }
+image = { version = "0.25", default-features = false, features = ["webp"] }
 smallvec = "1"
 # For the Tauri shell's own preferences.rs and presets.rs, compiled in unchanged.
 serde = { version = "1", features = ["derive"] }
