@@ -51,6 +51,9 @@ pub enum SourceFormat {
 	/// Binary PNM: a graymap (`P5`), pixmap (`P6`) or PAM (`P7`), read the way `cwebp`
 	/// reads one ([`crate::pnm`]).
 	Pnm,
+	/// PFM, the floating-point PNM (`PF`, `Pf`), read the way `cjxl` reads it
+	/// ([`crate::pnm::pfm`]).
+	Pfm,
 }
 
 impl SourceFormat {
@@ -70,6 +73,7 @@ impl SourceFormat {
 			[0xff, 0x0a, ..] | [0, 0, 0, 0x0c, b'J', b'X', b'L', b' ', 0x0d, 0x0a, 0x87, 0x0a, ..] => Some(Self::Jxl),
 			[b'G', b'I', b'F', b'8', b'7' | b'9', b'a', ..] => Some(Self::Gif),
 			[b'P', b'5'..=b'7', b' ' | b'\t' | b'\r' | b'\n', ..] => Some(Self::Pnm),
+			[b'P', b'F' | b'f', b' ' | b'\t' | b'\r' | b'\n', ..] => Some(Self::Pfm),
 			_ => None,
 		}
 	}
@@ -87,6 +91,7 @@ impl SourceFormat {
 			Self::Heic => "HEIC",
 			Self::Gif => "GIF",
 			Self::Pnm => "PNM",
+			Self::Pfm => "PFM",
 		}
 	}
 }
@@ -310,6 +315,11 @@ pub fn decode(path: &Path, bytes: Vec<u8>) -> Result<SourceImage, SourceError> {
 		SourceFormat::Pnm => {
 			let pnm = crate::pnm::decode(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?;
 			Decoded { width: pnm.header.width, height: pnm.header.height, pixels: pnm.pixels, deep: pnm.deep, gray: pnm.header.gray(), has_alpha: pnm.header.alpha() }
+		}
+		SourceFormat::Pfm => {
+			let image = crate::pnm::pfm(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?;
+			let (pixels, deep) = crate::pnm::pfm_rgba(&image);
+			Decoded { width: image.width, height: image.height, pixels, deep: Some(deep), gray: image.gray, has_alpha: false }
 		}
 		// libjpeg-turbo, as every reference tool decodes JPEG; a CMYK JPEG, which cwebp and
 		// cjxl refuse, falls through to the `image` crate.
@@ -874,6 +884,8 @@ mod tests {
 		assert_eq!(SourceFormat::sniff(b"P7\nWIDTH 1\n"), Some(SourceFormat::Pnm), "a PAM");
 		assert_eq!(SourceFormat::sniff(b"P3\n1 1\n255\n"), None, "cwebp reads no plain (ASCII) PNM");
 		assert_eq!(SourceFormat::sniff(b"P6x"), None);
+		assert_eq!(SourceFormat::sniff(b"PF\n64 48\n-1.0\n"), Some(SourceFormat::Pfm), "a colour PFM");
+		assert_eq!(SourceFormat::sniff(b"Pf 64 48 1\n"), Some(SourceFormat::Pfm), "a gray PFM");
 		assert_eq!(SourceFormat::sniff(b"BM6\x00\x00\x00......"), None, "BMP is not accepted");
 		assert_eq!(SourceFormat::sniff(b"RIFF\x00\x00\x00\x00WAVEfmt "), None, "a RIFF container that is not WebP");
 		assert_eq!(SourceFormat::sniff(b"\x89PN"), None, "a truncated header must not match");

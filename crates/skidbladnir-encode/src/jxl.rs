@@ -180,6 +180,7 @@ const JXL_ENC_SUCCESS: c_int = 0;
 const JXL_ENC_NEED_MORE_OUTPUT: c_int = 2;
 const JXL_CHANNEL_ALPHA: c_int = 0;
 const JXL_ORIENT_IDENTITY: c_int = 1;
+const JXL_TYPE_FLOAT: c_int = 0;
 const JXL_TYPE_UINT8: c_int = 2;
 const JXL_TYPE_UINT16: c_int = 3;
 const JXL_NATIVE_ENDIAN: c_int = 0;
@@ -530,6 +531,7 @@ fn distance(target: JxlTarget, lossy_source: bool) -> f32 {
 enum Samples {
 	U8(Vec<u8>),
 	U16(Vec<u16>),
+	F32(Vec<f32>),
 }
 
 /// How the image's colour is described: an ICC profile, or an enumerated encoding.
@@ -544,6 +546,8 @@ struct Input {
 	width: u32,
 	height: u32,
 	bits_per_sample: u32,
+	/// Nonzero for floating-point samples: 8 for 32-bit floats.
+	exponent_bits: u32,
 	num_color_channels: u32,
 	alpha_bits: u32,
 	samples: Samples,
@@ -587,6 +591,7 @@ impl Input {
 			SourceFormat::Png => Self::png(source),
 			SourceFormat::Jpeg => Self::jpeg(source),
 			SourceFormat::Pnm => Self::pnm(source),
+			SourceFormat::Pfm => Self::pfm(source),
 			_ => Self::other(source),
 		}
 	}
@@ -694,7 +699,7 @@ impl Input {
 		let colour_given = given != Given::None;
 		let intensity_target = if encoding.transfer_function == JXL_TRANSFER_FUNCTION_PQ { max_cll } else { 0.0 };
 		let frame = JxlFrameHeader { duration: 100, timecode: 0, name_length: 0, is_last: JXL_TRUE, layer_info: JxlLayerInfo { have_crop: JXL_FALSE, crop_x0: 0, crop_y0: 0, xsize: source.width, ysize: source.height, blend_info: JxlBlendInfo { blendmode: JXL_BLEND_REPLACE, source: 1, alpha: 0, clamp: JXL_FALSE }, save_as_reference: 1 } };
-		Self { width: source.width, height: source.height, bits_per_sample: bits, num_color_channels: if colour { 3 } else { 1 }, alpha_bits: if alpha { bits } else { 0 }, samples: Self::samples(source, !colour, alpha, bit_depth > 8), colour: icc.map_or(Colour::Encoding(encoding), Colour::Icc), colour_given, colour_hints_ignored: false, intensity_target, exif, xmp, jumbf: Vec::new(), frame, lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT }
+		Self { width: source.width, height: source.height, bits_per_sample: bits, exponent_bits: 0, num_color_channels: if colour { 3 } else { 1 }, alpha_bits: if alpha { bits } else { 0 }, samples: Self::samples(source, !colour, alpha, bit_depth > 8), colour: icc.map_or(Colour::Encoding(encoding), Colour::Icc), colour_given, colour_hints_ignored: false, intensity_target, exif, xmp, jumbf: Vec::new(), frame, lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT }
 	}
 
 	/// `lib/extras/dec/jpg.cc`: a JPEG decoded to 8-bit pixels (`-j 0`).
@@ -702,7 +707,7 @@ impl Input {
 		let markers = jpeg_markers(&source.bytes);
 		let exif = markers.iter().find(|(marker, data)| *marker == 0xe1 && data.len() >= 8 && data.starts_with(b"Exif\0\0")).map_or_else(Vec::new, |(_, data)| data[6..].to_vec());
 		let colour = jpeg_icc(&markers).map_or_else(|| Colour::Encoding(srgb(source.gray, JXL_RENDERING_INTENT_PERCEPTUAL)), Colour::Icc);
-		Self { width: source.width, height: source.height, bits_per_sample: 8, num_color_channels: if source.gray { 1 } else { 3 }, alpha_bits: 0, samples: Self::samples(source, source.gray, false, false), colour, colour_given: true, colour_hints_ignored: true, intensity_target: 0.0, exif, xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: true, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT }
+		Self { width: source.width, height: source.height, bits_per_sample: 8, exponent_bits: 0, num_color_channels: if source.gray { 1 } else { 3 }, alpha_bits: 0, samples: Self::samples(source, source.gray, false, false), colour, colour_given: true, colour_hints_ignored: true, intensity_target: 0.0, exif, xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: true, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT }
 	}
 
 	/// `lib/extras/dec/pnm.cc`: the samples as stored, at `log2(maxval + 1)` bits and read
@@ -719,7 +724,18 @@ impl Input {
 		let raw = crate::pnm::raw_samples(&source.bytes, &header);
 		let samples = if bits > 8 { Samples::U16(raw) } else { Samples::U8(raw.into_iter().map(|v| u8::try_from(v).unwrap_or(u8::MAX)).collect()) };
 		let gray = header.gray();
-		Self { width: source.width, height: source.height, bits_per_sample: bits, num_color_channels: if gray { 1 } else { 3 }, alpha_bits: if header.alpha() { bits } else { 0 }, samples, colour: Colour::Encoding(srgb(gray, JXL_RENDERING_INTENT_PERCEPTUAL)), colour_given: false, colour_hints_ignored: false, intensity_target: 0.0, exif: Vec::new(), xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_CODESTREAM }
+		Self { width: source.width, height: source.height, bits_per_sample: bits, exponent_bits: 0, num_color_channels: if gray { 1 } else { 3 }, alpha_bits: if header.alpha() { bits } else { 0 }, samples, colour: Colour::Encoding(srgb(gray, JXL_RENDERING_INTENT_PERCEPTUAL)), colour_given: false, colour_hints_ignored: false, intensity_target: 0.0, exif: Vec::new(), xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_CODESTREAM }
+	}
+
+	/// `lib/extras/dec/pnm.cc` for a PFM: 32-bit floats as they are stored, top row first,
+	/// in sRGB with the perceptual intent. A cropped or resized image is no longer the
+	/// file's samples, and is encoded from its 16-bit reduction as [`Self::other`].
+	fn pfm(source: &SourceImage) -> Self {
+		let image = match crate::pnm::pfm(&source.bytes) {
+			Ok(image) if (image.width, image.height) == (source.width, source.height) => image,
+			_ => return Self::other(source),
+		};
+		Self { width: source.width, height: source.height, bits_per_sample: 32, exponent_bits: 8, num_color_channels: if image.gray { 1 } else { 3 }, alpha_bits: 0, samples: Samples::F32(image.samples), colour: Colour::Encoding(srgb(image.gray, JXL_RENDERING_INTENT_PERCEPTUAL)), colour_given: false, colour_hints_ignored: false, intensity_target: 0.0, exif: Vec::new(), xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT }
 	}
 
 	/// A format `cjxl` does not read (TIFF, WebP, AVIF, HEIC, or JPEG XL decoded to
@@ -732,7 +748,7 @@ impl Input {
 		let colour_given = metadata.icc.is_some();
 		let colour = metadata.icc.map_or_else(|| Colour::Encoding(srgb(source.gray, JXL_RENDERING_INTENT_RELATIVE)), Colour::Icc);
 		let frame = JxlFrameHeader::default();
-		Self { width: source.width, height: source.height, bits_per_sample: bits, num_color_channels: if source.gray { 1 } else { 3 }, alpha_bits: if source.has_alpha { bits } else { 0 }, samples: Self::samples(source, source.gray, source.has_alpha, deep), colour, colour_given, colour_hints_ignored: false, intensity_target: 0.0, exif: metadata.exif.unwrap_or_default(), xmp: metadata.xmp.unwrap_or_default(), jumbf: Vec::new(), frame, lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT }
+		Self { width: source.width, height: source.height, bits_per_sample: bits, exponent_bits: 0, num_color_channels: if source.gray { 1 } else { 3 }, alpha_bits: if source.has_alpha { bits } else { 0 }, samples: Self::samples(source, source.gray, source.has_alpha, deep), colour, colour_given, colour_hints_ignored: false, intensity_target: 0.0, exif: metadata.exif.unwrap_or_default(), xmp: metadata.xmp.unwrap_or_default(), jumbf: Vec::new(), frame, lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT }
 	}
 
 	/// `ApplyColorHints`: the `-x` hints, in the order `cjxl` applies them.
@@ -1042,6 +1058,7 @@ fn encode_pixels(settings: &JxlSettings, source: &SourceImage) -> Result<Vec<u8>
 	info.xsize = input.width * already_downsampled;
 	info.ysize = input.height * already_downsampled;
 	info.bits_per_sample = input.bits_per_sample;
+	info.exponent_bits_per_sample = input.exponent_bits;
 	info.intensity_target = if settings.intensity_target > 0.0 { settings.intensity_target } else { input.intensity_target };
 	info.uses_original_profile = c_int::from(lossless || settings.disable_perceptual_optimizations);
 	info.orientation = orientation;
@@ -1108,6 +1125,7 @@ fn encode_pixels(settings: &JxlSettings, source: &SourceImage) -> Result<Vec<u8>
 	let (format, pointer, size) = match &input.samples {
 		Samples::U8(samples) => (JxlPixelFormat { num_channels: channels, data_type: JXL_TYPE_UINT8, endianness: JXL_NATIVE_ENDIAN, align: 0 }, samples.as_ptr().cast::<c_void>(), samples.len()),
 		Samples::U16(samples) => (JxlPixelFormat { num_channels: channels, data_type: JXL_TYPE_UINT16, endianness: JXL_NATIVE_ENDIAN, align: 0 }, samples.as_ptr().cast::<c_void>(), samples.len() * 2),
+		Samples::F32(samples) => (JxlPixelFormat { num_channels: channels, data_type: JXL_TYPE_FLOAT, endianness: JXL_NATIVE_ENDIAN, align: 0 }, samples.as_ptr().cast::<c_void>(), samples.len() * 4),
 	};
 	// SAFETY: `pointer` addresses `size` bytes in the declared format, which libjxl copies
 	// before returning.

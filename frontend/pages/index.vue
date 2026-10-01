@@ -145,7 +145,7 @@ onUnmounted(() => {
 
 async function chooseInputs() {
 	const { open } = await import('@tauri-apps/plugin-dialog')
-	const picked = await open({ multiple: true, filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'jpe', 'jif', 'jfif', 'jfi', 'tif', 'tiff', 'webp', 'avif', 'jxl', 'heic', 'heif', 'gif', 'pnm', 'pgm', 'ppm', 'pam'] }] })
+	const picked = await open({ multiple: true, filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'jpe', 'jif', 'jfif', 'jfi', 'tif', 'tiff', 'webp', 'avif', 'jxl', 'heic', 'heif', 'gif', 'pnm', 'pgm', 'ppm', 'pam', 'pfm'] }] })
 	scanned.value = []
 	scannedRoot.value = ''
 	if (Array.isArray(picked)) inputPaths.value = picked

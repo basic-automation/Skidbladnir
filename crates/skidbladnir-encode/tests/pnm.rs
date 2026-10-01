@@ -210,3 +210,74 @@ fn matches_cjxl_reading_pnm() {
 	assert!(mismatches.is_empty(), "{} of {total} PNM conversions diverged from cjxl:\n  {}", mismatches.len(), mismatches.join("\n  "));
 	eprintln!("PNM PARITY OK: {total} PNM-to-JPEG XL conversions matched cjxl byte for byte.");
 }
+
+/// A PFM file: `PF` or `Pf`, the size, the scale (its sign is the byte order), then rows
+/// bottom to top. The samples run a little outside 0 to 1, as real PFMs do.
+fn pfm(gray: bool, scale: &str) -> Vec<u8> {
+	let channels = if gray { 1 } else { 3 };
+	let little = scale.starts_with('-');
+	let mut out = format!("{}\n{W} {H}\n{scale}\n", if gray { "Pf" } else { "PF" }).into_bytes();
+	for y in (0..H).rev() {
+		for x in 0..W {
+			for c in 0..channels {
+				#[expect(clippy::cast_precision_loss, reason = "small integers")]
+				let value = sample(x, y, c, 1000) as f32 / 900.0 - 0.05;
+				out.extend_from_slice(&if little { value.to_le_bytes() } else { value.to_be_bytes() });
+			}
+		}
+	}
+	out
+}
+
+#[test]
+fn matches_cjxl_reading_pfm() {
+	let Some((cjxl, dir)) = prepare("PFM cjxl", tool("SKIDBLADNIR_REFERENCE_CJXL", "cjxl", "--version", jxl::linked_version())) else { return };
+	let fixtures = [("PF big-endian", pfm(false, "1.0")), ("PF little-endian", pfm(false, "-1.0")), ("Pf gray", pfm(true, "-1")), ("PF scale 2.5 (ignored)", pfm(false, "2.5"))];
+	let mut mismatches = Vec::new();
+	let mut total = 0;
+	for (fixture, bytes) in fixtures {
+		let input = dir.join("input.pfm");
+		fs::write(&input, &bytes).expect("write the fixture");
+		for settings in [JxlSettings { effort: 3, ..JxlSettings::default() }, JxlSettings { effort: 7, target: JxlTarget::Distance(0.0), ..JxlSettings::default() }, JxlSettings { effort: 7, target: JxlTarget::Distance(2.0), ..JxlSettings::default() }] {
+			let job = EncodeJob { format: OutputFormat::Jxl, jxl: settings.clone(), ..EncodeJob::default() };
+			let theirs = dir.join("cjxl.jxl");
+			let ours = dir.join("ours.jxl");
+			let run = Command::new(&cjxl).args(cjxl_args(&job, &input, &theirs)).output().expect("run cjxl");
+			assert!(run.status.success(), "cjxl refused {fixture}: {}", String::from_utf8_lossy(&run.stderr));
+			encode_file(&job, &input, &ours).unwrap_or_else(|error| panic!("ours failed on {fixture}: {error}"));
+			total += 1;
+			let (expected, actual) = (fs::read(&theirs).expect("read cjxl's"), fs::read(&ours).expect("read ours"));
+			if expected != actual {
+				mismatches.push(format!("{fixture}, {:?}: ours {} bytes, cjxl {} bytes", settings.target, actual.len(), expected.len()));
+			}
+		}
+	}
+	// libjxl 0.12.0 fails a lossless float encode at effort 3 ("JxlEncoderProcessOutput
+	// failed" from cjxl itself). Both sides must refuse it; if cjxl starts accepting it, it
+	// belongs in the cases above.
+	let job = EncodeJob { format: OutputFormat::Jxl, jxl: JxlSettings { effort: 3, target: JxlTarget::Distance(0.0), ..JxlSettings::default() }, ..EncodeJob::default() };
+	let input = dir.join("input.pfm");
+	fs::write(&input, pfm(false, "1.0")).expect("write the fixture");
+	let run = Command::new(&cjxl).args(cjxl_args(&job, &input, &dir.join("cjxl.jxl"))).output().expect("run cjxl");
+	assert!(!run.status.success(), "cjxl now encodes a lossless float PFM at effort 3: make it a parity case");
+	assert!(encode_file(&job, &input, &dir.join("ours.jxl")).is_err(), "libjxl refuses it on our side too");
+	let _ = fs::remove_dir_all(&dir);
+	assert!(mismatches.is_empty(), "{} of {total} PFM conversions diverged from cjxl:\n  {}", mismatches.len(), mismatches.join("\n  "));
+	eprintln!("PFM PARITY OK: {total} PFM-to-JPEG XL conversions matched cjxl byte for byte.");
+}
+
+/// PFM to the other formats has no reference (only `cjxl` reads PFM): it converts, clamped
+/// to the nominal range, at the file's size.
+#[test]
+fn pfm_converts_to_every_format() {
+	let dir = env::temp_dir().join(format!("skidbladnir-pfm-formats-{}", std::process::id()));
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+	let input = dir.join("input.pfm");
+	fs::write(&input, pfm(false, "-1")).expect("write the fixture");
+	for format in [OutputFormat::Webp, OutputFormat::Avif, OutputFormat::Jxl, OutputFormat::Heic] {
+		let output = dir.join(format!("out.{}", format.extension()));
+		let conversion = encode_file(&EncodeJob { format, ..EncodeJob::default() }, &input, &output).unwrap_or_else(|error| panic!("{format:?}: {error}"));
+		assert_eq!((conversion.width, conversion.height), (W, H), "{format:?}");
+	}
+	let _ = fs::remove_dir_all(&dir);
+}
