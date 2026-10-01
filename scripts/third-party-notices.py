@@ -7,9 +7,10 @@ Kvazaar and x265 submodules.
     scripts/third-party-notices.py [--check]
 
 There is one file per edition, because the editions ship different HEVC encoders under
-different licences: THIRD-PARTY-NOTICES.md for the standard edition (Kvazaar, ISC as a
-whole) and THIRD-PARTY-NOTICES-GPL.md for the GPL edition (x265, GPL-3.0-or-later as a
-whole). Each installer carries its own edition's file as THIRD-PARTY-NOTICES.md.
+different licences: THIRD-PARTY-NOTICES.md for the standard edition (Kvazaar; ISC, with
+libheif and libde265 as a separate, replaceable LGPL-3.0 library) and
+THIRD-PARTY-NOTICES-GPL.md for the GPL edition (x265, GPL-3.0-or-later as a whole). Each
+installer carries its own edition's file as THIRD-PARTY-NOTICES.md.
 
 Run it after bumping any of them; CI's `notices` check fails if either file is stale.
 """
@@ -52,9 +53,11 @@ lgpl = ["**libheif and libde265 (LGPL-3.0).** They are shipped as one shared lib
 editions = {
 	"THIRD-PARTY-NOTICES.md": (["# Third-party notices", "",
 		"This is the **standard edition** of Skidbladnir. Skidbladnir is ISC-licensed (`LICENSE`),",
-		"and so is this build as a whole: its HEIC encoder is Kvazaar. It includes the native",
-		"libraries below, whose licences require their notices to travel with the app. Rust",
-		"crates are listed with their licences by `cargo deny`'s policy in `deny.toml`.", ""] + lgpl, common + [kvazaar] + heif),
+		"and this build's HEIC encoder is Kvazaar (BSD-3-Clause), not x265. The build ships",
+		"libheif and libde265 as a separate, replaceable LGPL-3.0 shared library, described",
+		"next. It includes the native libraries below, whose licences require their notices to",
+		"travel with the app. Rust crates are listed with their licences by `cargo deny`'s",
+		"policy in `deny.toml`.", ""] + lgpl, common + [kvazaar] + heif),
 	"THIRD-PARTY-NOTICES-GPL.md": (["# Third-party notices", "",
 		"This is the **GPL edition** of Skidbladnir. Skidbladnir's own source is ISC-licensed",
 		"(`LICENSE`), but this build encodes HEIC with x265, which is licensed GPL-2.0-or-later,",
