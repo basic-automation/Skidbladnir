@@ -350,11 +350,13 @@ jobs:
           fi
           # The workflow can be reached two ways: a tag pushed on its own, or a tag created
           # alongside a release. In the first case there is no release to upload to yet, and
-          # `gh release upload` would simply fail — so create a draft prerelease to hold the
-          # artifacts rather than losing a green build to an ordering accident.
+          # `gh release upload` would simply fail — so create a draft release to hold the
+          # artifacts rather than losing a green build to an ordering accident. From 1.0.0 a
+          # release is a full release, not a prerelease, so that /releases/latest and the
+          # repository's "Latest" badge find it; a beta is marked prerelease when published.
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            echo "no release for $TAG yet; creating a draft prerelease to hold the artifacts"
-            gh release create "$TAG" --draft --prerelease --title "$TAG" --notes "Artifacts attached by CI. Notes pending."
+            echo "no release for $TAG yet; creating a draft release to hold the artifacts"
+            gh release create "$TAG" --draft --title "$TAG" --notes "Artifacts attached by CI. Notes pending."
           fi
           gh release upload "$TAG" dist-artifacts/* --clobber
 
@@ -442,7 +444,7 @@ jobs:
             exit 1
           fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --draft --prerelease --title "$TAG" --notes "Artifacts attached by CI. Notes pending."
+            gh release create "$TAG" --draft --title "$TAG" --notes "Artifacts attached by CI. Notes pending."
           fi
           gh release upload "$TAG" "${{ steps.archive.outputs.file }}" --clobber
 
@@ -450,9 +452,10 @@ jobs:
   # lists the ones that produced signed installers (scripts/updater-manifest.py): one per
   # edition, latest.json for the standard edition and latest-gpl.json for the GPL one.
   #
-  # The installed app reads it from the `updater` branch, not from the release:
-  # `releases/latest` skips prereleases, and every release is a prerelease for now. The
-  # branch holds only the manifests, and only this job writes to it.
+  # The installed app reads it from the `updater` branch, not from the release. That began
+  # because `releases/latest` skips prereleases and every release before 1.0.0 was one; it
+  # also means only this job decides what installed copies are offered. The branch holds
+  # only the manifests, and only this job writes to it.
   manifest:
     name: updater manifest
     needs: bundle

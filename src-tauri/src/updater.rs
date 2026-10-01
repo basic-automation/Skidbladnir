@@ -12,11 +12,10 @@
 //! # Where updates come from
 //!
 //! `tauri.conf.json` points the plugin at `latest.json` on the repository's `updater`
-//! branch, which `release.yml` rewrites after every release. GitHub's own
-//! `releases/latest` cannot be used: every release is a prerelease until the migration
-//! ships, and `latest` skips prereleases. Every download is checked against the minisign
-//! public key in the same file, so a manifest that pointed somewhere else would fail
-//! verification rather than install.
+//! branch, which `release.yml` rewrites after every release. It is not GitHub's own
+//! `releases/latest`, which skips prereleases: every release before 1.0.0 was one. Every
+//! download is checked against the minisign public key in the same file, so a manifest
+//! that pointed somewhere else would fail verification rather than install.
 
 use std::sync::Mutex;
 

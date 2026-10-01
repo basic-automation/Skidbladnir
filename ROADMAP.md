@@ -679,9 +679,10 @@ prettier subset.
       `manifest` job writes `latest.json` from the signed installers
       (`scripts/updater-manifest.py`), attaches it to the release, and commits it to the
       orphan **`updater` branch**, which is what installed copies read. Not
-      `releases/latest`: that skips prereleases, and every release is one. A re-run of an
-      older tag never rolls the branch back. Dry runs sign with a throwaway key so the
-      whole path is exercised without publishing.
+      `releases/latest`: that skips prereleases, and every release before 1.0.0 was one.
+      From 1.0.0 `release.yml` holds a tag's artifacts in a draft full release, not a
+      draft prerelease. A re-run of an older tag never rolls the branch back. Dry runs
+      sign with a throwaway key so the whole path is exercised without publishing.
       Verified locally: a signed `.deb` built with a throwaway key, served with a
       generated manifest, raised the banner in the real window; a tampered download was
       refused with "signature verification failed". A `release.yml` dry run signed all
