@@ -1,9 +1,11 @@
 # Third-party notices
 
 This is the **standard edition** of Skidbladnir. Skidbladnir is ISC-licensed (`LICENSE`),
-and so is this build as a whole: its HEIC encoder is Kvazaar. It includes the native
-libraries below, whose licences require their notices to travel with the app. Rust
-crates are listed with their licences by `cargo deny`'s policy in `deny.toml`.
+and this build's HEIC encoder is Kvazaar (BSD-3-Clause), not x265. The build ships
+libheif and libde265 as a separate, replaceable LGPL-3.0 shared library, described
+next. It includes the native libraries below, whose licences require their notices to
+travel with the app. Rust crates are listed with their licences by `cargo deny`'s
+policy in `deny.toml`.
 
 **libheif and libde265 (LGPL-3.0).** They are shipped as one shared library
 (`libheif.so.1`, `heif.dll`, or `libheif.1.dylib`) beside the app, which loads it
