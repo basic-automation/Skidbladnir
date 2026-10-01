@@ -640,6 +640,15 @@ prettier subset.
       executable. CI builds the NSIS installer, installs it silently to
       `%LOCALAPPDATA%\Skidbladnir`, and runs the full smoke test (13 checks) against the
       installed `skidbladnir.exe`. WebView2 displays AVIF there.
+- [ ] "Basic Automation", not "basicautomation", as the Windows publisher. Not a label
+      only: Tauri's NSIS installer keeps the install folder under
+      `HKCU\Software\<publisher>\Skidbladnir`, and with no `bundle.publisher` the
+      publisher is `basicautomation`, from the identifier. Renamed, an in-app update of a
+      copy in a custom folder installs to `%LOCALAPPDATA%\Skidbladnir` instead, its
+      shortcuts keep opening the old copy, and that copy offers the update again on every
+      start. Running the new setup.exe by hand, its "uninstall first" reads the same key
+      before any installer hook can run. Needs a migration, tested on Windows over a
+      custom-folder install, before the key is set.
 - [ ] First launch of the **macOS** build. `tauri-driver` does not support macOS, so the
       `.dmg` still needs a human to open it once.
 - [x] An Intel macOS build. `release.yml` cross-builds `x86_64-apple-darwin` on the Apple
