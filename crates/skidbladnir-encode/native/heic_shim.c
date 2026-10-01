@@ -25,12 +25,13 @@
 typedef struct {
 	uint32_t width;
 	uint32_t height;
-	/* 0: monochrome, Y and optional alpha planes. 1: interleaved RGB or RGBA. */
+	/* 0: monochrome, Y and optional alpha planes. 1: interleaved RGB or RGBA. 2: YCbCr
+	   4:2:0 planes and optional alpha, as heifio/decoder_webp.cc reads a lossy WebP. */
 	int layout;
 	int has_alpha;
-	/* layout 0: Y, alpha. layout 1: the interleaved plane. */
-	const uint8_t* planes[2];
-	size_t strides[2];
+	/* layout 0: Y, alpha. layout 1: the interleaved plane. layout 2: Y, Cb, Cr, alpha. */
+	const uint8_t* planes[4];
+	size_t strides[4];
 	const uint8_t* icc;
 	size_t icc_size;
 	const uint8_t* exif;
@@ -244,6 +245,27 @@ static struct heif_error make_image(const SkidHeicInput* in, struct heif_image**
 			if (err.code) goto fail;
 			plane = heif_image_get_plane2(image, heif_channel_Alpha, &stride);
 			copy_plane(plane, stride, in->planes[1], in->strides[1], in->width, in->height);
+		}
+	}
+	else if (in->layout == 2) {
+		/* decoder_webp.cc: Y, Cb and Cr at 4:2:0, then alpha. */
+		int uv_w = (w + 1) / 2, uv_h = (h + 1) / 2;
+		const enum heif_channel channels[4] = {heif_channel_Y, heif_channel_Cb, heif_channel_Cr, heif_channel_Alpha};
+		int c;
+		err = heif_image_create(w, h, heif_colorspace_YCbCr, heif_chroma_420, &image);
+		if (err.code) return err;
+		for (c = 0; c < (in->has_alpha ? 4 : 3); c++) {
+			int full = c == 0 || c == 3;
+			err = heif_image_add_plane(image, channels[c], full ? w : uv_w, full ? h : uv_h, 8);
+			if (err.code) goto fail;
+		}
+		for (c = 0; c < (in->has_alpha ? 4 : 3); c++) {
+			int full = c == 0 || c == 3;
+			plane = heif_image_get_plane2(image, channels[c], &stride);
+			copy_plane(plane, stride, in->planes[c], in->strides[c], full ? in->width : (size_t) uv_w, full ? in->height : (size_t) uv_h);
+		}
+		if (in->has_alpha) {
+			heif_image_set_premultiplied_alpha(image, 0);
 		}
 	}
 	else {

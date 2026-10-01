@@ -39,7 +39,7 @@ compare the bytes. What that covers and where it stops is spelled out under
 | Animated WebP | `img2webp`, `gif2webp` and `webpmux` 1.6.0 | libwebp 1.6.0 | 97 cases: animated WebP and GIF input, every setting those tools can express, and metadata (`gif2webp -metadata`, `webpmux -set`) |
 | AVIF | `avifenc` 1.4.2 | libavif 1.4.2 + libaom 3.15.1 | 191 cases: every option, PNG inputs, JPEG input |
 | JPEG XL | `cjxl` 0.12.0 | libjxl 0.12.0 | 254 cases: every option, PNG, PNM, PFM and still-GIF inputs, JPEG recompression and decoding |
-| HEIC | `heif-enc -e kvazaar` 1.23.5 | libheif 1.23.5 + Kvazaar 2.3.2 | 153 cases: every option, PNG, JPEG and TIFF inputs |
+| HEIC | `heif-enc -e kvazaar` 1.23.5 | libheif 1.23.5 + Kvazaar 2.3.2 | 162 cases: every option, PNG, JPEG, TIFF and WebP inputs |
 
 The [GPL edition](#editions) writes HEIC with x265 instead, adding `heif-enc`'s `-L`
 lossless, 4:4:4 and 4:2:2 chroma, 10-bit output and x265's own tuning; its HEIC is checked
@@ -229,7 +229,7 @@ What it can do:
 - Encode each format with its reference encoder's library linked into the binary, with
   every option of the reference command line for a still image, and prove the output
   **byte-for-byte identical** to `cwebp`, `img2webp`, `gif2webp`, `webpmux`, `avifenc`, `cjxl` and
-  `heif-enc` across 3,368 cases (see above).
+  `heif-enc` across 3,377 cases (see above).
 - Convert images from a window with every one of those options, labelled with the flag
   it sets, the expert ones in folding sections.
 - Accept files dropped onto the window, sorting out the ones it cannot read by looking

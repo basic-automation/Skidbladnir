@@ -248,3 +248,31 @@ fn matches_heif_enc_across_tiff_inputs() {
 	}
 	finish(&run, "TIFF inputs");
 }
+
+/// WebP input, which `heif-enc` reads with libwebp (`heifio/decoder_webp.cc`): lossless and
+/// lossy, with and without alpha, written here by libwebp itself.
+#[test]
+fn matches_heif_enc_across_webp_inputs() {
+	use skidbladnir_encode::{RgbaImage, encode_rgba, settings::WebpSettings};
+
+	let Some(mut run) = prepare() else { return };
+	let (width, height) = (W, H);
+	let rgba = rows(4, 8);
+	let opaque: Vec<u8> = rgba.chunks(4).flat_map(|p| [p[0], p[1], p[2], 255]).collect();
+	for (name, pixels, settings) in [("lossless, alpha", &rgba, WebpSettings { lossless: true, exact: true, ..WebpSettings::default() }), ("lossless, opaque", &opaque, WebpSettings { lossless: true, ..WebpSettings::default() }), ("lossy, alpha", &rgba, WebpSettings::default()), ("lossy, opaque", &opaque, WebpSettings::default())] {
+		let webp = encode_rgba(&settings.into(), &RgbaImage { width, height, pixels }).expect("libwebp encodes the fixture");
+		let input = run.dir.join(format!("{}.webp", name.replace([',', ' '], "_")));
+		fs::write(&input, webp).expect("write the fixture");
+		for (setting, heic) in [("default", d()), ("quality 30", HeicSettings { quality: 30, ..d() })] {
+			run.compare(&format!("{name}, {setting}"), &input, &heic);
+		}
+	}
+	// Odd dimensions, so the 4:2:0 planes round up.
+	let (odd_w, odd_h) = (61_u32, 45_u32);
+	let odd: Vec<u8> = (0..odd_h).flat_map(|y| (0..odd_w).flat_map(move |x| [u8::try_from(x * 4).expect("byte"), u8::try_from(y * 5).expect("byte"), 120, u8::try_from(255 - x).expect("byte")])).collect();
+	let webp = encode_rgba(&WebpSettings::default().into(), &RgbaImage { width: odd_w, height: odd_h, pixels: &odd }).expect("libwebp encodes the fixture");
+	let input = run.dir.join("odd.webp");
+	fs::write(&input, webp).expect("write the fixture");
+	run.compare("lossy, alpha, 61x45", &input, &d());
+	finish(&run, "WebP inputs");
+}

@@ -1208,6 +1208,14 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       `matches_heif_enc_across_tiff_inputs` — 8-bit RGB (plain and LZW) and straight-alpha
       RGBA x two settings: 6 of 6 byte-identical. A 16-bit TIFF is refused by Kvazaar in
       `heif-enc` too.
+- [x] **WebP into HEIC, held to `heif-enc`** (fixed 2026-10-01). `heif-enc` reads a *lossy*
+      WebP straight into YCbCr 4:2:0 planes (`heifio/decoder_webp.cc`: `WebPDecode` into
+      `MODE_YUV(A)`, never RGB), where Skidbladnir went through RGB — 4 of 8 conversions
+      differed (every lossy one). A lossy WebP now reaches the shim as its own 4:2:0 planes
+      (`encoder::webp_yuv420_planes`, the same decode the `cwebp` route uses, and a third
+      input layout in `native/heic_shim.c`). **Gate:** `matches_heif_enc_across_webp_inputs`
+      — lossless and lossy, with and without alpha, and an odd-sized lossy one: 9 of 9
+      byte-identical. GPL edition: the same input path, built and checked by CI only.
 - [ ] (owner decision) **Premultiplied-alpha TIFF into HEIC.** Since 2026-10-01 an
       associated-alpha TIFF is un-multiplied as `cwebp` does, for every format. Reading
       `heifio/decoder_tiff.cc`, `heif-enc` instead takes associated alpha as plain alpha
