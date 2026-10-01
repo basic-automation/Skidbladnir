@@ -86,6 +86,9 @@ jobs:
         edition: [standard, gpl]
     env:
       FEATURES: ${{ matrix.edition == 'gpl' && 'skidbladnir/custom-protocol,skidbladnir/full' || 'skidbladnir/custom-protocol' }}
+      # RUSTFLAGS replaces .cargo/config.toml's target rustflags rather than adding to
+      # them, so Windows has to repeat the static C runtime here (see that file).
+      RUSTFLAGS: ${{ matrix.os == 'windows-latest' && '-D warnings -C target-feature=+crt-static' || '-D warnings' }}
 
     steps:
       - uses: actions/checkout@v7
@@ -364,6 +367,9 @@ jobs:
   window-windows:
     name: window smoke (windows)
     runs-on: windows-2022
+    env:
+      # As in the rust job: RUSTFLAGS would otherwise drop .cargo/config.toml's static C runtime.
+      RUSTFLAGS: -D warnings -C target-feature=+crt-static
     # A GUI installer that stops to ask a question never returns. Bound the job rather
     # than let a hang hold a runner for GitHub's six-hour default.
     timeout-minutes: 45

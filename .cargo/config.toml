@@ -9,5 +9,8 @@
 # separate DLL and keeps its own (dynamic) runtime, which nothing crosses: it hands out
 # and takes back its own memory. A side effect: the app no longer needs the Visual C++
 # redistributable to be installed.
+#
+# A RUSTFLAGS environment variable replaces these flags instead of adding to them, so CI,
+# which sets RUSTFLAGS, repeats `+crt-static` for its Windows jobs (.github/workflows/ci.yml).
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
