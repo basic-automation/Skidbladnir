@@ -15,9 +15,7 @@ Include what you can of:
 - the steps, and the file or files that show the problem;
 - what happened, and what an attacker could do with it.
 
-You will get a reply as soon as possible. A fix ships as a new release. Once it is out,
-the report is published as an advisory on the Security tab, with credit to you if you
-want it.
+You will get a reply as soon as possible. A fix ships as a new release.
 
 ## Supported versions
 
