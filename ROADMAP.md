@@ -1238,9 +1238,11 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       `heifio/decoder_tiff.cc`, `heif-enc` instead takes associated alpha as plain alpha
       (it un-multiplies nothing unless `--premultiplied-alpha` marks the image), so its
       HEIC of such a TIFF is darker where semi-transparent — the mirror image of the
-      straight-alpha exception kept for `cwebp`. Not yet run against `heif-enc`; decide
-      whether HEIC keeps true colours (as now) or follows `heif-enc`, then pin it with a
-      test either way.
+      straight-alpha exception kept for `cwebp`. **Run 2026-10-01:** a 16x16 TIFF stored as
+      premultiplied (100, 50, 25) at alpha 128 — straight colour (200, 100, 50), which is
+      how ImageMagick reads it — comes out of `heif-enc -e kvazaar -q 100` and `heif-dec`
+      as (100, 50, 25) at alpha 128. Decide whether HEIC keeps true colours (as now) or
+      follows `heif-enc`, then pin it with a test either way.
 - [ ] More input formats the tools read: animated GIF and APNG into `cjxl` (with the
       multi-image work below), Y4M (`avifenc`, `heif-enc`), PGX and EXR (`cjxl`), raw pixels
       (`heif-enc --raw`, `cwebp -s`), and `heif-enc`'s WebP and HEIF input.

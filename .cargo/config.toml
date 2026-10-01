@@ -7,8 +7,7 @@
 # binary. `+crt-static` puts Rust on the static runtime as well; `cc` follows it for the
 # C it compiles, and build.rs sets the CMake-built libraries to match. libheif is a
 # separate DLL and keeps its own (dynamic) runtime, which nothing crosses: it hands out
-# and takes back its own memory. A side effect: the app no longer needs the Visual C++
-# redistributable to be installed.
+# and takes back its own memory.
 #
 # A RUSTFLAGS environment variable replaces these flags instead of adding to them, so CI,
 # which sets RUSTFLAGS, repeats `+crt-static` for its Windows jobs (.github/workflows/ci.yml).
