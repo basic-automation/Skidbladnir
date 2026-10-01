@@ -317,9 +317,18 @@ The Electron app shells out to `cwebp.exe`. The Rust port should not.
       Pinned both ways by `unassociated_alpha_tiff_keeps_its_colours`: ours lossless equals
       the source; `cwebp`'s equals it premultiplied, and the test says what to do if a
       libtiff or libwebp release changes that.
-- [ ] **Associated-alpha (premultiplied) TIFF input.** `cwebp` un-multiplies it; whether the
-      `image` crate's decoder does is unchecked, and an `magick`-written associated-alpha
-      fixture reads back oddly even in `magick`. Needs a trustworthy fixture first.
+- [x] **Associated-alpha (premultiplied) TIFF input** (fixed 2026-10-01). **It diverged:**
+      the `image` crate hands the stored, premultiplied samples back, and Skidbladnir encoded
+      them as straight colour, darkening every semi-transparent pixel — 272 of 276
+      conversions differed from `cwebp`. `cwebp` gets them from libtiff as stored and
+      un-multiplies them itself (`imageio/tiffdec.c`, `MultARGBRow`: 24-bit fixed point,
+      black under alpha 0) when `ExtraSamples` is exactly `[1]`; `source.rs` now does the
+      same, and un-multiplies the 16-bit samples exactly for the other formats. The fixture
+      problem was solved by writing the TIFFs byte by byte in the test rather than with
+      `magick`. **Gate:** `matches_reference_cwebp_through_an_associated_alpha_tiff` — 8- and
+      16-bit, every alpha value 0-255 present, x the 138-setting surface: 276 of 276
+      byte-identical. Mutation: plain rounded division instead of the fixed-point form fails
+      79; no un-multiply fails 272.
 
 ## Phase 3 — Frontend parity (Nuxt + Tailwind)
 

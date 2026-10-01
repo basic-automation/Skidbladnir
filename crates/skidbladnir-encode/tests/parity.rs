@@ -897,3 +897,124 @@ fn unassociated_alpha_tiff_keeps_its_colours() {
 	assert!(theirs == premultiplied, "cwebp no longer premultiplies unassociated-alpha TIFFs: parity is now possible, so move tiff-rgba8.tif into matches_reference_cwebp_through_a_tiff_file");
 	eprintln!("UNASSOCIATED-ALPHA TIFF: ours keeps the colours exactly; cwebp premultiplies them, as pinned.");
 }
+
+/// A baseline little-endian TIFF, uncompressed in one strip: `samples` channels of
+/// `bits` bits (big samples stored little-endian, as the byte order says), with
+/// `ExtraSamples` set to `extra` when given.
+fn tiff(width: u32, height: u32, bits: u16, samples: u16, raster: &[u8], extra: Option<u16>) -> Vec<u8> {
+	let mut entries: Vec<(u16, u16, u32, u32)> = Vec::new(); // tag, type, count, value or offset
+	let header = 8_u32;
+	let raster_at = header;
+	let bits_at = raster_at + u32::try_from(raster.len()).expect("small");
+	let ifd_at = bits_at + 2 * u32::from(samples);
+	let short = 3;
+	let long = 4;
+	entries.push((256, long, 1, width));
+	entries.push((257, long, 1, height));
+	entries.push((258, short, u32::from(samples), bits_at));
+	entries.push((259, short, 1, 1));
+	entries.push((262, short, 1, if samples >= 3 { 2 } else { 1 }));
+	entries.push((273, long, 1, raster_at));
+	entries.push((277, short, 1, u32::from(samples)));
+	entries.push((278, long, 1, height));
+	entries.push((279, long, 1, u32::try_from(raster.len()).expect("small")));
+	entries.push((284, short, 1, 1));
+	if let Some(kind) = extra {
+		entries.push((338, short, 1, u32::from(kind)));
+	}
+	let mut out = b"II*\0".to_vec();
+	out.extend_from_slice(&ifd_at.to_le_bytes());
+	out.extend_from_slice(raster);
+	for _ in 0..samples {
+		out.extend_from_slice(&bits.to_le_bytes());
+	}
+	out.extend_from_slice(&u16::try_from(entries.len()).expect("few").to_le_bytes());
+	for (tag, kind, count, value) in entries {
+		out.extend_from_slice(&tag.to_le_bytes());
+		out.extend_from_slice(&kind.to_le_bytes());
+		out.extend_from_slice(&count.to_le_bytes());
+		// A single SHORT sits in the low half of the value field.
+		if kind == short && count == 1 {
+			out.extend_from_slice(&u16::try_from(value).expect("short").to_le_bytes());
+			out.extend_from_slice(&[0, 0]);
+		} else {
+			out.extend_from_slice(&value.to_le_bytes());
+		}
+	}
+	out.extend_from_slice(&0_u32.to_le_bytes());
+	out
+}
+
+/// A TIFF with **associated** (premultiplied) alpha: `cwebp` reads it through libtiff,
+/// which hands the stored samples back as they are, and then un-multiplies them itself
+/// (`imageio/tiffdec.c`, `MultARGBRow`, 24-bit fixed point; colour under alpha 0 becomes
+/// black). Held to `cwebp` byte for byte across the whole surface, at 8 and 16 bits, with
+/// every alpha value from 0 to 255 present.
+#[test]
+fn matches_reference_cwebp_through_an_associated_alpha_tiff() {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let Some(cwebp) = reference_cwebp() else {
+		let message = "ASSOCIATED-ALPHA TIFF PARITY NOT RUN: no reference cwebp found.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+	let linked = skidbladnir_encode::encoder::linked_encoder_version();
+	if reference_version(&cwebp) != Some(linked) {
+		let message = "ASSOCIATED-ALPHA TIFF PARITY NOT RUN: reference cwebp and the linked libwebp are different versions.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	}
+
+	let (width, height) = (64_u32, 48_u32);
+	let straight = fixture(width, height);
+	// Every alpha value appears: the fixture's own alpha, overridden by a ramp on four rows.
+	let straight: Vec<u8> = straight
+		.chunks(4)
+		.enumerate()
+		.flat_map(|(i, p)| {
+			let (x, y) = (u32::try_from(i).expect("small") % width, u32::try_from(i).expect("small") / width);
+			let a = if (20..24).contains(&y) { u8::try_from((x + (y - 20) * width) % 256).expect("byte") } else { p[3] };
+			[p[0], p[1], p[2], a]
+		})
+		.collect();
+	let premultiply8 = |c: u8, a: u8| u8::try_from((u32::from(c) * u32::from(a) + 127) / 255).expect("byte");
+	let raster8: Vec<u8> = straight.chunks(4).flat_map(|p| [premultiply8(p[0], p[3]), premultiply8(p[1], p[3]), premultiply8(p[2], p[3]), p[3]]).collect();
+	// 16 bits: the low byte carries detail, so libtiff's 16-to-8 rounding matters.
+	let raster16: Vec<u8> = straight
+		.chunks(4)
+		.enumerate()
+		.flat_map(|(i, p)| {
+			let a16 = u32::from(p[3]) * 257;
+			let wide = |c: u8| u16::try_from((u32::from(c) * 257 + u32::try_from(i % 97).expect("small")).min(65_535) * a16 / 65_535).expect("16-bit");
+			[wide(p[0]), wide(p[1]), wide(p[2]), u16::try_from(a16).expect("16-bit")]
+		})
+		.flat_map(u16::to_le_bytes)
+		.collect();
+	let sources = [("8-bit", tiff(width, height, 8, 4, &raster8, Some(1))), ("16-bit", tiff(width, height, 16, 4, &raster16, Some(1)))];
+
+	let dir = env::temp_dir().join(format!("skidbladnir-parity-assoc-tiff-{}", std::process::id()));
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+	let mut mismatches = Vec::new();
+	let cases = cases();
+	for (source_name, bytes) in &sources {
+		let source = dir.join(format!("assoc-{source_name}.tif"));
+		fs::write(&source, bytes).expect("write the fixture");
+		for (index, (name, settings)) in cases.iter().enumerate() {
+			let theirs = dir.join(format!("cwebp-{index}.webp"));
+			let run = Command::new(&cwebp).args(cwebp_args(settings, &source, &theirs)).output().expect("run the reference cwebp");
+			assert!(run.status.success(), "reference cwebp failed for `{name}` from the {source_name} TIFF: {}", String::from_utf8_lossy(&run.stderr));
+			let ours = dir.join(format!("ours-{index}.webp"));
+			skidbladnir_encode::source::encode_file(settings, &source, &ours).expect("our pipeline encodes");
+			let (expected, actual) = (fs::read(&theirs).expect("read cwebp's"), fs::read(&ours).expect("read ours"));
+			if actual != expected {
+				mismatches.push(format!("{source_name}, `{name}`: ours {} bytes, cwebp {} bytes", actual.len(), expected.len()));
+			}
+		}
+	}
+	let _ = fs::remove_dir_all(&dir);
+	let total = sources.len() * cases.len();
+	assert!(mismatches.is_empty(), "{} of {total} associated-alpha TIFF conversions diverged from cwebp:\n  {}", mismatches.len(), mismatches.join("\n  "));
+	eprintln!("ASSOCIATED-ALPHA TIFF PARITY OK: {total} conversions matched the reference cwebp byte for byte.");
+}

@@ -326,7 +326,11 @@ pub fn decode(path: &Path, bytes: Vec<u8>) -> Result<SourceImage, SourceError> {
 		SourceFormat::Jpeg if let Some(jpeg) = crate::jpeg::decode(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })? => Decoded::jpeg(&jpeg),
 		SourceFormat::Png | SourceFormat::Jpeg | SourceFormat::Tiff => {
 			let image = image::load_from_memory(&bytes).map_err(|error| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: error.to_string() })?;
-			Decoded::from_image(image, format, format == SourceFormat::Png && png_has_trns(&bytes))
+			let mut decoded = Decoded::from_image(image, format, format == SourceFormat::Png && png_has_trns(&bytes));
+			if format == SourceFormat::Tiff && tiff_alpha_is_associated(&bytes) {
+				decoded.unmultiply();
+			}
+			decoded
 		}
 	};
 
@@ -370,6 +374,44 @@ impl Decoded {
 		let rgba = to_rgba8(image, format);
 		Self { width: rgba.width(), height: rgba.height(), pixels: rgba.into_raw(), deep, gray, has_alpha }
 	}
+}
+
+impl Decoded {
+	/// Un-premultiply associated alpha the way `cwebp` does after libtiff has read a TIFF
+	/// (`imageio/tiffdec.c`, `MultARGBRow`): 24-bit fixed point, `(c * (255 << 24) / a +
+	/// 2^23) >> 24` clamped, and black under alpha 0. The 16-bit samples, which no reference
+	/// reads, are un-multiplied exactly, rounding to nearest.
+	fn unmultiply(&mut self) {
+		const HALF: u32 = 1 << 23;
+		for pixel in self.pixels.as_chunks_mut::<4>().0 {
+			let alpha = u32::from(pixel[3]);
+			if alpha == 255 {
+				continue;
+			}
+			let scale = (255_u32 << 24).checked_div(alpha).unwrap_or(0);
+			for colour in &mut pixel[..3] {
+				*colour = u8::try_from(((u32::from(*colour) * scale + HALF) >> 24).min(255)).unwrap_or(u8::MAX);
+			}
+		}
+		if let Some(deep) = &mut self.deep {
+			for pixel in deep.as_chunks_mut::<4>().0 {
+				let alpha = u64::from(pixel[3]);
+				if alpha == 65_535 {
+					continue;
+				}
+				for colour in &mut pixel[..3] {
+					*colour = (u64::from(*colour) * 65_535 + alpha / 2).checked_div(alpha).map_or(0, |v| u16::try_from(v.min(65_535)).unwrap_or(u16::MAX));
+				}
+			}
+		}
+	}
+}
+
+/// Whether a TIFF declares its one extra sample *associated* (premultiplied) alpha —
+/// `ExtraSamples` (tag 338) of exactly one value, 1 — which is when `cwebp` un-multiplies.
+fn tiff_alpha_is_associated(bytes: &[u8]) -> bool {
+	use tiff::{decoder::Decoder, tags::Tag};
+	Decoder::new(std::io::Cursor::new(bytes)).ok().and_then(|mut decoder| decoder.get_tag_u16_vec(Tag::ExtraSamples).ok()).is_some_and(|extra| extra == [1])
 }
 
 /// Whether a PNG has a `tRNS` chunk, which makes an RGB or grayscale PNG transparent.
