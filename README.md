@@ -48,6 +48,9 @@ against the real tools, apart from the exceptions listed under
 - WebP and **GIF**, still or animated
 - **PNM**: binary PGM, PPM and PAM (8 or 16 bits, with or without alpha), and **PFM**
   floating-point images
+- Each file's format is recognised from its contents, not its extension. An AVIF's crop,
+  rotation and mirror are applied, so a sideways-stored portrait converts upright, and
+  tiled (grid) AVIFs, as some cameras write large captures, are decoded whole.
 
 **Output formats, each with its reference encoder's whole command line for a still image**
 
@@ -79,21 +82,44 @@ its HEIC is checked by decoding, not byte for byte against a reference.
   file.
 - **JPEG XL**: distance or quality, alpha distance, effort (up to 11), **lossless JPEG
   recompression** — a JPEG repacked typically about 20% smaller (libjxl's figure) and
-  rebuildable bit for bit — and every one of `cjxl`'s modular, progressive, filter,
-  colour-space, metadata and container options.
+  rebuildable bit for bit, and the default for JPEG input — and every one of `cjxl`'s
+  modular, progressive, filter, colour-space, metadata and container options.
 - **HEIC**, the format iPhones use: quality, Kvazaar's lossless coding, chroma
   downsampling, the colour-profile presets and custom code points, thumbnails, alpha and
   premultiplied alpha, rotation and mirroring, tiles, 360° projection, a description,
   compatible brands and the compact `mini` format.
+- **Metadata**: a photo's ICC colour profile, Exif and XMP are kept as each reference
+  tool keeps them: in WebP when you ask, as `cwebp -metadata` does (off by default, as in
+  `cwebp`); in AVIF, JPEG XL and HEIC by default, as `avifenc`, `cjxl` and `heif-enc` do,
+  with each kind switchable off.
 - Crop and resize (with `-resize_mode`), shared by every format.
 
 **Workflow**
 
-- Preview the result beside the original, in any format, before anything is written
-- Animated WebP or GIF in, animated WebP out, every frame kept
-- Batch conversion across multiple files or whole folders
-- Original and converted file sizes reported after each conversion
-- Saved presets of your own, and settings remembered between launches
+- Preview the result beside the original, in any format, before anything is written to
+  disk. AVIF and JPEG XL previews are decoded in Rust, so they show on every platform.
+- Animated WebP or GIF in, animated WebP out: every frame, its timing and its loop count
+  kept, every WebP setting applied to each frame, and a preview of the animation first.
+  A GIF converts as `gif2webp` converts it, across disposal methods, transparency, timing
+  and loop counts, keeping its ICC profile and XMP when you ask, as
+  `gif2webp -metadata` does.
+- Drop files onto the window (any it cannot read are set aside), or convert a whole
+  folder, optionally with its subfolders, recreating their structure in the destination.
+- Batch conversion with progress per file, and a Cancel button that never leaves a
+  half-written image behind.
+- The original and converted sizes, and the dimensions produced, reported after each
+  conversion; and what an existing WebP already is: size, lossy or lossless, alpha,
+  animated.
+- Each format keeps its own settings while you try another. Settings and the destination
+  are remembered between launches, and you can save named presets of your own.
+- Every control shows the flag it sets, with the expert ones in folding sections. The
+  whole window works from the keyboard, and every control is labelled for a screen
+  reader.
+- Your source image is never overwritten, and every write goes through a temporary file,
+  so a failed conversion cannot damage a file that was already there. A file already in
+  the destination with the output's name (for example `photo.webp` when converting
+  `photo.png`, or when `photo.png` and `photo.jpg` are converted together) is replaced, as
+  `cwebp -o` would replace it.
 
 ## Install
 
@@ -212,17 +238,16 @@ licence:
 
 The GPL edition exists for people who want x265, the HEVC encoder a default `heif-enc`
 build uses, and x265 is GPL: an app that ships it is distributed under the GPL.
-Skidbladnir's own source is ISC either way. Each release attaches
-`Skidbladnir-<version>-source.tar.gz`, the complete source with every submodule, which is
-what the GPL edition's licence requires to be offered with it; the Rust crates and npm
-packages it compiles in are pinned by `Cargo.lock` and `frontend/package-lock.json` in
-that archive and published unmodified on crates.io and npmjs.com. Everything but HEIC
-output — WebP, AVIF, JPEG XL, and HEIC input — is identical in both.
+Skidbladnir's own source is ISC either way. Everything but HEIC output — WebP, AVIF,
+JPEG XL, and HEIC input — is identical in both. In both, libheif ships as a separate
+shared library beside the app, with its codec plugins switched off, so the standard
+edition can never pick up x265 from your system.
 
-Skidbladnir used to be an Electron app for Windows. That app has been retired: its last
-binary release is [v0.4.3](https://github.com/basic-automation/Skidbladnir/releases/tag/v0.4.3)
-(2019), and its last source is the
-[`electron-final`](https://github.com/basic-automation/Skidbladnir/tree/electron-final) tag.
+Each release attaches `Skidbladnir-<version>-source.tar.gz`, the complete source with
+every submodule, which is what the GPL edition's licence requires to be offered with it.
+The Rust crates and npm packages it compiles in are pinned by `Cargo.lock` and
+`frontend/package-lock.json` in that archive, and published unmodified on crates.io and
+npmjs.com.
 
 ## What "every option" means
 
@@ -247,8 +272,11 @@ same source as the library the app links (`scripts/build-reference-tools.sh`). P
   only `cjxl` reads PFM, so PFM to another format has no reference to match. JPEG is read
   through libjpeg-turbo 3.2.0, the way each tool reads it — including `avifenc`'s and
   `heif-enc`'s copying of a JPEG's own YCbCr planes — and PNG by libpng 1.6's rules,
-  including `cwebp`'s gamma correction. A tool linked against a different libjpeg or
-  libpng can decode the same file differently.
+  including `cwebp`'s gamma correction. For WebP, 16-bit files are reduced to 8 bits the
+  way `cwebp`'s libpng or libtiff reduces them, a WebP source takes `cwebp`'s route
+  straight to YUV, and a TIFF with premultiplied (associated) alpha is un-multiplied as
+  `cwebp` un-multiplies it. A tool linked against a different libjpeg or libpng can
+  decode the same file differently.
 - **The same encoders, built the same way**: libwebp 1.6.0, libavif 1.4.2 with libaom
   3.15.1, libjxl 0.12.0, libheif 1.23.5 with Kvazaar 2.3.2. Another version of a tool
   writes other bytes, as it would against itself. The app's libavif and the reference
@@ -285,6 +313,16 @@ that alpha as straight, which would make its HEIC darker where the image is
 semi-transparent. That has not yet been run against `heif-enc`, and which result HEIC
 should give is still to be decided ([ROADMAP.md](ROADMAP.md), Phase 8).
 
+Besides the byte comparisons, the output is decoded with each format's own tools. AVIF is
+decoded with libavif's `avifdec`, and the tests measure how close the pixels come back and
+check that transparency survives. JPEG XL is decoded with libjxl's `djxl`, which must
+decode it at the right size and alpha, a lossless file exactly, and rebuild a recompressed
+JPEG byte for byte. HEIC is decoded with libheif's `heif-dec` and `heif-info`, from a
+separate build; that is how the GPL edition's x265 output is checked. Metadata is checked
+against `cwebp` itself and with `avifdec`, `djxl` and `heif-info`. AVIF input is checked
+against `avifdec` across 17 colour encodings (bit depths, chroma subsampling, range,
+colour matrices, alpha), and JPEG XL input against `djxl`.
+
 ## Build from source
 
 Requires a stable Rust toolchain, Node.js and npm, **`nasm`** — libaom, libjpeg-turbo and
@@ -296,6 +334,21 @@ libjpeg-turbo from source so they are linked statically. Clone with
 built with `scripts/build-libheif.sh` from the same pinned sources into `build/libheif`;
 without that build, the system libheif is linked instead. On Linux you also need
 `webkit2gtk-4.1` and its development headers.
+
+```bash
+npm --prefix frontend install        # also installs the Tauri CLI
+cd src-tauri && ../frontend/node_modules/.bin/tauri build --no-bundle
+```
+
+Run it with `../frontend/node_modules/.bin/tauri dev` from `src-tauri/`, which starts the
+Nuxt dev server and the window together. Release builds must go through `tauri build`
+rather than `cargo build --release`: the `custom-protocol` feature that embeds the
+frontend is only enabled by the former.
+
+Without CMake, the build links the system libjxl, libavif and libjpeg through
+`pkg-config` instead, and says so. Set `SKIDBLADNIR_LIBJXL`, `SKIDBLADNIR_LIBAVIF` or
+`SKIDBLADNIR_LIBJPEG` to `vendored` to insist on the static build, or to `system` to insist
+on the system library.
 
 The GPL edition is the `gpl` feature (or `full`, every optional feature), with a libheif
 built around x265 into `build/libheif-gpl`. The build refuses to link either edition
@@ -309,21 +362,6 @@ cd src-tauri && ../frontend/node_modules/.bin/tauri build --features gpl --confi
 `tauri.gpl.conf.json` (and on Windows `tauri.gpl.windows.conf.json` too) bundles x265's
 libheif, the GPL edition's notices and the GPL text, and points the updater at the GPL
 edition's releases.
-
-Without CMake, the build links the system libjxl, libavif and libjpeg through
-`pkg-config` instead, and says so. Set `SKIDBLADNIR_LIBJXL`, `SKIDBLADNIR_LIBAVIF` or
-`SKIDBLADNIR_LIBJPEG` to `vendored` to insist on the static build, or to `system` to insist
-on the system library.
-
-```bash
-npm --prefix frontend install        # also installs the Tauri CLI
-cd src-tauri && ../frontend/node_modules/.bin/tauri build --no-bundle
-```
-
-Run it with `../frontend/node_modules/.bin/tauri dev` from `src-tauri/`, which starts the
-Nuxt dev server and the window together. Release builds must go through `tauri build`
-rather than `cargo build --release`: the `custom-protocol` feature that embeds the
-frontend is only enabled by the former.
 
 The encoders are the libraries themselves, linked into the binary — there is no command-line
 tool to download and no subprocess.
@@ -352,84 +390,14 @@ those are missing.
 ## Status
 
 Skidbladnir is a **Rust + Tauri 2** app with a **Nuxt + Tailwind** frontend, for Windows,
-Linux and macOS. It replaced an Electron app, now retired. Releases are stable from 1.0.0;
-the ones before it were prereleases. The work queue lives in [ROADMAP.md](ROADMAP.md).
+Linux and macOS, and it builds and passes its tests on all three in CI. Releases are
+stable from 1.0.0; the ones before it were prereleases. The work queue lives in
+[ROADMAP.md](ROADMAP.md).
 
-What it can do:
-
-- Encode each format with its reference encoder's library linked into the binary, with
-  every option of the reference command line for a still image, and prove the output
-  **byte-for-byte identical** to `cwebp`, `img2webp`, `gif2webp`, `webpmux`, `avifenc`, `cjxl` and
-  `heif-enc` across 3,387 cases (see above).
-- Convert images from a window with every one of those options, labelled with the flag
-  it sets, the expert ones in folding sections.
-- Accept files dropped onto the window, sorting out the ones it cannot read by looking
-  at their contents rather than their file extension.
-- Convert a batch of files, showing progress per file, with a Cancel button that stops
-  without leaving a half-converted image behind.
-- Convert a whole folder, optionally including its subfolders and recreating their
-  structure in the destination.
-- Write **AVIF** as well as WebP, with its own panel of controls. Each format keeps its
-  own settings while you try another. AVIF output is also checked by decoding it with
-  the runner's `avifdec`, measuring how close the pixels come back, and confirming
-  transparency survives.
-- Write **JPEG XL**, ahead of browsers enabling it by default, so a library can be
-  converted in anticipation. JPEGs are recompressed losslessly by default. JPEG XL output
-  is checked by libjxl's own `djxl`: it must decode our files at the right size and
-  alpha, lossless files exactly, and rebuild a recompressed JPEG byte for byte.
-- Preview the result beside the original, in any format, before anything is written to
-  disk. AVIF and JPEG XL previews are decoded in Rust, so they show on every web engine.
-- Tell you what an existing WebP already is — size, lossy or lossless, alpha, animated.
-- Re-encode an **animated WebP** as an animated WebP, keeping every frame, its timing and
-  its loop count, with every WebP setting applied to each frame, and preview it as an
-  animation before converting. Its output is byte-for-byte identical to libwebp's own
-  `img2webp` for every Skidbladnir setting `img2webp` can express; `img2webp`'s own
-  `-mixed`, `-min_size`, `-kmin`/`-kmax`, `-loop` and per-frame options are not offered
-  yet.
-- Convert **GIFs**, still or animated, to WebP exactly as libwebp's own `gif2webp` does —
-  byte for byte, across disposal methods, transparency, timing and loop counts, and
-  keeping a GIF's ICC profile and XMP when you ask, as `gif2webp -metadata` does.
-- Remember your settings and destination between launches, and save named presets of
-  your own.
-- Be driven entirely from the keyboard, with every control labelled for a screen reader.
-- A frameless window with a format rail, a sidebar for the queue, destination and
-  presets, and one column of settings with Convert at its head.
-- Write **HEIC** through libheif with Kvazaar, a BSD-licensed HEVC encoder, and in the
-  GPL edition with x265 — lossless, 4:4:4 and 4:2:2, 10-bit, and a fixed set of x265's
-  tuning controls — and read HEIC input with libde265. libheif ships as a separate shared library beside the app,
-  with its codec plugins switched off, so the standard edition can never pick up x265
-  from your system. Checked by the runner's own libheif (`heif-dec`), a separate build.
-- Read PNG, JPEG, TIFF, WebP, **AVIF**, **JPEG XL**, **HEIC**, **GIF**, **PNM/PAM** and
-  **PFM** input,
-  identifying the format by its contents rather than by its file extension. JPEGs are
-  decoded by libjpeg-turbo, as the reference tools decode them. That includes **CMYK
-  JPEGs** as Photoshop writes them, which `cwebp` itself refuses to read. AVIF input is
-  checked against libavif's own `avifdec` across 17 colour encodings (bit depths, chroma
-  subsampling, range, colour matrices, alpha), and an AVIF's crop, rotation and mirror are
-  applied, so a sideways-stored portrait converts upright. Tiled (grid) AVIFs, as some
-  cameras write large captures, are decoded whole. JPEG XL input is checked against
-  libjxl's `djxl`.
-- Keep a photo's **ICC colour profile, EXIF and XMP** as each reference tool does: in WebP
-  when you ask, exactly as `cwebp -metadata` does (off by default, as in `cwebp`); in AVIF,
-  JPEG XL and HEIC by default, as `avifenc`, `cjxl` and `heif-enc` do, with each kind
-  switchable off. Checked against `cwebp` itself and by libavif's `avifdec`, libjxl's
-  `djxl` and libheif's `heif-info`.
-- Convert **JPEG, PNG, TIFF and WebP files to WebP byte for byte as `cwebp` itself
-  would**, across every setting: JPEGs are decoded with libjpeg-turbo, 16-bit files are
-  reduced to 8 bits the way `cwebp`'s libpng or libtiff reduces them, PNG gamma is
-  corrected as libpng corrects it for `cwebp`, and WebP sources take `cwebp`'s route
-  straight to YUV; a TIFF with premultiplied (associated) alpha is un-multiplied exactly as
-  `cwebp` un-multiplies it. One deliberate exception: a TIFF with straight (unassociated) alpha
-  keeps its colours, where `cwebp` darkens its semi-transparent pixels. A premultiplied
-  TIFF converted to HEIC is the one open case (see
-  [What "every option" means](#what-every-option-means)).
-- Refuse to overwrite your source image, and stage every write through a temporary
-  file so a failed conversion cannot damage a file that was already there. A file already
-  in the destination with the output's name (for example `photo.webp` when converting
-  `photo.png`, or when `photo.png` and `photo.jpg` are converted together) is replaced, as
-  `cwebp -o` would replace it.
-- Report the before and after sizes, and the dimensions actually produced.
-- Build and pass its tests on Windows, Linux and macOS in CI.
+Skidbladnir used to be an Electron app for Windows. That app has been retired: its last
+binary release is [v0.4.3](https://github.com/basic-automation/Skidbladnir/releases/tag/v0.4.3)
+(2019), and its last source is the
+[`electron-final`](https://github.com/basic-automation/Skidbladnir/tree/electron-final) tag.
 
 Known gaps:
 
@@ -437,14 +405,12 @@ Known gaps:
   the test suite runs on macOS, but nobody has yet opened the app on a real Mac. The
   standard edition's Windows installer is installed and exercised by CI on every change,
   and the Linux `.deb` and AppImage have been run.
-- No AppImage is produced on the maintainer's machine, because bundling one needs
-  `patchelf`, which is not installed there. CI has it.
 - The app is not code-signed on any platform;
   [Opening it the first time](#opening-it-the-first-time) shows how to get past each
   system's warning.
-- An AVIF, JPEG XL or HEIC encode cannot be cancelled mid-file: none of those encoders reports progress, so
-  Cancel takes effect when the current file finishes (which is then discarded, not
-  written).
+- An AVIF, JPEG XL or HEIC encode cannot be cancelled mid-file: none of those encoders
+  reports progress, so Cancel takes effect when the current file finishes (which is then
+  discarded, not written).
 - An animated AVIF, JPEG XL or HEIC is read as one still image: its primary image or
   first frame.
 - Animated AVIF, JPEG XL and HEIC are not written (see below), so an animation's metadata
