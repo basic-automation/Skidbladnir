@@ -154,17 +154,25 @@ update checks off and an isolated config directory (`tools/bench.py`):
 - output to a scratch folder;
 - the same inputs: a 1600×1000 RGBA PNG for the preview, six of them for the convert.
 
-Medians of 5 rounds, each round starting fresh processes:
+Medians of 7 rounds, each round starting fresh processes. The machine was quiet (load
+average under 3):
 
 | | Tauri 1.1.0 | gpui spike |
 | --- | --- | --- |
-| Memory, idle (PSS, all processes) | 350 MB | 109 MB |
-| Memory after a preview | 405 MB | 155 MB |
-| Idle CPU over 10 s | 0.01 s | 0.05 s |
-| Preview, press to both images drawn | ≈ equal (see below) | ≈ equal |
-| Convert six images to WebP | ≈ equal (see below) | ≈ equal |
+| Launch to UI drawn | 976 ms | 678 ms |
+| Memory, idle (PSS, all processes) | 380 MB | 109 MB |
+| Memory after a preview | 438 MB | 147 MB |
+| Idle CPU over 10 s | 0.01 s | 0.03 s |
+| Preview, press to both images drawn | 2,750 ms | 2,712 ms |
+| Convert six images to WebP | 5,886 ms | 5,901 ms |
 
-TIMINGS
+**Launch** is from starting the process until the Convert button's colour is on screen, not
+just until a window maps. The old window maps before its web UI loads.
+- **Tauri:** 961–978 ms.
+- **Spike:** 482–699 ms; it alternates between about 490 and about 680, which looks like the
+  font and GPU caches.
+
+**Idle CPU** is negligible for both: tens of milliseconds over ten seconds.
 
 **Memory.** The Tauri figure is the app process plus WebKitGTK's web and network processes,
 plus the AppImage runtime. The spike is one process.
