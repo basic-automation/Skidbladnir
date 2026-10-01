@@ -15,6 +15,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Every job here reads the repository and nothing else: checkout, caches and artifacts
+# (which use the runner's own token, not this one), and tools downloaded from public
+# releases. So the job token can only read, whatever the repository's default is.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true

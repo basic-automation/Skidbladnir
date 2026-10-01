@@ -2,7 +2,9 @@
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
     "macOS": {
-      "frameworks": ["../build/libheif/lib/libheif.1.dylib"]
+      "frameworks": ["../build/libheif/lib/libheif.1.dylib"],
+      "signingIdentity": "-",
+      "hardenedRuntime": false
     }
   }
 }

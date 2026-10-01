@@ -3,8 +3,10 @@
 # in — and make it findable for the rest of the job.
 #
 # Needs the third_party/ submodules checked out. The result is cached on the pinned
-# submodule commits, the edition and the build script, so a routine run does not rebuild
-# three C/C++ libraries. See scripts/build-libheif.sh for what is built and why.
+# submodule commits, the edition, the build script and the runner image, so a routine run
+# does not rebuild three C/C++ libraries. See scripts/build-libheif.sh for what is built
+# and why. The image's name is an output too: release.yml keys its Rust cache on it, for
+# the same reason.
 name: libheif
 description: Build or restore libheif with the edition's HEVC encoder and libde265, and put it on the library path.
 inputs:
@@ -16,6 +18,10 @@ inputs:
     description: Set for a cross build (x86_64 on an Apple Silicon runner).
     required: false
     default: ""
+outputs:
+  image:
+    description: The runner image (ImageOS, plus the glibc version on Linux), e.g. ubuntu22-glibc2.35.
+    value: ${{ steps.key.outputs.image }}
 runs:
   using: composite
   steps:
@@ -29,7 +35,19 @@ runs:
           *) echo "::error::unknown edition ${{ inputs.edition }}"; exit 1 ;;
         esac
         echo "dir=$dir" >> "$GITHUB_OUTPUT"
-        echo "key=libheif-${{ inputs.edition }}-${{ runner.os }}-${{ inputs.target-arch }}-$(git submodule status third_party | awk '{print $1}' | tr -d '+-' | tr '\n' '-')${{ hashFiles('scripts/build-libheif.sh') }}" >> "$GITHUB_OUTPUT"
+        # The runner image, not just the OS. A libheif built on ubuntu-24.04 needs that
+        # image's glibc and libstdc++, so the release's ubuntu-22.04 job must never restore
+        # it. ImageOS is the hosted runner's own variable (ubuntu22, ubuntu24, macos15,
+        # win22, ...), read from the shell: the expression context `env.ImageOS` would be
+        # empty, because the env context leaves out what the runner process inherits. On
+        # Linux the glibc version goes in as well, which also covers a runner without
+        # ImageOS.
+        image="${ImageOS:-unknown}"
+        if [ "$RUNNER_OS" = Linux ]; then
+          image="$image-glibc$(getconf GNU_LIBC_VERSION | cut -d' ' -f2)"
+        fi
+        echo "image=$image" >> "$GITHUB_OUTPUT"
+        echo "key=libheif-${{ inputs.edition }}-${{ runner.os }}-$image-${{ inputs.target-arch }}-$(git submodule status third_party | awk '{print $1}' | tr -d '+-' | tr '\n' '-')${{ hashFiles('scripts/build-libheif.sh') }}" >> "$GITHUB_OUTPUT"
 
     - name: Restore libheif
       id: cache

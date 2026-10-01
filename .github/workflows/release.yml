@@ -48,7 +48,11 @@ jobs:
         platform: [linux, windows, macos-arm64, macos-x64]
         edition: [standard, gpl]
         include:
-          - { platform: linux, os: ubuntu-latest, target: "" }
+          # The oldest system the Linux installers support, because they need whatever
+          # glibc and libstdc++ they were built against: Ubuntu 22.04 (glibc 2.35), which
+          # makes Debian 12 (2.36) work too. Built on ubuntu-latest, 0.14.0 needed glibc
+          # 2.39 and did not start on either. The floor is checked after bundling.
+          - { platform: linux, os: ubuntu-22.04, target: "" }
           - { platform: windows, os: windows-latest, target: "" }
           # macos-latest is Apple Silicon, so its native build is aarch64 only. Intel Macs
           # get their own .dmg, cross-built on the same runner.
@@ -65,8 +69,9 @@ jobs:
       - name: Install the Linux system dependencies Tauri needs
         # patchelf is what bundles the AppImage. It is unavailable on the dev host, which
         # is owner-gated there — but it is a plain apt package here, so the AppImage is
-        # produced in CI even though it cannot be produced locally.
-        if: matrix.os == 'ubuntu-latest'
+        # produced in CI even though it cannot be produced locally. Every package here
+        # exists under the same name on Ubuntu 22.04 (jammy).
+        if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev
@@ -87,6 +92,7 @@ jobs:
         # Every installer ships this libheif beside the app (tauri.<platform>.conf.json,
         # and tauri.gpl*.conf.json for the GPL edition's). The Intel Mac build is a cross
         # build on an Apple Silicon runner.
+        id: libheif
         uses: ./.github/actions/libheif
         with:
           edition: ${{ matrix.edition }}
@@ -97,8 +103,15 @@ jobs:
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
+        # rust-cache keys on the OS name and the CPU only ("Linux-x64" on every Ubuntu
+        # image). Its target/ keeps what crates.io dependencies' build scripts compiled,
+        # such as libwebp-sys's libwebp, and Cargo reuses that C without looking at the
+        # compiler or the glibc (only the workspace's own crates are cleaned and rebuilt).
+        # A cache from an ubuntu-24.04 run would bring GLIBC_2.38 needs into the 22.04
+        # build. So the key names the runner image, as the libheif cache does, and the
+        # platform, which keeps the two macOS legs (one runner, two targets) apart.
         with:
-          key: ${{ matrix.edition }}
+          key: ${{ matrix.edition }}-${{ matrix.platform }}-${{ steps.libheif.outputs.image }}
 
       - name: Build the frontend
         run: |
@@ -150,6 +163,156 @@ jobs:
           fi
           cd src-tauri
           "../$cli" build "${args[@]}"
+
+      - name: The Linux installers need nothing newer than Ubuntu 22.04 has
+        # Reads what the binary and every library in the .deb and the AppImage need from
+        # glibc and libstdc++ (scripts/glibc-floor.py), prints the newest of each, and fails
+        # above glibc 2.35, GLIBCXX_3.4.30 or CXXABI_1.3.13 (GCC 12's libstdc++, which
+        # Ubuntu 22.04 and Debian 12 ship). A build over the floor installs and then does
+        # not start, so it must not reach a release.
+        if: matrix.platform == 'linux'
+        run: |
+          bundle=target/release/bundle
+          python3 scripts/glibc-floor.py --glibc 2.35 --glibcxx 3.4.30 --cxxabi 1.3.13 "$bundle"/deb/*.deb "$bundle"/appimage/*.AppImage
+
+      - name: The macOS app is signed, ad hoc
+        # There is no Apple Developer ID yet, so tauri.macos.conf.json signs ad hoc
+        # ("signingIdentity": "-"). Unsigned, the arm64 app carried only the linker's
+        # signature, which does not seal the bundle, and Apple silicon Macs call such a
+        # download "damaged" with no way past it. Ad hoc signed, macOS asks the user to
+        # allow it once in System Settings > Privacy & Security instead.
+        #
+        # The hardened runtime is off ("hardenedRuntime": false). Its library validation
+        # loads only code "signed by Apple or signed with the same Team ID as the main
+        # executable" (Apple, com.apple.security.cs.disable-library-validation), and an
+        # ad hoc signature has no Team ID, so it would refuse Frameworks/libheif.1.dylib.
+        # With a Developer ID, remove both keys (APPLE_SIGNING_IDENTITY would override the
+        # first, not the second): the bundle then signs with the team's identity, the
+        # hardened runtime returns, and notarization becomes possible.
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          # target/<triple>/release/bundle for a cross build, target/release/bundle otherwise.
+          bundle=target/release/bundle
+          if [ -n "${{ matrix.target }}" ]; then bundle="target/${{ matrix.target }}/release/bundle"; fi
+          app=$(find "$bundle/macos" -maxdepth 1 -type d -name '*.app' | head -1)
+          if [ -z "$app" ]; then
+            echo "::error::no .app in $bundle/macos"
+            exit 1
+          fi
+          echo "APP=$app" >> "$GITHUB_ENV"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -dv --verbose=4 "$app" 2>&1 | tee "$RUNNER_TEMP/codesign.txt"
+          for library in "$app"/Contents/Frameworks/*; do
+            codesign --verify --strict --verbose=2 "$library"
+            codesign -dv "$library" 2>&1 | grep -E '^(Executable|Identifier|Format|CodeDirectory|Signature|TeamIdentifier)'
+          done
+          executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")
+          otool -L "$app/Contents/MacOS/$executable" | grep -i heif
+          grep -q '^Signature=adhoc' "$RUNNER_TEMP/codesign.txt" || { echo "::error::$app is not signed ad hoc"; exit 1; }
+          if grep -q '^CodeDirectory.*flags=.*runtime' "$RUNNER_TEMP/codesign.txt"; then
+            echo "::warning::the hardened runtime is on, so library validation may refuse the ad hoc signed libheif"
+          fi
+
+      - name: The macOS app starts, and a screenshot shows its window
+        # No person has opened a macOS build yet. This runs the bundled app's own
+        # executable from inside the signed bundle, fails if it exits within 15 seconds
+        # (a dyld or library-validation error ends it at once), and keeps a screenshot
+        # and the app's output so a person can see what macOS drew. The Intel app runs
+        # under Rosetta on this Apple silicon runner. The bundle is not quarantined here,
+        # so Gatekeeper is not involved; the next step looks at that.
+        #
+        # It takes under a minute. If something hangs (an app that ignores the kill, say),
+        # the timeout fails the leg within minutes, not at the job's six-hour limit while
+        # the manifest job waits for it.
+        if: runner.os == 'macOS'
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          out="$RUNNER_TEMP/macos-launch"
+          mkdir -p "$out"
+          executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")
+          binary="$APP/Contents/MacOS/$executable"
+          lipo -info "$binary"
+          if [ "${{ matrix.target }}" = x86_64-apple-darwin ] && ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+            echo "::warning::Rosetta is not installed on this runner, so the Intel app was not launched"
+            exit 0
+          fi
+          "$binary" > "$out/app.log" 2>&1 &
+          pid=$!
+          for second in $(seq 1 15); do
+            sleep 1
+            # Gone, or exited and not yet reaped (a zombie still answers kill -0).
+            if ! kill -0 "$pid" 2>/dev/null || [ "$(ps -o stat= -p "$pid" 2>/dev/null | cut -c1)" = Z ]; then
+              status=0
+              wait "$pid" || status=$?
+              cat "$out/app.log"
+              echo "::error::the app exited after ${second}s with status $status"
+              exit 1
+            fi
+            if [ "$second" = 10 ]; then
+              # perl's alarm bounds it, in case macOS stops to ask for screen-recording
+              # permission. Without that permission the picture shows only the desktop.
+              perl -e 'alarm 20; exec @ARGV' screencapture -x "$out/window.png" || echo "::warning::screencapture failed"
+            fi
+          done
+          echo "still running after 15s"
+          kill "$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true
+          cat "$out/app.log"
+
+      - name: What Gatekeeper says about a downloaded copy (report only)
+        # A browser marks a download with the com.apple.quarantine attribute, and Gatekeeper
+        # judges only marked apps. This marks a copy the same way, prints Gatekeeper's
+        # verdicts, then opens the copy as a double-click would and screenshots whatever
+        # dialog appears, so the README's first-launch steps can be matched to what macOS
+        # actually says. It never fails the job, and it runs before the installers are
+        # attached, so it is bounded: syspolicy_check asks Apple's servers, and spctl,
+        # open or log show could stall. A timeout counts as a failure, which
+        # continue-on-error lets through.
+        if: ${{ !cancelled() && runner.os == 'macOS' && env.APP != '' }}
+        timeout-minutes: 5
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          out="$RUNNER_TEMP/macos-launch"
+          mkdir -p "$out" "$RUNNER_TEMP/gatekeeper"
+          copy="$RUNNER_TEMP/gatekeeper/$(basename "$APP")"
+          ditto "$APP" "$copy"
+          xattr -w com.apple.quarantine "0081;$(printf '%x' "$(date +%s)");Safari;$(uuidgen)" "$copy"
+          echo "== com.apple.quarantine: $(xattr -p com.apple.quarantine "$copy")"
+          echo "== spctl --status"
+          spctl --status
+          echo "== spctl --assess --type execute -vv, the quarantined copy"
+          spctl --assess --type execute -vv "$copy"
+          echo "== spctl --assess -vv, the bundle as built"
+          spctl --assess -vv "$APP"
+          if command -v syspolicy_check >/dev/null; then
+            echo "== syspolicy_check distribution"
+            syspolicy_check distribution "$copy"
+          fi
+          dmg=$(find "$(dirname "$(dirname "$APP")")/dmg" -name '*.dmg' 2>/dev/null | head -1)
+          if [ -n "$dmg" ]; then
+            echo "== spctl --assess --type open, $(basename "$dmg")"
+            spctl --assess --type open --context context:primary-signature -vv "$dmg"
+          fi
+          echo "== open the quarantined copy"
+          open "$copy"
+          sleep 10
+          perl -e 'alarm 20; exec @ARGV' screencapture -x "$out/gatekeeper.png"
+          pkill -f "$(basename "$APP")/Contents/MacOS/"
+          echo "== syspolicyd's log"
+          log show --last 2m --style compact --predicate 'process == "syspolicyd"' 2>/dev/null | tail -40
+          exit 0
+
+      - uses: actions/upload-artifact@v7
+        # Not named skidbladnir-*: the manifest job merges every artifact of that name.
+        if: ${{ !cancelled() && runner.os == 'macOS' }}
+        with:
+          name: macos-launch-${{ matrix.platform }}-${{ matrix.edition }}
+          path: ${{ runner.temp }}/macos-launch/
+          if-no-files-found: warn
 
       - name: Collect the artifacts
         shell: bash
@@ -204,13 +367,58 @@ jobs:
           fi
           # The workflow can be reached two ways: a tag pushed on its own, or a tag created
           # alongside a release. In the first case there is no release to upload to yet, and
-          # `gh release upload` would simply fail — so create a draft prerelease to hold the
-          # artifacts rather than losing a green build to an ordering accident.
+          # `gh release upload` would simply fail — so create a draft release to hold the
+          # artifacts rather than losing a green build to an ordering accident. From 1.0.0 a
+          # release is a full release, not a prerelease, so that /releases/latest and the
+          # repository's "Latest" badge find it; a beta is marked prerelease when published.
+          # Installed copies are not offered a draft: the manifest job waits for it to be
+          # published and re-run.
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            echo "no release for $TAG yet; creating a draft prerelease to hold the artifacts"
-            gh release create "$TAG" --draft --prerelease --title "$TAG" --notes "Artifacts attached by CI. Notes pending."
+            echo "no release for $TAG yet; creating a draft release to hold the artifacts"
+            gh release create "$TAG" --draft --title "$TAG" --notes "Artifacts attached by CI. Notes pending."
           fi
-          gh release upload "$TAG" dist-artifacts/* --clobber
+          # Everything but the .sig files. The manifest job copies each signature into
+          # latest.json from this job's workflow artifact, and the app reads the signature
+          # from there, so on the release page a .sig is one more file to puzzle over.
+          files=()
+          for file in dist-artifacts/*; do
+            case "$file" in *.sig) ;; *) files+=("$file") ;; esac
+          done
+          gh release upload "$TAG" "${files[@]}" --clobber
+
+  # The .deb on the oldest systems it is said to support, beyond the bundle job's version
+  # check: apt installs it, resolving its dependencies from that system's own archive, and
+  # the loader then finds every library the app needs at a version that system has. The
+  # result does not hold back the release; read it in the run before publishing.
+  deb-install:
+    name: .deb installs on ${{ matrix.image }}${{ matrix.edition == 'gpl' && ' / gpl' || '' }}
+    needs: bundle
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ubuntu:22.04", "debian:12"]
+        edition: [standard, gpl]
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: skidbladnir-linux-${{ matrix.edition }}
+          path: dist
+
+      - name: Install it with apt, and resolve its libraries
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends ./dist/*.deb
+          ldd /usr/bin/skidbladnir > "$RUNNER_TEMP/ldd.txt" 2>&1 || true
+          cat "$RUNNER_TEMP/ldd.txt"
+          # A library missing outright, or present at too old a version, both read "not found".
+          if grep -q 'not found' "$RUNNER_TEMP/ldd.txt"; then
+            echo "::error::the ${{ matrix.edition }} .deb does not run on ${{ matrix.image }}"
+            exit 1
+          fi
 
   # The complete corresponding source, which the GPL edition's licence requires to travel
   # with its installers: the repository at this tag WITH its submodules (x265, libheif,
@@ -262,7 +470,7 @@ jobs:
             exit 1
           fi
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --draft --prerelease --title "$TAG" --notes "Artifacts attached by CI. Notes pending."
+            gh release create "$TAG" --draft --title "$TAG" --notes "Artifacts attached by CI. Notes pending."
           fi
           gh release upload "$TAG" "${{ steps.archive.outputs.file }}" --clobber
 
@@ -270,9 +478,12 @@ jobs:
   # lists the ones that produced signed installers (scripts/updater-manifest.py): one per
   # edition, latest.json for the standard edition and latest-gpl.json for the GPL one.
   #
-  # The installed app reads it from the `updater` branch, not from the release:
-  # `releases/latest` skips prereleases, and every release is a prerelease for now. The
-  # branch holds only the manifests, and only this job writes to it.
+  # The installed app reads it from the `updater` branch, not from the release. That began
+  # because `releases/latest` skips prereleases and every release before 1.0.0 was one; it
+  # also means only this job decides what installed copies are offered. The branch holds
+  # only the manifests, and only this job writes to it. It writes nothing while the tag's
+  # release is a draft, as it is when the tag was pushed on its own: publish the release,
+  # then re-run this job.
   manifest:
     name: updater manifest
     needs: bundle
@@ -309,6 +520,17 @@ jobs:
               exit 1
             fi
             gh release view "$tag" --json body -q .body > notes.md || true
+            # Installed copies download from the release, and a draft's files are not
+            # public: offered a draft, every copy would fail to download the update. So the
+            # manifests are written, but reach the updater branch only once the release is
+            # published. Publish it, then re-run this job; a re-run reuses this run's
+            # installers and signatures, and reads the published notes.
+            draft=$(gh release view "$tag" --json isDraft -q .isDraft 2>/dev/null) || draft=missing
+            case "$draft" in
+              false) echo "public=true" >> "$GITHUB_OUTPUT" ;;
+              true) echo "::warning::$tag is still a draft, so installed copies are not offered it yet. Publish the release, then re-run this job." ;;
+              *) echo "::warning::there is no release for $tag to download it from, so installed copies are not offered it." ;;
+            esac
           fi
           if ! ls dist-artifacts/*.sig >/dev/null 2>&1; then
             echo "::warning::no platform produced updater signatures; no manifest is published and installed copies will not be offered $tag"
@@ -339,17 +561,20 @@ jobs:
         with:
           name: updater-manifest
           path: latest*.json
+          # A re-run of this job, after a draft is published, writes it again.
+          overwrite: true
 
-      - name: Publish to the release and the updater branch
-        if: ${{ steps.write.outputs.publish == 'true' && !inputs.dry_run }}
+      - name: Publish to the updater branch
+        # Only to the branch, which is what installed copies read. Attached to the release
+        # as well, the manifests were two more files on the release page that nobody
+        # downloads; each release's manifests stay in the branch's history. Never while
+        # the release is a draft or missing (the step above says why).
+        if: ${{ steps.write.outputs.publish == 'true' && steps.write.outputs.public == 'true' && !inputs.dry_run }}
         env:
-          GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.write.outputs.tag }}
           VERSION: ${{ steps.write.outputs.version }}
           MANIFESTS: ${{ steps.write.outputs.manifests }}
         run: |
-          gh release upload "$TAG" $MANIFESTS --clobber
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           branch="$RUNNER_TEMP/updater"

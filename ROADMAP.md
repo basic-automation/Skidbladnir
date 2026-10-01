@@ -640,6 +640,15 @@ prettier subset.
       executable. CI builds the NSIS installer, installs it silently to
       `%LOCALAPPDATA%\Skidbladnir`, and runs the full smoke test (13 checks) against the
       installed `skidbladnir.exe`. WebView2 displays AVIF there.
+- [ ] "Basic Automation", not "basicautomation", as the Windows publisher. Not a label
+      only: Tauri's NSIS installer keeps the install folder under
+      `HKCU\Software\<publisher>\Skidbladnir`, and with no `bundle.publisher` the
+      publisher is `basicautomation`, from the identifier. Renamed, an in-app update of a
+      copy in a custom folder installs to `%LOCALAPPDATA%\Skidbladnir` instead, its
+      shortcuts keep opening the old copy, and that copy offers the update again on every
+      start. Running the new setup.exe by hand, its "uninstall first" reads the same key
+      before any installer hook can run. Needs a migration, tested on Windows over a
+      custom-folder install, before the key is set.
 - [ ] First launch of the **macOS** build. `tauri-driver` does not support macOS, so the
       `.dmg` still needs a human to open it once.
 - [x] An Intel macOS build. `release.yml` cross-builds `x86_64-apple-darwin` on the Apple
@@ -677,11 +686,16 @@ prettier subset.
 - [x] Updater plumbing. `release.yml` builds with `createUpdaterArtifacts` only when the
       signing secret is present (so local and CI builds need no key), and a final
       `manifest` job writes `latest.json` from the signed installers
-      (`scripts/updater-manifest.py`), attaches it to the release, and commits it to the
-      orphan **`updater` branch**, which is what installed copies read. Not
-      `releases/latest`: that skips prereleases, and every release is one. A re-run of an
-      older tag never rolls the branch back. Dry runs sign with a throwaway key so the
-      whole path is exercised without publishing.
+      (`scripts/updater-manifest.py`) and commits it to the orphan **`updater` branch**,
+      which is what installed copies read. Since 1.0.0 neither the manifests nor the
+      `.sig` files are attached to the release; they were clutter there. Not
+      `releases/latest`: that skips prereleases, and every release before 1.0.0 was one.
+      From 1.0.0 `release.yml` holds a tag's artifacts in a draft full release, not a
+      draft prerelease. The manifest job never offers a draft, whose files are not public
+      and would fail to download: publish the release, then re-run that one job, which
+      reuses the run's signed installers. A re-run of an older tag never rolls the branch
+      back. Dry runs sign with a throwaway key so the whole path is exercised without
+      publishing.
       Verified locally: a signed `.deb` built with a throwaway key, served with a
       generated manifest, raised the banner in the real window; a tampered download was
       refused with "signature verification failed". A `release.yml` dry run signed all
