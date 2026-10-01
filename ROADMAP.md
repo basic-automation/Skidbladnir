@@ -5,10 +5,10 @@ phase order. Tick `[x]` only when the item genuinely shipped and was verified.
 Discovered work becomes a new `[ ]` in the right phase. No status tables, no run
 logs, no prose essays — git history and the PRs are the record.
 
-**The migration in one line:** Skidbladnir is an Electron 9 GUI wrapping `cwebp`.
-It is moving to **Rust + Tauri 2** with a **Nuxt + Tailwind** frontend, shipping on
+**The migration in one line:** Skidbladnir was an Electron 9 GUI wrapping `cwebp`.
+It moved to **Rust + Tauri 2** with a **Nuxt + Tailwind** frontend, shipping on
 **Windows, Linux and macOS**, without losing a single one of the encoder controls
-the Electron app exposes today.
+the Electron app exposed; the Electron app was retired in 0.7.0 (Phase 6).
 
 ---
 
@@ -116,16 +116,17 @@ building and running the Electron app until Phase 6 retires it.
       `cargo tauri build --no-bundle` produces a 12 MB `skidbladnir`. Driven over
       WebDriver with no dev server running, it loads `tauri://localhost/`, renders the
       Nuxt shell, and its IPC commands return live data from the Rust core. `--no-bundle`
-      because the AppImage target needs `patchelf`, which is owner-gated; **no installer
-      or AppImage has been built.**
+      because the AppImage target needs `patchelf`, which the dev host lacked. Installers
+      and the AppImage have since been built by `release.yml` in CI, where `patchelf` is an
+      apt package (Phase 4).
 - [x] First green dev window that renders the Nuxt shell — verified over WebDriver
       against the Nuxt dev server on 127.0.0.1:1420: `document.title` is "Skidbladnir",
       the shell renders, and `encoder_version` / `default_settings` return real values.
-      The shared harness at `~/.claude/scheduled-tasks/_shared/tauri-webdriver.sh` drives
-      this app correctly; its first green run against Skidbladnir is this one.
-- [ ] (owner-gated) `patchelf` is not installed on the dev host and AppImage bundling
-      needs it — `sudo pacman -S patchelf`. Until then, verify the bare binary and
-      report the AppImage as not built.
+      The dev host's shared WebDriver harness drives this app correctly; its first green
+      run against Skidbladnir is this one.
+- [x] (owner-gated) `patchelf` on the dev host for AppImage bundling. *Superseded:* CI
+      builds the AppImage (`release.yml` installs `patchelf` from apt), and the published
+      AppImage is what gets checked, so the dev host does not need it.
 
 - [x] Tighten the CSP. Everything except inline script is now locked down:
       `default-src 'self'`, `img-src 'self' data:` (the preview's two images and nothing
@@ -624,11 +625,11 @@ prettier subset.
       on `patchelf`.** Only the AppImage target needs it; `cargo tauri build --bundles deb`
       produces a valid 3.8 MB `Skidbladnir_<version>_amd64.deb` on the dev host today,
       containing `usr/bin/skidbladnir` and the hicolor icon set.
-- [x] AppImage on Linux — produced by `release.yml` in CI (80 MB for 0.5.0). It still
-      cannot be *built* on the dev host without `patchelf` (owner-gated, Phase 1), but it
-      can be *checked*: the published `Skidbladnir_0.5.0_amd64.AppImage` was downloaded,
-      unpacked with `--appimage-extract`, and passes the 9-check smoke test launched
-      through its own `AppRun`.
+- [x] AppImage on Linux — produced by `release.yml` in CI (80 MB for 0.5.0). It is not
+      *built* on the dev host, which has no `patchelf` (Phase 1), but it can be *checked*:
+      the published `Skidbladnir_0.5.0_amd64.AppImage` was downloaded, unpacked with
+      `--appimage-extract`, and passes the 9-check smoke test launched through its own
+      `AppRun`.
 - [x] The published 0.5.0 `.deb` passes the same smoke test. This closes the gap the
       0.5.0 run left: CI's upload replaced the locally-tested `.deb`, so the file users
       download had never been run. It now has.
@@ -663,8 +664,8 @@ prettier subset.
       tri-platform release had gone out. Both held by 0.7.0, and the owner asked for it
       (2026-09-28), so it is in — shaped by those three objections:
       1. **Key custody.** The minisign keypair was generated in an interactive session
-       with the owner, not by the routine. The private key and its password live in the
-       owner's `~/.tauri/skidbladnir-updater.key*` and the repository's Actions secrets
+       with the owner, not by the routine. The private key and its password live with the
+       owner and in the repository's Actions secrets
        `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, nowhere else;
        the public half is in `tauri.conf.json`. The routine never touches either.
       2. **Nothing is silent.** The app checks once per launch (release builds only) and
@@ -711,7 +712,7 @@ that can be checked here, and no further claim is made.
       has shipped), but the Electron app is **Windows-only**, and the Tauri Windows build
       has been compiled and never opened. Retiring the one Windows app that is known to
       have run, in favour of one that never has, would risk leaving Windows users with
-      nothing. Clears when the Windows first-launch item in Phase 5 is ticked.
+      nothing. Clears when the Windows first-launch item in Phase 4 is ticked.
 - [x] Remove `main.js`, `index.html`, `index.css` and the Electron `package.json` (its
       dependencies went with it — there was no committed lockfile), the three SVGs only
       `index.html` used, and Dependabot's root npm entry. `build/icon.png`, the 2363 px
@@ -1256,8 +1257,8 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       as (100, 50, 25) at alpha 128. Decide whether HEIC keeps true colours (as now) or
       follows `heif-enc`, then pin it with a test either way.
 - [ ] More input formats the tools read: animated GIF and APNG into `cjxl` (with the
-      multi-image work below), Y4M (`avifenc`, `heif-enc`), PGX and EXR (`cjxl`), raw pixels
-      (`heif-enc --raw`, `cwebp -s`), and `heif-enc`'s WebP and HEIF input.
+      multi-image work below), Y4M (`avifenc`, `heif-enc`), PGX and EXR (`cjxl`), and raw
+      pixels (`heif-enc --raw`, `cwebp -s`).
 
 **Multi-image features the tools have, deferred by the owner (2026-09-28):**
 
