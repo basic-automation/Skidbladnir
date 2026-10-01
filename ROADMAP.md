@@ -719,7 +719,7 @@ prettier subset.
       (`bundle.linux.{deb,appimage}.files`).
 - [ ] (owner decision) A supported way for packagers to turn the update check off: an
       `updater` cargo feature that keeps the two commands registered, and `FLATPAK_ID`
-      detection. `SKIDBLADNIR_NO_UPDATE_CHECK` is a test hook, not a documented switch.
+      detection. The smoke tests' environment switch is a test hook, not a documented one.
 - [ ] More platforms: an `rpm` bundle target, a Linux ARM64 leg (`ubuntu-22.04-arm`), and a
       universal `.dmg`.
 
