@@ -1216,6 +1216,18 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       input layout in `native/heic_shim.c`). **Gate:** `matches_heif_enc_across_webp_inputs`
       — lossless and lossy, with and without alpha, and an odd-sized lossy one: 9 of 9
       byte-identical. GPL edition: the same input path, built and checked by CI only.
+- [x] **HEIC into HEIC, held to `heif-enc`** (fixed 2026-10-01). `heif-enc` decodes a HEIF
+      input with libheif in the file's own colourspace and chroma, NCLX passed through and
+      transformations applied, and keeps its first Exif and XMP blocks
+      (`heifio/decoder_heif.cc`). Skidbladnir decoded to RGB and **dropped the source's Exif
+      and XMP**. The shim now loads an untouched HEIC itself, as that reader does
+      (`load_heif` in `native/heic_shim.c`); the window's Exif/XMP toggles still leave
+      them out. With the ICC toggle off, the pixels go through RGB (the reader cannot drop
+      a profile). **Gate:** `matches_heif_enc_across_heic_inputs` — sources written by
+      `heif-enc` (RGB, RGBA, gray, odd size, every kind of metadata) x two settings: 10 of
+      10 byte-identical, plus a direct check that Exif/XMP are kept and left out as asked.
+      Mutation: the old route fails it (on the dropped metadata first). AVIF-in-HEIF input
+      is not covered: neither our libheif nor the reference `heif-enc` decodes AV1.
 - [ ] (owner decision) **Premultiplied-alpha TIFF into HEIC.** Since 2026-10-01 an
       associated-alpha TIFF is un-multiplied as `cwebp` does, for every format. Reading
       `heifio/decoder_tiff.cc`, `heif-enc` instead takes associated alpha as plain alpha

@@ -96,6 +96,10 @@ struct SkidHeicInput {
 	jpeg: *const u8,
 	jpeg_size: usize,
 	ten_bit: c_int,
+	heif: *const u8,
+	heif_size: usize,
+	keep_exif: c_int,
+	keep_xmp: c_int,
 }
 
 #[repr(C)]
@@ -459,7 +463,12 @@ pub fn encode(job: &EncodeJob, source: &SourceImage, on_progress: &mut dyn FnMut
 	// `heif-enc` writes nothing, and the pixels are encoded instead. 10-bit input is made
 	// from pixels, which `heif-enc` cannot do.
 	let jpeg = (source.format == SourceFormat::Jpeg && !source.bytes.is_empty() && matches!(source, Cow::Borrowed(_)) && !ten_bit).then(|| without_jpeg_metadata(&source.bytes, keep));
-	let output = match encode_input(settings, source.width, source.height, &input, jpeg.as_deref(), ten_bit) {
+	// A HEIC as it is goes to `heif-enc`'s HEIF reader (`heifio/decoder_heif.cc`), decoded in
+	// its own colourspace. That reader cannot leave the colour profile out, so with ICC
+	// dropped the pixels are encoded instead.
+	let heif = (source.format == SourceFormat::Heic && !source.bytes.is_empty() && matches!(source, Cow::Borrowed(_)) && !ten_bit && keep.icc).then_some(source.bytes.as_slice());
+	let file = jpeg.as_deref().map(SourceFile::Jpeg).or(heif.map(SourceFile::Heif));
+	let output = match encode_input(settings, source.width, source.height, &input, file, ten_bit) {
 		Err(Refusal::Jpeg(_)) => encode_input(settings, source.width, source.height, &input, None, ten_bit),
 		other => other,
 	}
@@ -471,8 +480,15 @@ pub fn encode(job: &EncodeJob, source: &SourceImage, on_progress: &mut dyn FnMut
 }
 
 /// Why the shim wrote nothing.
+/// A file handed to one of `heif-enc`'s own readers in the shim, rather than as samples.
+#[derive(Clone, Copy)]
+enum SourceFile<'a> {
+	Jpeg(&'a [u8]),
+	Heif(&'a [u8]),
+}
+
 enum Refusal {
-	/// `heif-enc`'s JPEG reader could not read the JPEG.
+	/// `heif-enc`'s JPEG or HEIF reader could not read the file.
 	Jpeg(String),
 	/// Anything else.
 	Other(String),
@@ -539,7 +555,12 @@ pub(crate) fn x265_parameters(s: &HeicSettings, (width, height): (u32, u32)) -> 
 	parameters
 }
 
-fn encode_input(s: &HeicSettings, width: u32, height: u32, input: &Input, jpeg: Option<&[u8]>, ten_bit: bool) -> Result<Vec<u8>, Refusal> {
+fn encode_input(s: &HeicSettings, width: u32, height: u32, input: &Input, file: Option<SourceFile<'_>>, ten_bit: bool) -> Result<Vec<u8>, Refusal> {
+	let (jpeg, heif) = match file {
+		Some(SourceFile::Jpeg(bytes)) => (Some(bytes), None),
+		Some(SourceFile::Heif(bytes)) => (None, Some(bytes)),
+		None => (None, None),
+	};
 	if c_int::try_from(width).is_err() || c_int::try_from(height).is_err() {
 		return Err(Refusal::Other(format!("{width}x{height} is too large for HEIC")));
 	}
@@ -557,7 +578,7 @@ fn encode_input(s: &HeicSettings, width: u32, height: u32, input: &Input, jpeg: 
 		Layout::Yuv420 { alpha } => (2, alpha, [w, uv, uv, w]),
 	};
 	let plane = |i: usize| input.planes.get(i).map_or(ptr::null(), Vec::as_ptr);
-	let raw = SkidHeicInput { width, height, layout, has_alpha: c_int::from(has_alpha), planes: [plane(0), plane(1), plane(2), plane(3)], strides, icc, icc_size, exif, exif_size, xmp, xmp_size, orientation: c_int::from(input.orientation), jpeg: jpeg.map_or(ptr::null(), <[u8]>::as_ptr), jpeg_size: jpeg.map_or(0, <[u8]>::len), ten_bit: c_int::from(ten_bit) };
+	let raw = SkidHeicInput { width, height, layout, has_alpha: c_int::from(has_alpha), planes: [plane(0), plane(1), plane(2), plane(3)], strides, icc, icc_size, exif, exif_size, xmp, xmp_size, orientation: c_int::from(input.orientation), jpeg: jpeg.map_or(ptr::null(), <[u8]>::as_ptr), jpeg_size: jpeg.map_or(0, <[u8]>::len), ten_bit: c_int::from(ten_bit), heif: heif.map_or(ptr::null(), <[u8]>::as_ptr), heif_size: heif.map_or(0, <[u8]>::len), keep_exif: c_int::from(s.metadata.exif), keep_xmp: c_int::from(s.metadata.xmp) };
 
 	// Kvazaar's lossless is its `-p lossless=true`; x265's is `-L`.
 	let parameters: Vec<(String, String)> = if HEIC_X265 {

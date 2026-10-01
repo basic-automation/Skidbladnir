@@ -46,6 +46,12 @@ typedef struct {
 	size_t jpeg_size;
 	/* The GPL edition's 10-bit input: each 8-bit sample widened to 10 bits (no JPEG). */
 	int ten_bit;
+	/* A HEIF file to decode as heifio/decoder_heif.cc does instead of the fields above (but
+	   the size), keeping its Exif and XMP only where these say so. */
+	const uint8_t* heif;
+	size_t heif_size;
+	int keep_exif;
+	int keep_xmp;
 } SkidHeicInput;
 
 int skid_heic_load_jpeg(const unsigned char* data, size_t size, void** holder, struct heif_image** out, unsigned char** exif, size_t* exif_size, unsigned char** xmp, size_t* xmp_size, int* orientation, char* error, size_t error_size);
@@ -288,12 +294,71 @@ fail:
 	return err;
 }
 
+/* heifio/decoder_heif.cc: the primary image decoded in its own colourspace and chroma
+   with its NCLX passed through and its transformations applied (so the orientation stays
+   normal), and the first Exif and the first XMP block, the Exif with libheif's 4-byte
+   offset prefix. */
+static struct heif_error load_heif(const SkidHeicInput* in, Loaded* loaded)
+{
+	struct heif_context* ctx = heif_context_alloc();
+	struct heif_image_handle* handle = NULL;
+	struct heif_decoding_options* opts;
+	heif_item_id primary;
+	struct heif_error err = heif_context_read_from_memory_without_copy(ctx, in->heif, in->heif_size, NULL);
+	if (err.code) goto done;
+	err = heif_context_get_primary_image_ID(ctx, &primary);
+	if (err.code) goto done;
+	err = heif_context_get_image_handle(ctx, primary, &handle);
+	if (err.code) goto done;
+	opts = heif_decoding_options_alloc();
+	opts->output_image_nclx_profile_passthrough = 1;
+	err = heif_decode_image(handle, &loaded->image, heif_colorspace_undefined, heif_chroma_undefined, opts);
+	heif_decoding_options_free(opts);
+	if (err.code) goto done;
+	{
+		int count = heif_image_handle_get_number_of_metadata_blocks(handle, NULL);
+		heif_item_id* ids = count > 0 ? (heif_item_id*) malloc(sizeof(heif_item_id) * (size_t) count) : NULL;
+		if (ids) {
+			heif_image_handle_get_list_of_metadata_block_IDs(handle, NULL, ids, count);
+			for (int n = 0; n < count; n++) {
+				const char* type = heif_image_handle_get_metadata_type(handle, ids[n]);
+				const char* content = heif_image_handle_get_metadata_content_type(handle, ids[n]);
+				unsigned char** slot = NULL;
+				size_t* slot_size = NULL;
+				if (type && strcmp(type, "Exif") == 0 && !loaded->exif) { slot = &loaded->exif; slot_size = &loaded->exif_size; }
+				else if (content && strcmp(content, "application/rdf+xml") == 0 && !loaded->xmp) { slot = &loaded->xmp; slot_size = &loaded->xmp_size; }
+				if (slot) {
+					size_t size = heif_image_handle_get_metadata_size(handle, ids[n]);
+					*slot = (unsigned char*) malloc(size ? size : 1);
+					*slot_size = size;
+					if (*slot && heif_image_handle_get_metadata(handle, ids[n], *slot).code != heif_error_Ok) {
+						free(*slot);
+						*slot = NULL;
+						*slot_size = 0;
+					}
+				}
+			}
+			free(ids);
+		}
+	}
+	if (!in->keep_exif) { free(loaded->exif); loaded->exif = NULL; loaded->exif_size = 0; }
+	if (!in->keep_xmp) { free(loaded->xmp); loaded->xmp = NULL; loaded->xmp_size = 0; }
+	loaded->orientation = 1;
+done:
+	if (handle) heif_image_handle_release(handle);
+	heif_context_free(ctx);
+	return err;
+}
+
 /* heif-enc's load_image: the JPEG reader for a JPEG, otherwise the samples as given. */
 static struct heif_error load(const SkidHeicInput* in, Loaded* loaded, char* error, size_t error_size)
 {
 	struct heif_error ok = {heif_error_Ok, heif_suberror_Unspecified, "Success"};
 	struct heif_error bad = {heif_error_Invalid_input, heif_suberror_Unspecified, "the JPEG could not be read"};
 	memset(loaded, 0, sizeof(*loaded));
+	if (in->heif) {
+		return load_heif(in, loaded);
+	}
 	if (!in->jpeg) {
 		loaded->orientation = in->orientation;
 		return make_image(in, &loaded->image);
@@ -497,8 +562,8 @@ int skid_heic_encode(const SkidHeicInput* in, const SkidHeicSettings* s, uint8_t
 
 	err = load(in, &loaded, error, error_size);
 	if (err.code) {
-		if (in->jpeg) {
-			ok = 2; /* heif-enc's JPEG reader refused it. */
+		if (in->jpeg || in->heif) {
+			ok = 2; /* heif-enc's JPEG or HEIF reader refused it. */
 		}
 		else {
 			fail(error, error_size, "reading the image", err);
@@ -506,10 +571,10 @@ int skid_heic_encode(const SkidHeicInput* in, const SkidHeicSettings* s, uint8_t
 		goto done;
 	}
 	image = loaded.image;
-	exif = in->jpeg ? loaded.exif : in->exif;
-	exif_size = in->jpeg ? loaded.exif_size : in->exif_size;
-	xmp = in->jpeg ? loaded.xmp : in->xmp;
-	xmp_size = in->jpeg ? loaded.xmp_size : in->xmp_size;
+	exif = (in->jpeg || in->heif) ? loaded.exif : in->exif;
+	exif_size = (in->jpeg || in->heif) ? loaded.exif_size : in->exif_size;
+	xmp = (in->jpeg || in->heif) ? loaded.xmp : in->xmp;
+	xmp_size = (in->jpeg || in->heif) ? loaded.xmp_size : in->xmp_size;
 
 	err = make_nclx(s, encoder, image, &nclx);
 	if (err.code) { fail(error, error_size, "the colour profile", err); goto done; }

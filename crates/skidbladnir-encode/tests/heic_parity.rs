@@ -276,3 +276,38 @@ fn matches_heif_enc_across_webp_inputs() {
 	run.compare("lossy, alpha, 61x45", &input, &d());
 	finish(&run, "WebP inputs");
 }
+
+/// HEIC input, which `heif-enc` decodes with libheif in the file's own colourspace
+/// (`heifio/decoder_heif.cc`). The sources are written by `heif-enc` itself, from PNGs with
+/// and without alpha, gray, an odd size, and every kind of metadata.
+#[test]
+fn matches_heif_enc_across_heic_inputs() {
+	use skidbladnir_encode::settings::HeicMetadata;
+
+	let Some(mut run) = prepare() else { return };
+	let (odd_w, odd_h) = (61_u32, 45_u32);
+	let odd_rows: Vec<u8> = (0..odd_h).flat_map(|y| (0..odd_w).flat_map(move |x| [u8::try_from((x * 3 + y) % 256).expect("byte"), u8::try_from(x * 4 % 256).expect("byte"), u8::try_from(y * 5 % 256).expect("byte"), u8::try_from((x + y) * 2 % 256).expect("byte")])).collect();
+	let pngs: Vec<(&str, Vec<u8>)> = vec![("rgb", png(W, H, 8, 2, &rows(3, 8), &[], &[])), ("rgba", png(W, H, 8, 6, &rows(4, 8), &[], &[])), ("gray", png(W, H, 8, 0, &rows(1, 8), &[], &[])), ("odd size rgba", png(odd_w, odd_h, 8, 6, &odd_rows, &[], &[])), ("every kind of metadata", png(W, H, 8, 6, &rows(4, 8), &[chunk(*b"iCCP", &[b"test\0\0".as_slice(), &zlib(&icc(false))].concat()), chunk(*b"eXIf", &exif()), itxt("XML:com.adobe.xmp", b"<x:xmpmeta/>")], &[]))];
+	for (name, bytes) in pngs {
+		let png_path = run.dir.join("source.png");
+		fs::write(&png_path, &bytes).expect("write the PNG");
+		let heic = run.dir.join(format!("{}.heic", name.replace(' ', "_")));
+		let made = Command::new(&run.heif_enc).args(["-e", "kvazaar", "-q", "70"]).arg(&png_path).arg("-o").arg(&heic).env("LD_LIBRARY_PATH", &run.lib).env("DYLD_LIBRARY_PATH", &run.lib).output().expect("run heif-enc");
+		assert!(made.status.success(), "heif-enc could not make the {name} source: {}", String::from_utf8_lossy(&made.stderr));
+		run.compare(&format!("{name}, defaults"), &heic, &d());
+		run.compare(&format!("{name}, -q 30 --color-profile auto"), &heic, &HeicSettings { quality: 30, color_profile: ColorProfile::Auto, ..d() });
+		// heif-enc keeps every block it reads; leaving them out is the window's choice, not a
+		// heif-enc option, so it is checked directly: the blocks are there, then gone.
+		if name == "every kind of metadata" {
+			let has = |settings: &HeicSettings, needle: &[u8]| {
+				let out = run.dir.join("metadata.heic");
+				skidbladnir_encode::source::encode_file(&EncodeJob { format: OutputFormat::Heic, heic: settings.clone(), ..Default::default() }, &heic, &out).expect("our conversion");
+				fs::read(&out).expect("read ours").windows(needle.len()).any(|window| window == needle)
+			};
+			let none = HeicSettings { metadata: HeicMetadata { icc: true, exif: false, xmp: false }, ..d() };
+			assert!(has(&d(), b"<x:xmpmeta/>") && has(&d(), &exif()[..8]), "a HEIC source's XMP and Exif are kept by default");
+			assert!(!has(&none, b"<x:xmpmeta/>") && !has(&none, &exif()[..8]), "a HEIC source's XMP and Exif are left out when asked");
+		}
+	}
+	finish(&run, "HEIC inputs");
+}
