@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // The crop and resize every output format shares, in cwebp's order: crop the source, then
-// resize what is left. -resize_mode decides whether the resize applies to this image.
+// resize what is left. -resize_mode decides whether the resize applies to this image. And how
+// a TIFF's alpha is read, which also applies to every format.
 import { computed } from 'vue'
 import type { EncodeJob, ResizeMode } from '~/composables/useSettings'
 
@@ -31,6 +32,10 @@ const MODES: { label: string, value: ResizeMode }[] = [{ label: 'Always', value:
 				<ControlNumber v-model="job.resize.height" label="Height" :min="0" unit="px" help="-resize h · 0 derives it from the width; both 0 is no resize" />
 				<ControlChoice v-model="job.resize.mode" label="When" :items="MODES" help="-resize_mode · always, down_only or up_only" />
 			</div>
+		</ControlPanel>
+
+		<ControlPanel title="TIFF input">
+			<ControlToggle v-model="job.tiffAlphaLikeReference" label="Read transparency as the official tool does" help="Off: a TIFF's semi-transparent colours are read correctly. On: as cwebp reads them for WebP (straight alpha comes out darker) and heif-enc for HEIC (premultiplied alpha comes out darker), byte for byte. AVIF and JPEG XL are unaffected." />
 		</ControlPanel>
 	</div>
 </template>

@@ -31,6 +31,8 @@ export interface EncodeJob {
 	avif: AvifSettings
 	jxl: JxlSettings
 	heic: HeicSettings
+	/** Read a TIFF's alpha as cwebp (WebP) or heif-enc (HEIC) does, rather than correctly. */
+	tiffAlphaLikeReference: boolean
 }
 
 /**
