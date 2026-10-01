@@ -228,6 +228,40 @@ jobs:
           fi
           gh release upload "$TAG" dist-artifacts/* --clobber
 
+  # The .deb on the oldest systems it is said to support, beyond the bundle job's version
+  # check: apt installs it, resolving its dependencies from that system's own archive, and
+  # the loader then finds every library the app needs at a version that system has. The
+  # result does not hold back the release; read it in the run before publishing.
+  deb-install:
+    name: .deb installs on ${{ matrix.image }}${{ matrix.edition == 'gpl' && ' / gpl' || '' }}
+    needs: bundle
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ubuntu:22.04", "debian:12"]
+        edition: [standard, gpl]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: skidbladnir-linux-${{ matrix.edition }}
+          path: dist
+
+      - name: Install it with apt, and resolve its libraries
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends ./dist/*.deb
+          ldd /usr/bin/skidbladnir > "$RUNNER_TEMP/ldd.txt" 2>&1 || true
+          cat "$RUNNER_TEMP/ldd.txt"
+          # A library missing outright, or present at too old a version, both read "not found".
+          if grep -q 'not found' "$RUNNER_TEMP/ldd.txt"; then
+            echo "::error::the ${{ matrix.edition }} .deb does not run on ${{ matrix.image }}"
+            exit 1
+          fi
+
   # The complete corresponding source, which the GPL edition's licence requires to travel
   # with its installers: the repository at this tag WITH its submodules (x265, libheif,
   # libde265, Kvazaar, libavif, libaom, libwebp, libjpeg-turbo), which GitHub's own
