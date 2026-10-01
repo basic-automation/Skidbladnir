@@ -1,14 +1,31 @@
 # Skidbladnir
 
-A desktop GUI for converting images to next-generation formats — **WebP**, **AVIF**,
-**JPEG XL** and **HEIC** — that gives you every option of each format's official
-command-line encoder, not just a quality slider.
+[![CI](https://github.com/basic-automation/Skidbladnir/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/basic-automation/Skidbladnir/actions/workflows/ci.yml?query=branch%3Amaster)
+[![Latest release](https://img.shields.io/github/v/release/basic-automation/Skidbladnir)](https://github.com/basic-automation/Skidbladnir/releases/latest)
+[![Platforms: Windows, macOS (experimental), Linux](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%28experimental%29%20%7C%20Linux-blue)](#install)
 
-**For a still image, any file the official encoder can write, Skidbladnir can write too,
-byte for byte:** `cwebp` for WebP, `avifenc` (with libaom) for AVIF, `cjxl` for JPEG XL and
-`heif-enc` with the Kvazaar encoder for HEIC. Every option they have for one image is a
-control in the window, labelled with the flag it sets, and tests run the real tools and
-compare the bytes. What that covers and where it stops is spelled out under
+Skidbladnir makes image files smaller by converting them to the modern formats:
+**WebP**, **AVIF**, **JPEG XL** and **HEIC**. It is for anyone who wants smaller images for
+a website, an archive or a photo library without learning four command-line tools. Pick
+your files, see the result beside the original, then convert one image, a batch or a
+whole folder.
+
+Free and open source · Windows, macOS (experimental) and Linux · converts on your
+computer; the only network request is the in-app update check
+
+**[Download](https://github.com/basic-automation/Skidbladnir/releases/latest)** ·
+[Which file to pick](#install) ·
+[Project page](https://basicautomation.io/projects/skidbladnir/about)
+
+Each of these formats has an official encoder, and each one is a command-line tool with
+dozens of options that are easy to forget and easy to get wrong. Skidbladnir puts those
+options in a window, each labelled with the flag it sets, instead of a single quality
+slider.
+
+For a still image, every option of `cwebp`, `avifenc` (with libaom), `cjxl` and
+`heif-enc` (with Kvazaar) is a control in the window, and Skidbladnir writes the same
+bytes those tools write when they are built from the same library versions, as CI checks
+against the real tools, apart from the exceptions listed under
 [What "every option" means](#what-every-option-means).
 
 ![The Skidbladnir window with WebP selected: the format rail, the queue, destination and presets sidebar, and every cwebp option as a control labelled with its flag — compression, targets, presets and lossless levels, transparency, lossy tuning, metadata, performance, crop and resize — with a preview of the result beside the original](resources/images/screenshot.webp)
@@ -78,6 +95,135 @@ its HEIC is checked by decoding, not byte for byte against a reference.
 - Original and converted file sizes reported after each conversion
 - Saved presets of your own, and settings remembered between launches
 
+## Install
+
+Download the file for your computer from the
+[latest release](https://github.com/basic-automation/Skidbladnir/releases/latest)
+(`<version>` is the release's version number):
+
+| Your computer | File to download |
+|---|---|
+| Windows 10 or 11, 64-bit | `Skidbladnir_<version>_x64-setup.exe` |
+| Mac with Apple silicon (M1 or later), experimental | `Skidbladnir_<version>_aarch64.dmg` |
+| Mac with an Intel processor, experimental | `Skidbladnir_<version>_x64.dmg` |
+| Ubuntu 22.04 or later, Debian 12 or later, Linux Mint 21 or later, and distributions based on them | `Skidbladnir_<version>_amd64.deb` |
+| Any other 64-bit Linux with glibc 2.35 or later | `Skidbladnir_<version>_amd64.AppImage` |
+
+**Not sure which edition?** Download the standard edition: the files above, named
+`Skidbladnir_…` with an underscore. Choose the GPL edition, the same files named
+`Skidbladnir-GPL_…`, only if you write HEIC and want the x265 encoder: `heif-enc -L`
+lossless, 4:4:4 and 4:2:2 chroma, 10-bit, and x265's preset, tune and a fixed set of its
+other tuning controls. Both are free. The licence matters only if you redistribute the
+app; [Editions](#editions) has the details.
+
+Ignore the files the table does not name. The `.app.tar.gz` files are for the in-app
+updater on a Mac. `Skidbladnir-<version>-source.tar.gz` is the complete source with every
+submodule; GitHub's own "Source code" archives leave the submodules out.
+
+There are no builds for 32-bit systems, Linux on ARM or Windows on ARM. Windows on ARM
+can run x64 programs through emulation, but nobody has tried Skidbladnir there.
+[Status](#status) says which builds have been run, and how.
+
+### Opening it the first time
+
+The installers are not code-signed yet, so Windows and macOS warn before they open an app
+from a developer they cannot identify. This is what to expect, and how to get past it.
+
+**Windows.** Your browser may warn that the file is not commonly downloaded; choose
+**Keep**. When you run the installer, SmartScreen shows *Windows protected your PC*: click
+**More info**, then **Run anyway**. Skidbladnir installs for your account only, in
+`%LOCALAPPDATA%\Skidbladnir`, without administrator rights. If Microsoft's WebView2
+runtime is missing (Windows 10 and 11 normally have it), the installer downloads it. If
+**Smart App Control** is turned on (Windows Security > App & browser control), Windows
+blocks unsigned apps and offers no exception, so Skidbladnir cannot be installed on that
+PC until it is signed.
+
+**macOS (experimental).** The macOS builds are new: CI builds them and runs the test suite
+on macOS, but nobody has opened the app on a real Mac yet, so please
+[report problems](https://github.com/basic-automation/Skidbladnir/issues). Open the `.dmg`,
+drag Skidbladnir into Applications, and open it from there.
+
+- On macOS 15 (Sequoia) or later, the first time you open it, macOS says it cannot
+  verify the app. Click **Done**, open **System Settings > Privacy & Security**, scroll
+  down, click **Open Anyway** beside the message about Skidbladnir, and confirm.
+- On macOS 14 or earlier, right-click (or Control-click) Skidbladnir in Applications,
+  choose **Open**, then choose **Open** again.
+- If macOS says that Skidbladnir *is damaged and can't be opened*, there is no Open Anyway
+  button. Remove the quarantine flag your browser set, in Terminal, then open it again:
+
+  ```bash
+  xattr -dr com.apple.quarantine /Applications/Skidbladnir.app
+  ```
+
+**Linux.** Both packages need glibc 2.35 or later: Ubuntu 22.04, Debian 12 or newer.
+
+- The `.deb` (Ubuntu, Debian, Linux Mint): in the folder you downloaded it to, run
+  `sudo apt install ./Skidbladnir_<version>_amd64.deb`. apt installs what it needs
+  (WebKitGTK and GTK) and adds Skidbladnir to your applications menu.
+- The AppImage (any distribution): run `chmod +x Skidbladnir_<version>_amd64.AppImage`,
+  then `./Skidbladnir_<version>_amd64.AppImage`. It adds no menu entry. It needs FUSE: a
+  `fusermount3` or `fusermount` program (the `fuse3` or `fuse` package) and `/dev/fuse`;
+  libfuse2 is not needed. Where FUSE is not available, run it with
+  `--appimage-extract-and-run`.
+
+### Checking a download
+
+The release page lists a SHA-256 checksum beside each file. Work out the checksum of the
+file you downloaded and compare the two:
+
+- Linux: `sha256sum Skidbladnir_<version>_amd64.deb`
+- macOS: `shasum -a 256 Skidbladnir_<version>_aarch64.dmg`
+- Windows, in PowerShell: `Get-FileHash .\Skidbladnir_<version>_x64-setup.exe` (it uses
+  SHA-256 unless told otherwise)
+
+If they differ, the file is not the one the release published: delete it and download it
+again.
+
+### Updates
+
+Once installed, Skidbladnir checks for a newer release each time it starts and offers it
+in a banner; nothing is downloaded until you click **Install and restart**, and every
+update is verified against the project's signing key before it is installed. A `.deb`
+install updates with a `.deb` (and asks for your password to do it); an AppImage, the
+Windows installer and the macOS app update themselves in place. Each edition updates only
+to the same edition; to switch, install the other one over it. Releases before 0.8.0
+have no updater, so moving off them is a manual download, once.
+
+### Privacy
+
+Skidbladnir has no telemetry and no analytics, and your images never leave your
+computer. The app makes one network request of its own: when it starts, it fetches a
+small update manifest (`latest.json`, or `latest-gpl.json` for the GPL edition) from
+`raw.githubusercontent.com`. Like any web request, that shows GitHub your IP address;
+nothing about you or your files is sent. An update is downloaded from GitHub, and
+installed, only when you click **Install and restart**.
+
+### Editions
+
+The two editions are the same app except for how they write HEIC, and so for their
+licence:
+
+| | Standard (`Skidbladnir_*`) | GPL (`Skidbladnir-GPL_*`) |
+|---|---|---|
+| HEIC encoder | Kvazaar (BSD-3-Clause) | x265 (GPL-2.0-or-later) |
+| HEIC controls | every `heif-enc` option Kvazaar honours | those, plus `-L` lossless, 4:4:4 and 4:2:2 chroma, 10-bit, and x265's preset, tune, TU depth, AQ, psy-rd/psy-rdoq, deblock and SAO (a fixed set, not every `-p x265:` parameter) |
+| HEIC checked | byte for byte against `heif-enc -e kvazaar` | by decoding |
+| Licence of the build | ISC; ships libheif/libde265 as a separate, replaceable LGPL-3.0 library | GPL-3.0-or-later, as a whole |
+
+The GPL edition exists for people who want x265, the HEVC encoder a default `heif-enc`
+build uses, and x265 is GPL: an app that ships it is distributed under the GPL.
+Skidbladnir's own source is ISC either way. Each release attaches
+`Skidbladnir-<version>-source.tar.gz`, the complete source with every submodule, which is
+what the GPL edition's licence requires to be offered with it; the Rust crates and npm
+packages it compiles in are pinned by `Cargo.lock` and `frontend/package-lock.json` in
+that archive and published unmodified on crates.io and npmjs.com. Everything but HEIC
+output — WebP, AVIF, JPEG XL, and HEIC input — is identical in both.
+
+Skidbladnir used to be an Electron app for Windows. That app has been retired: its last
+binary release is [v0.4.3](https://github.com/basic-automation/Skidbladnir/releases/tag/v0.4.3)
+(2019), and its last source is the
+[`electron-final`](https://github.com/basic-automation/Skidbladnir/tree/electron-final) tag.
+
 ## What "every option" means
 
 The claim is tested, not assumed: for each format, a test runs the reference tool and
@@ -138,49 +284,6 @@ un-multiplies it, as `cwebp` does. `heif-enc`'s TIFF reader, judging by its sour
 that alpha as straight, which would make its HEIC darker where the image is
 semi-transparent. That has not yet been run against `heif-enc`, and which result HEIC
 should give is still to be decided ([ROADMAP.md](ROADMAP.md), Phase 8).
-
-## Install
-
-Grab a build from the [releases page](https://github.com/basic-automation/Skidbladnir/releases).
-
-Each release carries a Linux `.deb` and AppImage, a Windows installer, and macOS `.dmg`s
-for Apple Silicon and Intel, in two [editions](#editions): `Skidbladnir_*` is the
-standard edition and `Skidbladnir-GPL_*` the GPL edition. Releases are still marked
-**prerelease**; see Status for which builds have actually been run.
-
-Once installed, Skidbladnir checks for a newer release each time it starts and offers it
-in a banner; nothing is downloaded until you click **Install and restart**, and every
-update is verified against the project's signing key before it is installed. A `.deb`
-install updates with a `.deb` (and asks for your password to do it); an AppImage, the
-Windows installer and the macOS app update themselves in place. Each edition updates only
-to the same edition; to switch, install the other one over it. Releases before 0.8.0
-have no updater, so moving off them is a manual download, once.
-
-### Editions
-
-The two editions are the same app except for how they write HEIC, and so for their
-licence:
-
-| | Standard (`Skidbladnir_*`) | GPL (`Skidbladnir-GPL_*`) |
-|---|---|---|
-| HEIC encoder | Kvazaar (BSD-3-Clause) | x265 (GPL-2.0-or-later) |
-| HEIC controls | every `heif-enc` option Kvazaar honours | those, plus `-L` lossless, 4:4:4 and 4:2:2 chroma, 10-bit, and x265's preset, tune, TU depth, AQ, psy-rd/psy-rdoq, deblock and SAO (a fixed set, not every `-p x265:` parameter) |
-| HEIC checked | byte for byte against `heif-enc -e kvazaar` | by decoding |
-| Licence of the build | ISC; ships libheif/libde265 as a separate, replaceable LGPL-3.0 library | GPL-3.0-or-later, as a whole |
-
-The GPL edition exists for people who want x265, the HEVC encoder a default `heif-enc`
-build uses, and x265 is GPL: an app that ships it is distributed under the GPL.
-Skidbladnir's own source is ISC either way. Each release attaches
-`Skidbladnir-<version>-source.tar.gz`, the complete source with every submodule, which is
-what the GPL edition's licence requires to be offered with it; the Rust crates and npm
-packages it compiles in are pinned by `Cargo.lock` and `frontend/package-lock.json` in
-that archive and published unmodified on crates.io and npmjs.com. Everything but HEIC
-output — WebP, AVIF, JPEG XL, and HEIC input — is identical in both.
-
-Skidbladnir used to be an Electron app for Windows. That app has been retired: its last
-binary release is [v0.4.3](https://github.com/basic-automation/Skidbladnir/releases/tag/v0.4.3)
-(2019), and its last source is the
-[`electron-final`](https://github.com/basic-automation/Skidbladnir/tree/electron-final) tag.
 
 ## Build from source
 
@@ -249,8 +352,8 @@ those are missing.
 ## Status
 
 Skidbladnir is a **Rust + Tauri 2** app with a **Nuxt + Tailwind** frontend, for Windows,
-Linux and macOS. It replaced an Electron app, now retired. The work queue lives in
-[ROADMAP.md](ROADMAP.md).
+Linux and macOS. It replaced an Electron app, now retired. Releases are stable from 1.0.0;
+the ones before it were prereleases. The work queue lives in [ROADMAP.md](ROADMAP.md).
 
 What it can do:
 
@@ -330,13 +433,15 @@ What it can do:
 
 Known gaps:
 
-- The macOS `.dmg`s (Apple Silicon and Intel) are built by CI but **have never been
-  launched** — treat them as untested. The standard edition's Windows installer is
-  installed and exercised by CI on every change, and the Linux `.deb` and AppImage have
-  been run.
+- **macOS is experimental.** The `.dmg`s (Apple silicon and Intel) are built by CI, and
+  the test suite runs on macOS, but nobody has yet opened the app on a real Mac. The
+  standard edition's Windows installer is installed and exercised by CI on every change,
+  and the Linux `.deb` and AppImage have been run.
 - No AppImage is produced on the maintainer's machine, because bundling one needs
   `patchelf`, which is not installed there. CI has it.
-- The app is not code-signed on any platform.
+- The app is not code-signed on any platform;
+  [Opening it the first time](#opening-it-the-first-time) shows how to get past each
+  system's warning.
 - An AVIF, JPEG XL or HEIC encode cannot be cancelled mid-file: none of those encoders reports progress, so
   Cancel takes effect when the current file finishes (which is then discarded, not
   written).
