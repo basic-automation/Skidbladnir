@@ -1018,3 +1018,45 @@ fn matches_reference_cwebp_through_an_associated_alpha_tiff() {
 	assert!(mismatches.is_empty(), "{} of {total} associated-alpha TIFF conversions diverged from cwebp:\n  {}", mismatches.len(), mismatches.join("\n  "));
 	eprintln!("ASSOCIATED-ALPHA TIFF PARITY OK: {total} conversions matched the reference cwebp byte for byte.");
 }
+
+/// The opt-in ([`EncodeJob::tiff_alpha_like_reference`]): with it, a TIFF with *straight*
+/// alpha converts exactly as `cwebp` converts it — darkened by libtiff's premultiply —
+/// across the whole surface, for the committed 8-bit fixture and a 16-bit one written
+/// here. Without it, the colours are kept (`unassociated_alpha_tiff_keeps_its_colours`).
+#[test]
+fn matches_reference_cwebp_through_a_straight_alpha_tiff_when_asked() {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let Some(cwebp) = reference_cwebp().filter(|cwebp| reference_version(cwebp) == Some(skidbladnir_encode::encoder::linked_encoder_version())) else {
+		let message = "STRAIGHT-ALPHA TIFF PARITY NOT RUN: no reference cwebp of the linked libwebp version.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+	let dir = env::temp_dir().join(format!("skidbladnir-parity-straight-tiff-{}", std::process::id()));
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+	let (width, height) = (64_u32, 48_u32);
+	let raster16: Vec<u8> = fixture(width, height).chunks(4).enumerate().flat_map(|(i, p)| p.iter().map(move |&c| u16::try_from((u32::from(c) * 257 + u32::try_from(i % 89).expect("small")).min(65_535)).expect("16-bit")).collect::<Vec<_>>()).flat_map(u16::to_le_bytes).collect();
+	let wide = dir.join("straight-16.tif");
+	fs::write(&wide, tiff(width, height, 16, 4, &raster16, Some(2))).expect("write the fixture");
+	let sources = [Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tiff-rgba8.tif"), wide];
+
+	let mut mismatches = Vec::new();
+	let cases = cases();
+	for source in &sources {
+		for (index, (name, settings)) in cases.iter().enumerate() {
+			let settings = EncodeJob { tiff_alpha_like_reference: true, ..settings.clone() };
+			let theirs = dir.join(format!("cwebp-{index}.webp"));
+			let run = Command::new(&cwebp).args(cwebp_args(&settings, source, &theirs)).output().expect("run the reference cwebp");
+			assert!(run.status.success(), "reference cwebp failed for `{name}`: {}", String::from_utf8_lossy(&run.stderr));
+			let ours = dir.join(format!("ours-{index}.webp"));
+			skidbladnir_encode::source::encode_file(&settings, source, &ours).expect("our pipeline encodes");
+			if fs::read(&ours).expect("read ours") != fs::read(&theirs).expect("read cwebp's") {
+				mismatches.push(format!("{}, `{name}`", source.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned())));
+			}
+		}
+	}
+	let _ = fs::remove_dir_all(&dir);
+	let total = sources.len() * cases.len();
+	assert!(mismatches.is_empty(), "{} of {total} straight-alpha TIFF conversions diverged from cwebp with the opt-in on:\n  {}", mismatches.len(), mismatches.join("\n  "));
+	eprintln!("STRAIGHT-ALPHA TIFF PARITY OK (opt-in): {total} conversions matched the reference cwebp byte for byte.");
+}

@@ -349,6 +349,8 @@ pub fn encode_source_with_progress(job: &EncodeJob, source: &SourceImage, on_pro
 	{
 		return Err(EncodeError::CropOutside { x: crop.x, y: crop.y, crop_width: crop.width, crop_height: crop.height, width: source.width, height: source.height });
 	}
+	let reread = job.tiff_alpha_like_reference.then(|| crate::source::tiff_like_reference(source, job.format)).flatten();
+	let source = reread.as_ref().unwrap_or(source);
 	match job.format {
 		OutputFormat::Webp => encode_webp(job, source, on_progress),
 		OutputFormat::Jxl => crate::jxl::encode(job, source, on_progress),

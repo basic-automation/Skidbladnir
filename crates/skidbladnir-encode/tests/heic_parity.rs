@@ -53,7 +53,11 @@ struct Run {
 
 impl Run {
 	fn compare(&mut self, name: &str, input: &Path, settings: &HeicSettings) {
-		let job = EncodeJob { format: OutputFormat::Heic, heic: settings.clone(), ..Default::default() };
+		self.compare_job(name, input, &EncodeJob { format: OutputFormat::Heic, heic: settings.clone(), ..Default::default() });
+	}
+
+	fn compare_job(&mut self, name: &str, input: &Path, job: &EncodeJob) {
+		let job = job.clone();
 		let theirs = self.dir.join(format!("heif-enc-{}.heic", self.total));
 		let ours = self.dir.join(format!("ours-{}.heic", self.total));
 		self.total += 1;
@@ -310,4 +314,49 @@ fn matches_heif_enc_across_heic_inputs() {
 		}
 	}
 	finish(&run, "HEIC inputs");
+}
+
+/// An 8-bit RGBA TIFF, little-endian, one uncompressed strip, with `ExtraSamples` `extra`.
+fn rgba_tiff(width: u32, height: u32, raster: &[u8], extra: u16) -> Vec<u8> {
+	let raster_len = u32::try_from(raster.len()).expect("small");
+	let bits_at = 8 + raster_len;
+	let mut out = b"II*\0".to_vec();
+	out.extend_from_slice(&(bits_at + 8).to_le_bytes());
+	out.extend_from_slice(raster);
+	out.extend([8_u16; 4].iter().flat_map(|b| b.to_le_bytes()));
+	let short = |tag: u16, value: u16| [tag.to_le_bytes().as_slice(), &3_u16.to_le_bytes(), &1_u32.to_le_bytes(), &value.to_le_bytes(), &[0, 0]].concat();
+	let long = |tag: u16, kind: u16, count: u32, value: u32| [tag.to_le_bytes().as_slice(), &kind.to_le_bytes(), &count.to_le_bytes(), &value.to_le_bytes()].concat();
+	let entries = [long(256, 4, 1, width), long(257, 4, 1, height), long(258, 3, 4, bits_at), short(259, 1), short(262, 2), long(273, 4, 1, 8), short(277, 4), long(278, 4, 1, height), long(279, 4, 1, raster_len), short(284, 1), short(338, extra)];
+	out.extend_from_slice(&u16::try_from(entries.len()).expect("few").to_le_bytes());
+	for entry in entries {
+		out.extend(entry);
+	}
+	out.extend_from_slice(&0_u32.to_le_bytes());
+	out
+}
+
+/// A TIFF with premultiplied alpha: by default Skidbladnir un-multiplies it (the colours
+/// the file means), where `heif-enc` takes the stored samples as straight colour; with
+/// `tiff_alpha_like_reference` on, it hands them over as stored and matches `heif-enc`
+/// byte for byte.
+#[test]
+fn matches_heif_enc_through_a_premultiplied_tiff_when_asked() {
+	let Some(mut run) = prepare() else { return };
+	let straight = rows(4, 8);
+	let premultiply = |c: u8, a: u8| u8::try_from((u32::from(c) * u32::from(a) + 127) / 255).expect("byte");
+	let stored: Vec<u8> = straight.chunks(4).flat_map(|p| [premultiply(p[0], p[3]), premultiply(p[1], p[3]), premultiply(p[2], p[3]), p[3]]).collect();
+	assert!(stored.chunks(4).any(|p| p[3] > 0 && p[3] < 255 && p[0] > 0), "the fixture must have semi-transparent colour");
+	let input = run.dir.join("premultiplied.tif");
+	fs::write(&input, rgba_tiff(W, H, &stored, 1)).expect("write the fixture");
+	for (name, heic) in [("default", d()), ("quality 30", HeicSettings { quality: 30, ..d() })] {
+		run.compare_job(&format!("premultiplied TIFF, {name}, like heif-enc"), &input, &EncodeJob { format: OutputFormat::Heic, heic, tiff_alpha_like_reference: true, ..Default::default() });
+	}
+	// The default differs from heif-enc: it keeps the true colours.
+	let job = EncodeJob { format: OutputFormat::Heic, ..Default::default() };
+	let (theirs, ours) = (run.dir.join("premultiplied-heif-enc.heic"), run.dir.join("premultiplied-ours.heic"));
+	let made = Command::new(&run.heif_enc).args(heif_enc_args(&job, &input, &theirs)).env("LD_LIBRARY_PATH", &run.lib).env("DYLD_LIBRARY_PATH", &run.lib).output().expect("run heif-enc");
+	assert!(made.status.success(), "heif-enc reads the fixture");
+	encode_file(&job, &input, &ours).expect("our conversion");
+	assert_ne!(fs::read(&ours).expect("read ours"), fs::read(&theirs).expect("read heif-enc's"), "by default the true colours are kept, unlike heif-enc");
+	finish(&run, "premultiplied TIFF inputs");
 }
