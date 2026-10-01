@@ -1,0 +1,25 @@
+# A throwaway spike: the WebP options panel and the before/after preview, drawn with gpui
+# and gpuikit instead of Tauri + Nuxt. It answers one question — is gpuikit a credible
+# replacement for the webview UI? — and is not part of the product. See README.md.
+#
+# Its own workspace on purpose: gpui is a large dependency tree, and keeping it out of the
+# root workspace means `cargo build --workspace`, clippy, `cargo deny` and CI never see it.
+[workspace]
+
+[package]
+name = "skidbladnir-gpuikit-spike"
+version = "0.0.0"
+edition = "2024"
+license = "ISC"
+publish = false
+
+[dependencies]
+# gpuikit says to expect breaking changes in every pre-1.0 release, so both it and the
+# gpui distribution it builds against are pinned exactly, to the pair gpuikit's own
+# Cargo.lock resolves at v0.9.0. Two different gpui versions in one tree do not link.
+gpuikit = "=0.9.0"
+gpui = { package = "gpui-unofficial", version = "=1.17.2" }
+gpui_platform = { package = "gpui-platform-gpui-unofficial", version = "=1.17.2", features = ["font-kit"] }
+skidbladnir-encode = { path = "../../crates/skidbladnir-encode" }
+image = { version = "0.25", default-features = false }
+smallvec = "1"
