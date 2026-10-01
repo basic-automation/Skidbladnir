@@ -167,6 +167,45 @@ jobs:
           bundle=target/release/bundle
           python3 scripts/glibc-floor.py --glibc 2.35 --glibcxx 3.4.30 --cxxabi 1.3.13 "$bundle"/deb/*.deb "$bundle"/appimage/*.AppImage
 
+      - name: The macOS app is signed, ad hoc
+        # There is no Apple Developer ID yet, so tauri.macos.conf.json signs ad hoc
+        # ("signingIdentity": "-"). Unsigned, the arm64 app carried only the linker's
+        # signature, which does not seal the bundle, and Apple silicon Macs call such a
+        # download "damaged" with no way past it. Ad hoc signed, macOS asks the user to
+        # allow it once in System Settings > Privacy & Security instead.
+        #
+        # The hardened runtime is off ("hardenedRuntime": false). Its library validation
+        # loads only code "signed by Apple or signed with the same Team ID as the main
+        # executable" (Apple, com.apple.security.cs.disable-library-validation), and an
+        # ad hoc signature has no Team ID, so it would refuse Frameworks/libheif.1.dylib.
+        # With a Developer ID, remove both keys (APPLE_SIGNING_IDENTITY would override the
+        # first, not the second): the bundle then signs with the team's identity, the
+        # hardened runtime returns, and notarization becomes possible.
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          # target/<triple>/release/bundle for a cross build, target/release/bundle otherwise.
+          bundle=target/release/bundle
+          if [ -n "${{ matrix.target }}" ]; then bundle="target/${{ matrix.target }}/release/bundle"; fi
+          app=$(find "$bundle/macos" -maxdepth 1 -type d -name '*.app' | head -1)
+          if [ -z "$app" ]; then
+            echo "::error::no .app in $bundle/macos"
+            exit 1
+          fi
+          echo "APP=$app" >> "$GITHUB_ENV"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -dv --verbose=4 "$app" 2>&1 | tee "$RUNNER_TEMP/codesign.txt"
+          for library in "$app"/Contents/Frameworks/*; do
+            codesign --verify --strict --verbose=2 "$library"
+            codesign -dv "$library" 2>&1 | grep -E '^(Executable|Identifier|Format|CodeDirectory|Signature|TeamIdentifier)'
+          done
+          executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")
+          otool -L "$app/Contents/MacOS/$executable" | grep -i heif
+          grep -q '^Signature=adhoc' "$RUNNER_TEMP/codesign.txt" || { echo "::error::$app is not signed ad hoc"; exit 1; }
+          if grep -q '^CodeDirectory.*flags=.*runtime' "$RUNNER_TEMP/codesign.txt"; then
+            echo "::warning::the hardened runtime is on, so library validation may refuse the ad hoc signed libheif"
+          fi
+
       - name: Collect the artifacts
         shell: bash
         run: |
