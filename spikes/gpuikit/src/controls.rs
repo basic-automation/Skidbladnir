@@ -10,6 +10,8 @@ use gpui::{
 };
 use gpuikit::{elements::input::input, input::InputState};
 
+use crate::css_text::css_text;
+
 use crate::{
 	app::{Popup, Skid}, theme::{ACCENT, ACCENT_TEXT, BG, BRIGHT, DIM, FG, FIELD, MUTED, RULE, Type, VIOLET, c, ca}
 };
@@ -26,22 +28,17 @@ pub struct SliderDrag {
 	pub set: Set<f64>,
 }
 
-/// The ring `:focus-visible` draws: 2px of violet, 2px outside the element.
-pub fn focus_ring(radius: f32) -> gpui::Div {
-	div().absolute().top(px(-4.)).left(px(-4.)).right(px(-4.)).bottom(px(-4.)).border_2().border_color(c(VIOLET)).rounded(px(radius + 4.))
-}
-
 /// One labelled control's frame: `flex min-w-0 flex-col gap-2 px-2.5 py-[7px] text-xs`.
 pub fn field() -> gpui::Div {
 	div().flex().flex_col().min_w_0().gap(px(8.)).px(px(10.)).py(px(7.)).xs()
 }
 
 pub fn field_label(label: impl Into<SharedString>) -> gpui::Div {
-	div().xs().semibold().text_color(c(FG)).child(label.into())
+	div().xs().semibold().text_color(c(FG)).child(css_text(label))
 }
 
 pub fn help(text: impl Into<SharedString>) -> gpui::Div {
-	div().xs().regular().text_color(c(DIM)).child(text.into())
+	div().xs().regular().text_color(c(DIM)).child(css_text(text))
 }
 
 /// An Iconify icon, tinted like `currentColor`.
@@ -110,7 +107,6 @@ impl Skid {
 			.min_w_0()
 			.px(px(10.))
 			.py(px(7.))
-			.when(!disabled, |row| row.cursor_pointer())
 			.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| toggle(this, cx)))
 			.child(
 				div().h(px(20.)).flex().items_center().mt(px(-2.)).child(
@@ -131,18 +127,19 @@ impl Skid {
 							}
 						}))
 						.when(checked, |box_| box_.child(icon("lucide--check", 14., c(BG))))
-						.when(ring, |box_| box_.child(focus_ring(4.))),
+						.when(ring, |box_| box_.child(Ring::Primary.element(4.))),
 				),
 			)
 			.child(
 				div()
 					.ml(px(8.))
 					.flex()
+					.flex_1()
 					.flex_col()
 					.gap(px(4.))
 					.min_w_0()
-					.child(div().relative().child(probe(&format!("label {label}"))).xs().semibold().text_color(c(FG)).when(disabled, |label| label.opacity(0.75)).child(SharedString::from(label.to_owned())))
-					.when_some(help_text, |wrapper, text| wrapper.child(help(text.to_owned()).relative().child(probe(&format!("p {}", &text[..text.len().min(24)]))))),
+					.child(div().relative().child(probe(&format!("label {label}"))).xs().semibold().text_color(c(FG)).when(disabled, |label| label.opacity(0.75)).child(css_text(label.to_owned())))
+					.when_some(help_text, |wrapper, text| wrapper.child(help(text.to_owned()).relative().child(probe(&format!("p {}", &text.chars().take(24).collect::<String>()))))),
 			)
 			.into_any_element()
 	}
@@ -216,7 +213,7 @@ impl Skid {
 							.border_color(c(ACCENT))
 							.bg(c(BG))
 							.track_focus(&focus)
-							.when(ring, |thumb_| thumb_.child(focus_ring(9.)))
+							.when(ring, |thumb_| thumb_.child(crate::controls::ring(3., ca(ACCENT, 0.25), 0., 9.)))
 							.on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
 								let delta = match event.keystroke.key.as_str() {
 									"right" | "up" => step,
@@ -323,8 +320,8 @@ impl Skid {
 					.items_start()
 					.gap(px(4.))
 					.border_l_4()
-					.border_color(if checked { c(ACCENT) } else { gpui::transparent_black() })
-					.when(!checked, |item| item.rounded(px(12.)).hover(|item| item.bg(ca(FIELD, 0.7))))
+					.border_color(if checked || ring { c(ACCENT) } else { gpui::transparent_black() })
+					.when(!checked, |item| item.rounded(px(12.)).when(!ring, |item| item.hover(|item| item.bg(ca(FIELD, 0.7)))))
 					.when(cards, |item| item.flex_1().min_w_0().px(px(10.)).py(px(7.)))
 					.when(!cards, |item| item.px(px(8.)).py(px(4.)))
 					.when(vertical, |item| item.w_full())
@@ -343,9 +340,9 @@ impl Skid {
 							cx.stop_propagation();
 						}
 					}))
-					.child(div().xs().semibold().text_color(c(if checked { ACCENT_TEXT } else { FG })).child(SharedString::from((*item_label).to_owned())))
-					.when_some(*description, |item, text| item.child(div().xs().regular().text_color(c(DIM)).child(SharedString::from(text.to_owned()))))
-					.when(ring, |item| item.child(focus_ring(2.))),
+					.child(div().xs().semibold().text_color(c(if checked { ACCENT_TEXT } else { FG })).child(css_text((*item_label).to_owned())))
+					.when_some(*description, |item, text| item.child(div().xs().regular().text_color(c(DIM)).child(css_text(text.to_owned()))))
+					.when(ring, |item| item.child(crate::controls::ring(3., ca(ACCENT, 0.25), 0., if checked { 0. } else { 12. }))),
 			);
 		}
 		field().when(disabled, |frame| frame.opacity(0.5)).child(field_label(label.to_owned())).child(group).when_some(help_text, |frame, text| frame.child(help(text.to_owned()))).into_any_element()
@@ -361,52 +358,49 @@ impl Skid {
 		let set: Rc<dyn Fn(&mut Self, T)> = Rc::new(set);
 		let toggle_id = popup_id.clone();
 		let menu = open.then(|| {
-			let mut list = div().flex().flex_col().p(px(4.)).gap(px(0.));
+			// USelect's menu: the trigger's width, 8px below it, or above it when there is not
+			// room below and there is more above, as Reka's collision handling decides.
+			let trigger = self.bounds_of(&popup_id);
+			let mut list = div().flex().flex_col().p(px(4.));
+			let mut height: f32 = 8.;
 			for (index, (value, label)) in items.iter().enumerate() {
 				let value = *value;
+				let chosen = value == selected;
+				height += if chosen { 28. } else { 27. };
 				let set = Rc::clone(&set);
 				list = list.child(
 					div()
 						.id(ElementId::Name(format!("{popup_id}-{index}").into()))
+						.relative()
 						.flex()
-						.items_center()
+						.items_start()
 						.gap(px(6.))
-						.px(px(8.))
-						.py(px(6.))
-						.rounded(px(6.))
+						.p(px(6.))
 						.xs()
-						.text_color(c(BRIGHT))
-						.hover(|item| item.bg(c(FIELD)))
-						.cursor_pointer()
+						.text_color(c(FG))
+						.hover(|item| item.text_color(c(BRIGHT)))
+						.child(div().absolute().top(px(1.)).left(px(1.)).right(px(1.)).bottom(px(1.)).rounded(px(9.)).invisible().group_hover(format!("{popup_id}-{index}"), |pad| pad.visible().bg(ca(FIELD, 0.5))))
+						.group(format!("{popup_id}-{index}"))
 						.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
 							set(this, value);
 							this.popup = None;
 							this.changed(cx);
 						}))
-						.child(div().flex_1().truncate().child(label.clone()))
-						.when(value == selected, |item| item.child(icon("lucide--check", 16., c(BRIGHT)))),
+						.child(div().relative().flex_1().min_w_0().truncate().child(label.clone()))
+						.when(chosen, |item| item.child(icon("lucide--check", 16., c(FG)))),
 				);
 			}
-			gpui::deferred(gpui::anchored().snap_to_window_with_margin(px(8.)).child(
-				div()
-					.id(ElementId::Name(format!("{popup_id}-menu").into()))
-					.occlude()
-					.mt(px(4.))
-					.min_w(px(160.))
-					.max_h(px(240.))
-					.overflow_y_scroll()
-					.rounded(px(9.))
-					.bg(c(BG))
-					.border_1()
-					.border_color(c(RULE))
-					.shadow_lg()
-					.on_mouse_down_out(cx.listener(|this, _, _, cx| {
-						this.popup = None;
-						cx.notify();
-					}))
-					.child(list),
-			))
-			.with_priority(1)
+			let height = height.min(240.);
+			let (anchor, at) = match trigger {
+				Some(trigger) => {
+					let below = f32::from(window.viewport_size().height - trigger.bottom()) - 8.;
+					let above = f32::from(trigger.top()) - 8.;
+					if below < height && above > below { (gpui::Anchor::BottomLeft, gpui::point(trigger.left(), trigger.top() - px(8.))) } else { (gpui::Anchor::TopLeft, gpui::point(trigger.left(), trigger.bottom() + px(8.))) }
+				}
+				None => (gpui::Anchor::TopLeft, gpui::point(px(0.), px(0.))),
+			};
+			let width = trigger.map(|trigger| trigger.size.width);
+			place(anchor, at, popup_panel(&format!("{popup_id}-menu"), width, div().id(ElementId::Name(format!("{popup_id}-list").into())).max_h(px(240.)).overflow_y_scroll().child(list), cx))
 		});
 		div()
 			.id(ElementId::Name(popup_id.clone()))
@@ -423,7 +417,7 @@ impl Skid {
 			.regular()
 			.text_color(c(BRIGHT))
 			.when(disabled, |trigger| trigger.opacity(0.75))
-			.when(!disabled, |trigger| trigger.cursor_pointer())
+			.child(self.record(&popup_id))
 			.track_focus(&focus)
 			.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
 				if !disabled {
@@ -433,7 +427,7 @@ impl Skid {
 			}))
 			.child(div().truncate().child(current))
 			.child(div().absolute().right(px(10.)).top(px(6.)).child(icon("lucide--chevron-down", 16., c(DIM))))
-			.when(ring, |trigger| trigger.child(focus_ring(9.)))
+			.when(ring, |trigger| trigger.child(Ring::Primary.element(9.)))
 			.children(menu)
 	}
 
@@ -526,7 +520,6 @@ impl Skid {
 					.sm()
 					.semibold()
 					.text_color(c(BRIGHT))
-					.cursor_pointer()
 					.track_focus(&focus)
 					.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
 						let open = this.disclosures.entry(toggle_key.clone()).or_insert(false);
@@ -535,7 +528,7 @@ impl Skid {
 					}))
 					.child(icon("subway--down-2", 16., c(BRIGHT)).when(!open, |chevron| chevron.with_transformation(gpui::Transformation::rotate(gpui::radians(-std::f32::consts::FRAC_PI_2)))))
 					.child(SharedString::from(title.to_owned()))
-					.when(ring, |button| button.child(focus_ring(2.))),
+					.when(ring, |button| button.child(Ring::Violet.element(2.))),
 			)
 			.when_some(body, |section, body| section.child(div().flex().flex_col().gap(px(16.)).pb(px(8.)).children(body)))
 			.into_any_element()
@@ -609,7 +602,6 @@ pub fn button_soft(id: &str, label: &str, extra_small: bool) -> gpui::Stateful<g
 		.xs()
 		.medium()
 		.text_color(c(FG))
-		.cursor_pointer()
 		.child(SharedString::from(label.to_owned()))
 }
 
@@ -668,4 +660,109 @@ pub fn print_probes() {
 			eprintln!("--");
 		}
 	});
+}
+
+/// Which focus outline a control draws, as each Nuxt UI component (or the base stylesheet)
+/// defines it. Measured from the old window with each control focused from the keyboard.
+#[derive(Clone, Copy)]
+pub enum Ring {
+	/// `outline-3 outline-primary/25 outline-offset-2`: primary buttons, selects, checkboxes.
+	Primary,
+	/// `outline-3 outline-inverted/25 outline-offset-2`: neutral buttons.
+	Neutral,
+	/// `outline-3 outline-error/25`: the error button.
+	Error,
+	/// The base `:focus-visible` rule as these buttons compute it: 2px of their own text
+	/// colour, 2px out.
+	Plain(u32),
+	/// The base rule untouched: 2px violet, 2px out, and a 2px radius.
+	Violet,
+}
+
+/// An outline `width` wide, `offset` outside an element whose corners are `radius`.
+pub fn ring(width: f32, colour: Hsla, offset: f32, radius: f32) -> gpui::Div {
+	let out = offset + width;
+	div().absolute().top(px(-out)).left(px(-out)).right(px(-out)).bottom(px(-out)).border(px(width)).border_color(colour).rounded(px(radius + out))
+}
+
+impl Ring {
+	pub fn element(self, radius: f32) -> gpui::Div {
+		match self {
+			Self::Primary => ring(3., ca(ACCENT, 0.25), 2., radius),
+			Self::Neutral => ring(3., ca(BRIGHT, 0.25), 2., radius),
+			Self::Error => ring(3., ca(crate::theme::ERROR, 0.25), 2., radius),
+			Self::Plain(colour) => ring(2., c(colour), 2., radius),
+			Self::Violet => ring(2., c(VIOLET), 2., 2.),
+		}
+	}
+}
+
+/// A button: focusable, pressed by a click or by Enter or Space, with its focus outline.
+pub trait Press: Sized {
+	#[allow(clippy::too_many_arguments)]
+	fn press(self, skid: &mut Skid, id: &str, ring: Ring, radius: f32, handler: impl Fn(&mut Skid, &mut Window, &mut Context<Skid>) + 'static, window: &Window, cx: &mut Context<Skid>) -> Self;
+}
+
+impl Press for gpui::Stateful<gpui::Div> {
+	fn press(self, skid: &mut Skid, id: &str, ring: Ring, radius: f32, handler: impl Fn(&mut Skid, &mut Window, &mut Context<Skid>) + 'static, window: &Window, cx: &mut Context<Skid>) -> Self {
+		let focus = skid.focus_handle_for(&format!("press-{id}"), cx);
+		let visible = Skid::ring_visible(&focus, window);
+		let handler = Rc::new(handler);
+		let on_key = Rc::clone(&handler);
+		self.relative()
+			.track_focus(&focus)
+			.on_click(cx.listener(move |this, _: &ClickEvent, window, cx| handler(this, window, cx)))
+			.on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+				if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+					on_key(this, window, cx);
+					cx.stop_propagation();
+				}
+			}))
+			.when(visible, |button| button.child(ring.element(radius)))
+	}
+}
+
+
+/// A pop-up's panel: Nuxt UI's popover and menu content, `bg-default ring ring-default
+/// rounded-md shadow-lg`. The ring is a box-shadow outside the box, so it is drawn outside
+/// here too rather than as a border that would take a pixel from the content.
+pub fn popup_panel(id: &str, width: Option<Pixels>, body: impl IntoElement, cx: &mut Context<Skid>) -> gpui::Stateful<gpui::Div> {
+	div()
+		.id(ElementId::Name(id.to_owned().into()))
+		.occlude()
+		.relative()
+		.when_some(width, |panel, width| panel.w(width))
+		.rounded(px(9.))
+		.bg(c(BG))
+		.shadow_lg()
+		.on_mouse_down_out(cx.listener(|this, _, _, cx| {
+			this.popup = None;
+			cx.notify();
+		}))
+		.child(div().absolute().top(px(-1.)).left(px(-1.)).right(px(-1.)).bottom(px(-1.)).rounded(px(10.)).border_1().border_color(c(RULE)))
+		.child(body)
+}
+
+/// Put a pop-up over the window with its `anchor` corner at `at`, in window coordinates.
+pub fn place(anchor: gpui::Anchor, at: gpui::Point<Pixels>, panel: impl IntoElement) -> gpui::Deferred {
+	gpui::deferred(gpui::anchored().anchor(anchor).position(at).snap_to_window_with_margin(px(8.)).child(panel)).with_priority(1)
+}
+
+impl Skid {
+	/// Record this element's bounds under `id` each frame; the parent must be `relative()`.
+	pub fn record(&self, id: &str) -> impl IntoElement {
+		let store = Rc::clone(&self.slider_bounds);
+		let id: SharedString = id.to_owned().into();
+		canvas(|_, _, _| (), move |bounds, (), _, _| {
+			store.borrow_mut().insert(id.clone(), bounds);
+		})
+		.absolute()
+		.top_0()
+		.left_0()
+		.size_full()
+	}
+
+	pub fn bounds_of(&self, id: &str) -> Option<Bounds<Pixels>> {
+		self.slider_bounds.borrow().get(id).copied()
+	}
 }

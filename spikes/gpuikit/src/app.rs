@@ -12,16 +12,19 @@ use gpui::{
 	AnyElement, AppContext, Bounds, ClickEvent, Context, Entity, ExternalPaths, FocusHandle, Focusable, Image, ImageFormat, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement, PathPromptOptions, Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, StyledImage, Subscription, Window, canvas, div, img, point, prelude::FluentBuilder, px, size, svg
 };
 use gpuikit::{elements::input::input, input::InputState};
+
+use crate::css_text::css_text;
 use skidbladnir_encode::{
 	EncodeJob, OutputFormat, settings::HEIC_X265, source::{self, Conversion, FoundImage, PathInspection}
 };
 
 use crate::{
-	controls::{SliderDrag, focus_ring, icon}, shell::{self, preferences::PreferencesFallback, presets::Preset}, theme::{ACCENT, ACCENT_TEXT, BG, BRIGHT, BROWN, DIM, ERROR, FG, FIELD, ON_VIOLET, RULE, Type, VIOLET, WARNING, c, ca}
+	controls::{Press, Ring, SliderDrag, icon}, shell::{self, preferences::PreferencesFallback, presets::Preset}, theme::{ACCENT, ACCENT_TEXT, BG, BRIGHT, BROWN, DIM, ERROR, FG, FIELD, ON_VIOLET, RULE, Type, VIOLET, WARNING, c, ca}
 };
 
-/// The version the window reports. The spike stands in for 1.0.0, so it says so.
-pub const APP_VERSION: &str = "1.0.0";
+/// The version the window reports: the spike stands in for the build installed here,
+/// Skidbladnir-GPL 1.1.0.
+pub const APP_VERSION: &str = "1.1.0";
 
 /// What is open over the window.
 #[derive(Clone, PartialEq, Eq)]
@@ -183,6 +186,45 @@ impl Skid {
 			subscriptions,
 		}
 		.checking_for_update(cx)
+		.debug_state(cx)
+	}
+
+	/// Debugging aids for comparing the two windows state by state: `SKID_FORMAT` picks the
+	/// output format (not saved), `SKID_OPEN` opens a pop-up (`settings`, `queue`,
+	/// `preset-form`, or a select's id such as `select-webp-preset`), `SKID_SCROLL` scrolls
+	/// the settings column to that many pixels.
+	fn debug_state(mut self, cx: &mut Context<Self>) -> Self {
+		if let Ok(format) = std::env::var("SKID_FORMAT") {
+			self.job().format = match format.as_str() {
+				"avif" => OutputFormat::Avif,
+				"jxl" => OutputFormat::Jxl,
+				"heic" => OutputFormat::Heic,
+				_ => OutputFormat::Webp,
+			};
+		}
+		let open = std::env::var("SKID_OPEN").ok();
+		let scroll = std::env::var("SKID_SCROLL").ok().and_then(|value| value.parse::<f32>().ok());
+		if open.is_some() || scroll.is_some() {
+			// After the window has settled, so the triggers' bounds are known.
+			cx.spawn(async move |this, cx| {
+				cx.background_executor().timer(std::time::Duration::from_millis(1500)).await;
+				this.update(cx, |this, cx| {
+					if let Some(offset) = scroll {
+						this.scroll.set_offset(point(px(0.), px(-offset)));
+					}
+					this.popup = open.map(|open| match open.as_str() {
+						"settings" => Popup::Settings,
+						"queue" => Popup::QueueMenu,
+						"preset-form" => Popup::PresetForm,
+						other => Popup::Select(other.to_owned().into()),
+					});
+					cx.notify();
+				})
+				.ok();
+			})
+			.detach();
+		}
+		self
 	}
 
 	/// `check_for_update`: the same manifest, the same opt-out.
@@ -212,7 +254,7 @@ impl Skid {
 		self
 	}
 
-	fn update_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+	fn update_banner(&mut self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
 		let version = self.update.as_ref().filter(|_| !self.update_dismissed)?;
 		let description = if self.update_error.is_empty() { format!("You have {APP_VERSION}. Installing restarts Skidbladnir.") } else { format!("The update could not be installed: {}", self.update_error) };
 		Some(
@@ -228,7 +270,7 @@ impl Skid {
 				.border_color(ca(ACCENT, 0.25))
 				.text_color(c(ACCENT))
 				.child(icon("lucide--download", 20., c(ACCENT)))
-				.child(div().min_w_0().flex_1().flex().flex_col().child(div().sm().medium().child(format!("Skidbladnir {version} is available"))).child(div().sm().opacity(0.9).mt(px(4.)).child(description)))
+				.child(div().min_w_0().flex_1().flex().flex_col().child(div().sm().medium().child(css_text(format!("Skidbladnir {version} is available")))).child(div().sm().opacity(0.9).mt(px(4.)).child(css_text(description))))
 				.child(
 					div()
 						.flex()
@@ -250,24 +292,22 @@ impl Skid {
 								.xs()
 								.medium()
 								.text_color(c(BG))
-								.cursor_pointer()
 								.child(if self.update_error.is_empty() { "Install and restart" } else { "Try again" })
-								.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+								.press(self, "update-install", Ring::Primary, 9., |this, _, cx|  {
 									// Downloading, verifying and swapping the binary is
 									// tauri-plugin-updater's job; the spike has no replacement for it.
 									this.update_error = "installing is not implemented in the gpuikit spike".to_owned();
 									cx.notify();
-								})),
+								}, window, cx),
 						)
 						.child(
 							div()
 								.id("update-dismiss")
 								.rounded(px(9.))
-								.cursor_pointer()
-								.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+								.press(self, "update-dismiss", Ring::Neutral, 9., |this, _, cx|  {
 									this.update_dismissed = true;
 									cx.notify();
-								}))
+								}, window, cx)
 								.child(icon("lucide--x", 20., c(DIM))),
 						),
 				)
@@ -605,7 +645,8 @@ impl Skid {
 						.px(px(8.))
 						.py(px(4.))
 						.border_l_1()
-						.border_color(if checked { c(ACCENT) } else { gpui::transparent_black() })
+						.border_color(if checked || ring { c(ACCENT) } else { gpui::transparent_black() })
+						.when(!checked && !ring, |item| item.hover(|item| item.bg(ca(FIELD, 0.5))))
 						.cursor_pointer()
 						.track_focus(&focus)
 						.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
@@ -613,23 +654,27 @@ impl Skid {
 							this.changed(cx);
 						}))
 						.child(glyph)
-						.when(ring, |item| item.child(focus_ring(2.))),
+						.when(ring, |item| item.child(crate::controls::ring(3., ca(ACCENT, 0.25), 0., 0.))),
 				);
 			}
 		}
 		let settings_open = self.popup == Some(Popup::Settings);
 		let gear = div()
 			.id("app-settings")
+			.child(self.record("app-settings"))
 			.relative()
 			.px(px(8.))
 			.py(px(4.))
 			.rounded(px(9.))
 			.hover(|button| button.bg(c(FIELD)))
-			.cursor_pointer()
-			.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+			.press(self, "app-settings", Ring::Neutral, 9., |this, window, cx|  {
 				this.popup = if this.popup == Some(Popup::Settings) { None } else { Some(Popup::Settings) };
+				if this.popup.is_some() {
+					let first = this.focus_handle_for("popover-include", cx);
+					window.focus(&first, cx);
+				}
 				cx.notify();
-			}))
+			}, window, cx)
 			.child(icon("iconamoon--settings-light", 24., c(FG)))
 			.when(settings_open, |gear| gear.child(self.settings_popover(window, cx)));
 		div()
@@ -658,12 +703,9 @@ impl Skid {
 			self.toggle("popover-mirror", "Recreate folder structure", Some("When subfolders are included, mirror them in the destination. Off writes every file side by side."), mirror, !include, |this, on| this.mirror_structure = on, window, cx),
 		];
 		let version = self.backend_version.clone();
-		popover(
-			"settings-popover",
-			div().flex().flex_col().w(px(288.)).gap(px(8.)).p(px(8.)).xs().children(toggles).when(!version.is_empty(), |body| body.child(div().px(px(10.)).pb(px(4.)).text_color(c(DIM)).child(version))),
-			cx,
-		)
-		.into_any_element()
+		let gear = self.bounds_of("app-settings").unwrap_or_default();
+		let body = div().flex().flex_col().gap(px(8.)).p(px(8.)).xs().children(toggles).when(!version.is_empty(), |body| body.child(div().px(px(10.)).pb(px(4.)).text_color(c(DIM)).child(css_text(version))));
+		crate::controls::place(gpui::Anchor::BottomLeft, point(gear.right() + px(8.), gear.bottom()), crate::controls::popup_panel("settings-popover", Some(px(288.)), body, cx)).into_any_element()
 	}
 
 	fn sidebar(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
@@ -671,7 +713,7 @@ impl Skid {
 		let preset_open = self.popup == Some(Popup::PresetForm);
 		let count = self.input_paths.len();
 		let mut presets = div().flex().flex_col().gap(px(2.));
-		for (index, preset) in self.presets.iter().enumerate() {
+		for (index, preset) in self.presets.clone().iter().enumerate() {
 			let active = self.active_preset == preset.name;
 			let name = preset.name.clone();
 			let delete_name = preset.name.clone();
@@ -694,14 +736,13 @@ impl Skid {
 							.xs()
 							.when(active, |item| item.border_color(c(BROWN)).semibold().text_color(c(ACCENT_TEXT)))
 							.when(!active, |item| item.rounded(px(12.)).border_color(gpui::transparent_black()).text_color(c(BRIGHT)).hover(|item| item.bg(ca(FIELD, 0.7))))
-							.cursor_pointer()
-							.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+							.press(self, "preset-apply", Ring::Plain(BRIGHT), 12., move |this, _, cx|  {
 								if let Some(preset) = this.presets.iter().find(|preset| preset.name == name) {
 									this.settings = Some(preset.settings.clone());
 									this.active_preset = name.clone();
 									this.changed(cx);
 								}
-							}))
+							}, window, cx)
 							.child(preset.name.clone()),
 					)
 					.child(
@@ -715,8 +756,7 @@ impl Skid {
 							.opacity(0.)
 							.group_hover(group, |button| button.opacity(1.))
 							.hover(|button| button.bg(c(FIELD)))
-							.cursor_pointer()
-							.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+							.press(self, "preset-delete", Ring::Neutral, 9., move |this, _, cx|  {
 								this.preset_error.clear();
 								match shell::presets::delete_from(&shell::config_directory(), &delete_name) {
 									Ok(presets) => {
@@ -728,24 +768,24 @@ impl Skid {
 									Err(error) => this.preset_error = error.to_string(),
 								}
 								cx.notify();
-							}))
+							}, window, cx)
 							.child(icon("lucide--x", 14., c(FG))),
 					),
 			);
 		}
 		let name_empty = self.preset_name.read(cx).content().trim().is_empty();
+		let add = self.bounds_of("preset-add").unwrap_or_default();
 		let preset_form = preset_open.then(|| {
-			popover(
-				"preset-form",
+			crate::controls::place(gpui::Anchor::TopLeft, point(add.right() + px(8.), add.top()), crate::controls::popup_panel("preset-form", None,
 				div()
 					.flex()
 					.w(px(256.))
 					.gap(px(8.))
 					.p(px(8.))
 					.child(input(&self.preset_name, cx).flex_1().h(px(28.)).px(px(10.)).py(px(6.)).rounded(px(9.)).bg(c(BG)).border_1().border_color(c(RULE)).xs().text_color(c(FG)))
-					.child(primary_button("preset-save", "Save", name_empty).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.save_preset(cx)))),
+					.child(primary_button("preset-save", "Save", name_empty).press(self, "preset-save", Ring::Primary, 9., |this, _, cx|  this.save_preset(cx), window, cx)),
 				cx,
-			)
+			))
 		});
 		div()
 			.flex()
@@ -760,23 +800,23 @@ impl Skid {
 					.flex()
 					.justify_end()
 					.on_mouse_down(MouseButton::Left, |event, window, _| drag_window(event, window))
-					.child(link_button("collapse", "Collapse", 90.).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+					.child(link_button("collapse", "Collapse", 90.).press(self, "collapse", Ring::Neutral, 9., |this, _, cx|  {
 						this.sidebar_collapsed = true;
 						cx.notify();
-					}))),
+					}, window, cx)),
 			)
 			.child(
 				div()
 					.relative()
 					.child(
-						sidebar_button("queue", "el--inbox-box", "Queue", &self.queue_folder(), (count > 0).then(|| count.to_string())).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+						sidebar_button("queue", "el--inbox-box", "Queue", &self.queue_folder(), (count > 0).then(|| count.to_string())).child(self.record("queue")).press(self, "queue", Ring::Plain(FG), 12., |this, _, cx|  {
 							this.popup = if this.popup == Some(Popup::QueueMenu) { None } else { Some(Popup::QueueMenu) };
 							cx.notify();
-						})),
+						}, window, cx),
 					)
 					.when(queue_open, |queue| queue.child(self.queue_menu(cx))),
 			)
-			.child(sidebar_button("destination", "ic--baseline-upcoming", "Destination", if self.output_directory.is_empty() { "Not chosen" } else { &self.output_directory }, None).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.choose_output(cx))))
+			.child(sidebar_button("destination", "ic--baseline-upcoming", "Destination", if self.output_directory.is_empty() { "Not chosen" } else { &self.output_directory }, None).press(self, "destination", Ring::Plain(FG), 12., |this, _, cx|  this.choose_output(cx), window, cx))
 			.child(
 				div()
 					.flex()
@@ -789,24 +829,24 @@ impl Skid {
 							.child(
 								div()
 									.id("preset-add")
+									.child(self.record("preset-add"))
 									.rounded(px(9.))
 									.hover(|button| button.bg(c(FIELD)))
-									.cursor_pointer()
-									.on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+									.press(self, "preset-add", Ring::Neutral, 9., |this, window, cx|  {
 										this.popup = if this.popup == Some(Popup::PresetForm) { None } else { Some(Popup::PresetForm) };
 										if this.popup.is_some() {
 											let handle = this.preset_name.read(cx).focus_handle(cx);
 											window.focus(&handle, cx);
 										}
 										cx.notify();
-									}))
+									}, window, cx)
 									.child(icon("material-symbols--add", 16., c(FG))),
 							)
 							.children(preset_form),
 					),
 			)
 			.child(presets)
-			.when(self.presets.is_empty(), |aside| aside.child(div().px(px(10.)).xs().text_color(c(DIM)).child("No saved presets yet. Set the controls how you like them and press +.")))
+			.when(self.presets.is_empty(), |aside| aside.child(div().px(px(10.)).xs().text_color(c(DIM)).child(css_text("No saved presets yet. Set the controls how you like them and press +."))))
 			.when(!self.preset_error.is_empty(), |aside| aside.child(div().px(px(10.)).xs().text_color(c(ERROR)).child(self.preset_error.clone())))
 			.child(div().flex_1())
 			.child(div().px10().text_color(c(BRIGHT)).child(format!("v{APP_VERSION}{}", if HEIC_X265 { " · GPL edition" } else { "" })))
@@ -815,65 +855,58 @@ impl Skid {
 
 	fn queue_menu(&mut self, cx: &mut Context<Self>) -> AnyElement {
 		let include = self.include_subfolders;
-		let item = |id: &str, icon_name: &str, label: &str| div().id(SharedString::from(id.to_owned())).flex().items_center().gap(px(6.)).px(px(8.)).py(px(6.)).rounded(px(6.)).xs().text_color(c(BRIGHT)).hover(|item| item.bg(c(FIELD))).cursor_pointer().child(icon(icon_name, 16., c(DIM))).child(label.to_owned());
-		gpui::deferred(
-			gpui::anchored().snap_to_window_with_margin(px(8.)).child(
+		let trigger = self.bounds_of("queue").unwrap_or_default();
+		// Menu items: `p-1.5 text-sm gap-1.5`, a 20px icon, the text, and a faint fill under the
+		// highlighted item, whose text and icon turn from muted to highlighted.
+		let item = |id: &str, icon_name: Option<&str>| {
+			let group = SharedString::from(format!("{id}-group"));
+			div()
+				.id(SharedString::from(id.to_owned()))
+				.group(group.clone())
+				.relative()
+				.flex()
+				.items_start()
+				.gap(px(6.))
+				.p(px(6.))
+				// Nuxt UI's item ends in an empty trailing slot, which still takes a gap.
+				.pr(px(12.))
+				.sm()
+				.text_color(c(FG))
+				.hover(|item| item.text_color(c(BRIGHT)))
+				.child(div().absolute().top(px(1.)).left(px(1.)).right(px(1.)).bottom(px(1.)).rounded(px(9.)).invisible().group_hover(group.clone(), |pad| pad.visible().bg(ca(FIELD, 0.5))))
+				.when_some(icon_name.map(str::to_owned), move |item, name| item.child(div().relative().size(px(20.)).child(icon(&name, 20., c(DIM))).child(div().absolute().top_0().left_0().invisible().group_hover(group, |over| over.visible()).child(icon(&name, 20., c(FG))))))
+		};
+		let menu = div()
+			.flex()
+			.flex_col()
+			.child(
 				div()
-					.id("queue-menu")
-					.occlude()
-					.mt(px(54.))
-					.min_w(px(192.))
-					.rounded(px(9.))
-					.bg(c(BG))
-					.border_1()
-					.border_color(c(RULE))
-					.shadow_lg()
-					.on_mouse_down_out(cx.listener(|this, _, _, cx| {
+					.flex()
+					.flex_col()
+					.p(px(4.))
+					.child(item("menu-images", Some("lucide--images")).child(div().relative().child("Choose images…")).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
 						this.popup = None;
-						cx.notify();
-					}))
-					.child(
-						div()
-							.flex()
-							.flex_col()
-							.p(px(4.))
-							.child(item("menu-images", "lucide--images", "Choose images…").on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-								this.popup = None;
-								this.choose_inputs(cx);
-							})))
-							.child(item("menu-folder", "lucide--folder-search", "Choose a folder…").on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-								this.popup = None;
-								this.choose_folder(cx);
-							}))),
-					)
-					.child(div().h(px(1.)).bg(c(RULE)))
-					.child(
-						div().flex().flex_col().p(px(4.)).child(
-							div()
-								.id("menu-subfolders")
-								.flex()
-								.items_center()
-								.gap(px(6.))
-								.px(px(8.))
-								.py(px(6.))
-								.rounded(px(6.))
-								.xs()
-								.text_color(c(BRIGHT))
-								.hover(|item| item.bg(c(FIELD)))
-								.cursor_pointer()
-								// Kept open, so the box can be ticked and then a folder chosen.
-								.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.set_include_subfolders(!include, cx)))
-								.child(div().flex_1().child("Include subfolders"))
-								.when(include, |row| row.child(icon("lucide--check", 16., c(BRIGHT)))),
-						),
-					),
-			),
-		)
-		.with_priority(1)
-		.into_any_element()
+						this.choose_inputs(cx);
+					})))
+					.child(item("menu-folder", Some("lucide--folder-search")).child(div().relative().child("Choose a folder…")).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+						this.popup = None;
+						this.choose_folder(cx);
+					}))),
+			)
+			.child(div().h(px(1.)).bg(c(RULE)))
+			.child(
+				div().flex().flex_col().p(px(4.)).child(
+					item("menu-subfolders", None)
+						// Kept open, so the box can be ticked and then a folder chosen.
+						.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.set_include_subfolders(!include, cx)))
+						.child(div().relative().flex_1().child("Include subfolders"))
+						.when(include, |row| row.child(icon("lucide--check", 20., c(FG)))),
+				),
+			);
+		crate::controls::place(gpui::Anchor::TopLeft, point(trigger.left(), trigger.bottom() + px(8.)), crate::controls::popup_panel("queue-menu", None, menu, cx)).into_any_element()
 	}
 
-	fn title_bar(&self, cx: &mut Context<Self>) -> AnyElement {
+	fn title_bar(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
 		let window_button = |id: &str, icon_name: &str, wide: bool| div().id(SharedString::from(id.to_owned())).flex_none().pt(px(16.)).pb(px(16.)).pl(px(16.)).pr(px(if wide { 32. } else { 16. })).hover(|button| button.bg(c(FIELD))).child(icon(icon_name, 16., c(FG)));
 		div()
 			.id("title-bar")
@@ -883,24 +916,24 @@ impl Skid {
 			.gap(px(16.))
 			.on_mouse_down(MouseButton::Left, |event, window, _| drag_window(event, window))
 			.when(self.sidebar_collapsed, |bar| {
-				bar.child(link_button("expand", "Expand", -90.).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+				bar.child(link_button("expand", "Expand", -90.).press(self, "expand", Ring::Neutral, 9., |this, _, cx|  {
 					this.sidebar_collapsed = false;
 					cx.notify();
-				})))
+				}, window, cx))
 			})
 			.child(div().h(px(20.)).flex_1())
 			.child(
 				div()
 					.flex()
 					.items_center()
-					.child(window_button("minimise", "material-symbols--minimize", false).on_click(|_, window, _| window.minimize_window()))
-					.child(window_button("maximise", "mdi--maximize", false).on_click(|_, window, _| window.zoom_window()))
-					.child(window_button("close", "material-symbols--close", true).on_click(|_, _, cx| cx.quit())),
+					.child(window_button("minimise", "material-symbols--minimize", false).press(self, "minimise", Ring::Neutral, 0., |_, window, _| window.minimize_window(), window, cx))
+					.child(window_button("maximise", "mdi--maximize", false).press(self, "maximise", Ring::Neutral, 0., |_, window, _| window.zoom_window(), window, cx))
+					.child(window_button("close", "material-symbols--close", true).press(self, "close", Ring::Neutral, 0., |_, _, cx| cx.quit(), window, cx)),
 			)
 			.into_any_element()
 	}
 
-	fn header(&self, cx: &mut Context<Self>) -> AnyElement {
+	fn header(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
 		let text = if !self.input_paths.is_empty() && !self.output_directory.is_empty() {
 			format!("{} → {}", self.file_count(), self.output_directory)
 		} else if !self.input_paths.is_empty() {
@@ -923,14 +956,13 @@ impl Skid {
 				.sm()
 				.medium()
 				.text_color(c(ERROR))
-				.cursor_pointer()
 				.when(self.cancelling, |button| button.child(icon("lucide--loader-circle", 20., c(ERROR))))
 				.child(if self.cancelling { "Stopping…" } else { "Cancel" })
-				.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+				.press(self, "cancel", Ring::Error, 9., |this, _, cx|  {
 					this.cancelling = true;
 					this.cancel.store(true, Ordering::Relaxed);
 					cx.notify();
-				}))
+				}, window, cx)
 		} else {
 			div()
 				.id("convert")
@@ -942,17 +974,17 @@ impl Skid {
 				.py(px(10.))
 				.rounded(px(6.))
 				.bg(if enabled { c(VIOLET) } else { ca(VIOLET, 0.6) })
-				.when(enabled, |button| button.hover(|button| button.bg(ca(VIOLET, 0.9))).cursor_pointer())
+				.when(enabled, |button| button.hover(|button| button.bg(ca(VIOLET, 0.9))))
 				.sm()
 				.semibold()
 				.text_color(c(ON_VIOLET))
 				.child(icon("codicon--debug-start", 16., c(ON_VIOLET)))
 				.child(format!("Convert {}", if self.input_paths.is_empty() { String::new() } else { self.file_count() }).trim_end().to_owned())
-				.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+				.press(self, "convert", Ring::Primary, 6., move |this, _, cx|  {
 					if enabled {
 						this.convert(cx);
 					}
-				}))
+				}, window, cx)
 		};
 		div().flex().items_center().justify_end().gap(px(12.)).pr(px(10.)).child(div().relative().child(crate::controls::probe("p header")).min_w_0().truncate().xs().text_color(c(DIM)).child(text)).child(action.relative().child(crate::controls::probe("button Convert"))).into_any_element()
 	}
@@ -979,7 +1011,7 @@ impl Skid {
 			);
 			let include = self.include_subfolders;
 			let toggle = self.toggle("notes-include", "Include subfolders", None, include, false, |this, on| this.include_subfolders = on, window, cx);
-			notes = notes.child(div().flex().flex_wrap().items_start().gap_x(px(24.)).child(div().min_w_0().flex_1().py(px(7.)).text_color(c(DIM)).child(text)).child(div().flex_none().child(toggle)));
+			notes = notes.child(div().flex().flex_wrap().items_start().gap_x(px(24.)).child(div().min_w_0().flex_1().py(px(7.)).text_color(c(DIM)).child(css_text(text))).child(div().flex_none().child(toggle)));
 		}
 		if let Some(webp) = single_webp {
 			let compression = match webp.compression {
@@ -987,7 +1019,7 @@ impl Skid {
 				skidbladnir_encode::WebpCompression::Lossless => "lossless",
 				skidbladnir_encode::WebpCompression::Mixed => "mixed",
 			};
-			notes = notes.child(div().text_color(c(DIM)).child(format!("Already a WebP: {}×{}, {compression}{}.", webp.width, webp.height, if webp.has_alpha { ", with alpha" } else { "" })));
+			notes = notes.child(div().text_color(c(DIM)).child(css_text(format!("Already a WebP: {}×{}, {compression}{}.", webp.width, webp.height, if webp.has_alpha { ", with alpha" } else { "" }))));
 		}
 		if animated > 0 {
 			let (one, it) = if animated == 1 { ("One queued file is an animation".to_owned(), ("it", "It")) } else { (format!("{animated} queued files are animations"), ("them", "They")) };
@@ -996,11 +1028,11 @@ impl Skid {
 			} else {
 				format!("This format holds still images only here, so {} will be skipped with an error rather than cut down to one frame. Choose WebP to convert {} with every frame.", if animated == 1 { "it" } else { "they" }, it.0)
 			};
-			notes = notes.child(div().text_color(c(WARNING)).child(format!("{one} (animated WebP or GIF). {tail}")));
+			notes = notes.child(div().text_color(c(WARNING)).child(css_text(format!("{one} (animated WebP or GIF). {tail}"))));
 		}
 		if self.drop_rejected > 0 {
 			let one = self.drop_rejected == 1;
-			notes = notes.child(div().text_color(c(WARNING)).child(format!("{} dropped {} not a PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC or GIF and {} skipped.", self.drop_rejected, if one { "file was" } else { "files were" }, if one { "was" } else { "were" })));
+			notes = notes.child(div().text_color(c(WARNING)).child(css_text(format!("{} dropped {} not a PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC or GIF and {} skipped.", self.drop_rejected, if one { "file was" } else { "files were" }, if one { "was" } else { "were" }))));
 		}
 		Some(notes.into_any_element())
 	}
@@ -1027,18 +1059,17 @@ impl Skid {
 		.into_any_element()
 	}
 
-	fn results(&self, cx: &mut Context<Self>) -> AnyElement {
+	fn results(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
 		let dismiss = div()
 			.id("dismiss-results")
 			.p(px(4.))
 			.rounded(px(9.))
 			.hover(|button| button.bg(c(FIELD)))
-			.cursor_pointer()
-			.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+			.press(self, "dismiss-results", Ring::Neutral, 9., |this, _, cx|  {
 				this.reports.clear();
 				this.failures.clear();
 				cx.notify();
-			}))
+			}, window, cx)
 			.child(icon("material-symbols--close", 16., c(FG)))
 			.into_any_element();
 		let mut children = Vec::new();
@@ -1097,12 +1128,11 @@ impl Skid {
 					.xs()
 					.semibold()
 					.text_color(c(FG))
-					.cursor_pointer()
 					.when(previewing, |button| button.child(icon("lucide--loader-circle", 16., c(FG))))
 					.child(label)
-					.on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.run_preview(cx))),
+					.press(self, "preview-run", Ring::Primary, 6., |this, _, cx|  this.run_preview(cx), window, cx),
 			)
-			.child(div().min_w_0().flex_1().xs().text_color(c(DIM)).child(format!("Encodes {} in memory with the current settings. Nothing is written to disk.", if many { "the chosen file" } else { "the file" })));
+			.child(div().min_w_0().flex_1().xs().text_color(c(DIM)).child(css_text(format!("Encodes {} in memory with the current settings. Nothing is written to disk.", if many { "the chosen file" } else { "the file" }))));
 		let mut children = vec![row.into_any_element()];
 		if !self.preview_error.is_empty() {
 			children.push(div().px(px(10.)).xs().text_color(c(ERROR)).child(self.preview_error.clone()).into_any_element());
@@ -1201,11 +1231,11 @@ impl Render for Skid {
 		let format = self.settings.as_ref().map(|settings| settings.format);
 		let rail = self.rail(window, cx);
 		let sidebar = (!self.sidebar_collapsed).then(|| self.sidebar(window, cx));
-		let title_bar = self.title_bar(cx);
-		let header = self.header(cx);
+		let title_bar = self.title_bar(window, cx);
+		let header = self.header(window, cx);
 		let notes = self.notes(window, cx);
 		let mut sections: Vec<AnyElement> = vec![header];
-		sections.extend(self.update_banner(cx));
+		sections.extend(self.update_banner(window, cx));
 		if !self.preferences_notice.is_empty() {
 			sections.push(alert(&self.preferences_notice, WARNING, None));
 		}
@@ -1220,7 +1250,7 @@ impl Render for Skid {
 			sections.push(alert(&self.validation_error, ERROR, None));
 		}
 		if !self.reports.is_empty() || !self.failures.is_empty() {
-			sections.push(self.results(cx));
+			sections.push(self.results(window, cx));
 		}
 		if settings_ready {
 			let panel = match format {
@@ -1337,30 +1367,6 @@ fn drag_window(event: &MouseDownEvent, window: &mut Window) {
 	}
 }
 
-/// A Nuxt UI popover's panel, positioned against its trigger.
-fn popover(id: &str, body: gpui::Div, cx: &mut Context<Skid>) -> AnyElement {
-	gpui::deferred(
-		gpui::anchored().snap_to_window_with_margin(px(8.)).child(
-			div()
-				.id(SharedString::from(id.to_owned()))
-				.occlude()
-				.ml(px(32.))
-				.rounded(px(9.))
-				.bg(c(BG))
-				.border_1()
-				.border_color(c(RULE))
-				.shadow_lg()
-				.on_mouse_down_out(cx.listener(|this, _, _, cx| {
-					this.popup = None;
-					cx.notify();
-				}))
-				.child(body),
-		),
-	)
-	.with_priority(1)
-	.into_any_element()
-}
-
 /// The "Collapse" and "Expand" links: `UButton variant="link"` with a turned chevron.
 fn link_button(id: &str, label: &str, degrees: f32) -> gpui::Stateful<gpui::Div> {
 	div()
@@ -1375,8 +1381,6 @@ fn link_button(id: &str, label: &str, degrees: f32) -> gpui::Stateful<gpui::Div>
 		.xs()
 		.semibold()
 		.text_color(c(FG))
-		.hover(|link| link.opacity(0.75))
-		.cursor_pointer()
 		.child(label.to_owned())
 		.child(icon("subway--down-2", 16., c(FG)).with_transformation(gpui::Transformation::rotate(gpui::radians(degrees.to_radians()))))
 }
@@ -1395,7 +1399,6 @@ fn sidebar_button(id: &str, icon_name: &str, title: &str, subtitle: &str, badge:
 		.px(px(10.))
 		.py(px(7.))
 		.hover(|button| button.bg(ca(FIELD, 0.7)))
-		.cursor_pointer()
 		.child(
 			div()
 				.flex()
@@ -1420,7 +1423,7 @@ fn primary_button(id: &str, label: &str, disabled: bool) -> gpui::Stateful<gpui:
 		.rounded(px(9.))
 		.bg(c(ACCENT))
 		.when(disabled, |button| button.opacity(0.75))
-		.when(!disabled, |button| button.hover(|button| button.bg(ca(ACCENT, 0.75))).cursor_pointer())
+		.when(!disabled, |button| button.hover(|button| button.bg(ca(ACCENT, 0.75))))
 		.xs()
 		.medium()
 		.text_color(c(BG))
@@ -1437,8 +1440,8 @@ fn alert(text: &str, colour: u32, title: Option<&str>) -> AnyElement {
 		.rounded(px(12.))
 		.bg(ca(colour, 0.1))
 		.text_color(c(colour))
-		.when_some(title, |alert, title| alert.child(div().sm().medium().child(title.to_owned())))
-		.child(div().sm().opacity(0.9).child(text.to_owned()))
+		.when_some(title, |alert, title| alert.child(div().sm().medium().child(css_text(title.to_owned()))))
+		.child(div().sm().opacity(0.9).child(css_text(text.to_owned())))
 		.into_any_element()
 }
 

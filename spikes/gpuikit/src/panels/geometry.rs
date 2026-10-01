@@ -1,4 +1,5 @@
-//! `GeometrySettingsPanel.vue`: the crop and resize every output format shares.
+//! `GeometrySettingsPanel.vue`: the crop and resize every output format shares, and how a
+//! TIFF's alpha is read.
 
 use gpui::{AnyElement, Context, IntoElement, ParentElement, Styled, Window, div, px};
 use skidbladnir_encode::settings::{Crop, ResizeMode};
@@ -34,12 +35,25 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 		cx,
 	);
 
+	let tiff_alpha = this.job().tiff_alpha_like_reference;
+	let tiff = this.toggle(
+		"tiff-alpha",
+		"Read transparency as the official tool does",
+		Some("Off: a TIFF's semi-transparent colours are read correctly. On: as cwebp reads them for WebP (straight alpha comes out darker) and heif-enc for HEIC (premultiplied alpha comes out darker), byte for byte. AVIF and JPEG XL are unaffected."),
+		tiff_alpha,
+		false,
+		|t, v| t.job().tiff_alpha_like_reference = v,
+		window,
+		cx,
+	);
+
 	div()
 		.flex()
 		.flex_col()
 		.gap(px(32.))
 		.child(this.panel("Crop", None, vec![crop_control]))
 		.child(this.panel("Resize", None, vec![Skid::grid(3, 12., vec![width, height, mode]).into_any_element()]))
+		.child(this.panel("TIFF input", None, vec![tiff]))
 		.into_any_element()
 }
 

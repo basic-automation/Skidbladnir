@@ -4,6 +4,7 @@
 mod app;
 mod assets;
 mod controls;
+mod css_text;
 mod panels;
 mod shell;
 mod theme;
