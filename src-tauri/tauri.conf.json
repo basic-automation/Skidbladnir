@@ -48,8 +48,11 @@
       "../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md"
     },
     "category": "Graphics and Design",
+    "publisher": "Basic Automation",
+    "copyright": "Copyright © 2019-2026 Justin Icenhour",
+    "homepage": "https://basicautomation.io/projects/skidbladnir",
     "shortDescription": "Convert images to next-generation formats.",
-    "longDescription": "Skidbladnir converts images to WebP, AVIF, JPEG XL and HEIC with every option of each format's reference encoder, cwebp, avifenc, cjxl and heif-enc, and writes the same bytes those tools write. It reads PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC, GIF, PNM and PFM, converts animated GIF and WebP to animated WebP, keeps colour profiles and metadata the way each tool does, and previews the result before anything is written."
+    "longDescription": "Skidbladnir converts images to WebP, AVIF, JPEG XL and HEIC. For a still image it offers every option of cwebp, avifenc (libaom), cjxl and heif-enc with Kvazaar, and writes the same bytes those tools write, apart from a few documented cases. It reads PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC, GIF, PNM and PFM, converts animated GIF and WebP to animated WebP, keeps colour profiles and metadata the way each tool does, and previews the result before anything is written."
   },
   "plugins": {
     "updater": {
