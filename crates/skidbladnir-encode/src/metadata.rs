@@ -33,7 +33,8 @@ impl Metadata {
 			SourceFormat::Webp => webp_chunks(bytes),
 			// `cwebp` cannot read these at all. Their decoders' own metadata is used. (A GIF
 			// goes to WebP through the animation encoder, as `gif2webp`, never through here.)
-			SourceFormat::Avif | SourceFormat::Jxl | SourceFormat::Heic | SourceFormat::Gif => Self::default(),
+			// A PNM file has no metadata to carry.
+			SourceFormat::Avif | SourceFormat::Jxl | SourceFormat::Heic | SourceFormat::Gif | SourceFormat::Pnm => Self::default(),
 		}
 	}
 

@@ -48,6 +48,9 @@ pub enum SourceFormat {
 	/// GIF, still or animated, read the way libwebp's `gif2webp` reads one
 	/// ([`crate::gif_input`]).
 	Gif,
+	/// Binary PNM: a graymap (`P5`), pixmap (`P6`) or PAM (`P7`), read the way `cwebp`
+	/// reads one ([`crate::pnm`]).
+	Pnm,
 }
 
 impl SourceFormat {
@@ -66,6 +69,7 @@ impl SourceFormat {
 			[_, _, _, _, b'f', b't', b'y', b'p', ..] if is_heic_ftyp(bytes) => Some(Self::Heic),
 			[0xff, 0x0a, ..] | [0, 0, 0, 0x0c, b'J', b'X', b'L', b' ', 0x0d, 0x0a, 0x87, 0x0a, ..] => Some(Self::Jxl),
 			[b'G', b'I', b'F', b'8', b'7' | b'9', b'a', ..] => Some(Self::Gif),
+			[b'P', b'5'..=b'7', b' ' | b'\t' | b'\r' | b'\n', ..] => Some(Self::Pnm),
 			_ => None,
 		}
 	}
@@ -82,6 +86,7 @@ impl SourceFormat {
 			Self::Jxl => "JPEG XL",
 			Self::Heic => "HEIC",
 			Self::Gif => "GIF",
+			Self::Pnm => "PNM",
 		}
 	}
 }
@@ -283,6 +288,10 @@ pub fn decode(path: &Path, bytes: Vec<u8>) -> Result<SourceImage, SourceError> {
 				return Err(SourceError::Animated { path: path.to_path_buf() });
 			}
 			Decoded::rgba((animation.width, animation.height, animation.frames.swap_remove(0).pixels))
+		}
+		SourceFormat::Pnm => {
+			let pnm = crate::pnm::decode(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?;
+			Decoded { width: pnm.header.width, height: pnm.header.height, pixels: pnm.pixels, deep: pnm.deep, gray: pnm.header.gray(), has_alpha: pnm.header.alpha() }
 		}
 		// libjpeg-turbo, as every reference tool decodes JPEG; a CMYK JPEG, which cwebp and
 		// cjxl refuse, falls through to the `image` crate.
@@ -845,6 +854,11 @@ mod tests {
 		assert_eq!(SourceFormat::sniff(b"\xff\x0a\x00\x00...."), Some(SourceFormat::Jxl), "a bare JPEG XL codestream");
 		assert_eq!(SourceFormat::sniff(b"\0\0\0\x0cJXL \r\n\x87\n\0\0"), Some(SourceFormat::Jxl), "a JPEG XL container");
 		assert_eq!(SourceFormat::sniff(b"GIF89a......"), Some(SourceFormat::Gif));
+		assert_eq!(SourceFormat::sniff(b"P5\n64 48\n255\n"), Some(SourceFormat::Pnm), "a binary graymap");
+		assert_eq!(SourceFormat::sniff(b"P6 64 48 255\n"), Some(SourceFormat::Pnm), "a binary pixmap");
+		assert_eq!(SourceFormat::sniff(b"P7\nWIDTH 1\n"), Some(SourceFormat::Pnm), "a PAM");
+		assert_eq!(SourceFormat::sniff(b"P3\n1 1\n255\n"), None, "cwebp reads no plain (ASCII) PNM");
+		assert_eq!(SourceFormat::sniff(b"P6x"), None);
 		assert_eq!(SourceFormat::sniff(b"BM6\x00\x00\x00......"), None, "BMP is not accepted");
 		assert_eq!(SourceFormat::sniff(b"RIFF\x00\x00\x00\x00WAVEfmt "), None, "a RIFF container that is not WebP");
 		assert_eq!(SourceFormat::sniff(b"\x89PN"), None, "a truncated header must not match");
