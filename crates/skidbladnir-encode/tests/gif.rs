@@ -328,3 +328,62 @@ fn reads_gif_metadata_as_gif2webp_does() {
 	assert_eq!(gif_input::metadata(&base[0].1), skidbladnir_encode::metadata::Metadata::default(), "a GIF without the extensions has none");
 	assert_eq!(gif_input::metadata(&gif[..gif.len() - 1]).icc.as_deref(), Some(&[1_u8; 300][..]), "a truncated GIF keeps what was read");
 }
+
+/// A still GIF into JPEG XL, against `cjxl`, which reads GIF with its own reader
+/// (`lib/extras/dec/gif.cc`) and counts it a lossy input, so its default is lossless.
+/// Animated GIFs are refused for JPEG XL output (still images only), as for AVIF and HEIC.
+#[test]
+fn matches_cjxl_reading_a_still_gif() {
+	use skidbladnir_encode::{
+		cjxl::cjxl_args, jxl, settings::{EncodeJob, JxlSettings, JxlTarget, OutputFormat}, source::encode_file
+	};
+
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let cjxl = env::var_os("SKIDBLADNIR_REFERENCE_CJXL").map(PathBuf::from).filter(|path| path.is_file()).or_else(|| Command::new("cjxl").arg("--version").output().ok().filter(|out| out.status.success()).map(|_| PathBuf::from("cjxl")));
+	let version = cjxl.as_ref().and_then(|tool| {
+		let out = Command::new(tool).arg("--version").output().ok()?;
+		let text = String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+		let version = text.split_whitespace().find_map(|word| word.strip_prefix('v'))?.to_owned();
+		let mut parts = version.split('.').map(str::parse::<u32>);
+		match (parts.next(), parts.next(), parts.next()) {
+			(Some(Ok(a)), Some(Ok(b)), Some(Ok(c))) => Some((a, b, c)),
+			_ => None,
+		}
+	});
+	let Some(cjxl) = cjxl.filter(|_| version == Some(jxl::linked_version())) else {
+		let message = "GIF-TO-JXL PARITY NOT RUN: no cjxl of the linked libjxl version.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+
+	let background: fn(u16, u16) -> u8 = |x, y| u8::try_from((x / 5 + y / 5) % 16).unwrap_or(0);
+	let stills = [("opaque", build(&[full(0, background)], None)), ("transparent index", build(&[Spec { transparent: Some(3), ..full(0, background) }], None)), ("local palette, interlaced", build(&[Spec { palette: Some((0..16_u8).flat_map(|i| [i * 15, 90, 255 - i * 15]).collect()), interlaced: true, ..full(0, background) }], None)), ("with a loop extension", build(&[full(0, background)], Some(Repeat::Infinite)))];
+	// `JxlTarget::Default` is no -d or -q at all, where cjxl makes a GIF lossless.
+	let settings = [JxlSettings { effort: 3, ..JxlSettings::default() }, JxlSettings { effort: 7, target: JxlTarget::Default, ..JxlSettings::default() }, JxlSettings { effort: 3, target: JxlTarget::Default, ..JxlSettings::default() }, JxlSettings { effort: 3, target: JxlTarget::Distance(1.5), ..JxlSettings::default() }, JxlSettings { effort: 3, target: JxlTarget::Quality(80.0), ..JxlSettings::default() }];
+
+	let dir = env::temp_dir().join(format!("skidbladnir-gif-jxl-{}", std::process::id()));
+	let _ = fs::remove_dir_all(&dir);
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+	let mut compared = 0;
+	let mut mismatches = Vec::new();
+	for (name, bytes) in &stills {
+		let input = dir.join("still.gif");
+		fs::write(&input, bytes).expect("write the GIF");
+		for settings in &settings {
+			let job = EncodeJob { format: OutputFormat::Jxl, jxl: settings.clone(), ..EncodeJob::default() };
+			let (theirs, ours) = (dir.join("cjxl.jxl"), dir.join("ours.jxl"));
+			let run = Command::new(&cjxl).args(cjxl_args(&job, &input, &theirs)).output().expect("run cjxl");
+			assert!(run.status.success(), "cjxl refused the {name} GIF: {}", String::from_utf8_lossy(&run.stderr));
+			encode_file(&job, &input, &ours).expect("our conversion");
+			compared += 1;
+			let (expected, actual) = (fs::read(&theirs).expect("read cjxl's"), fs::read(&ours).expect("read ours"));
+			if expected != actual {
+				mismatches.push(format!("{name}, effort {} {:?}: ours {} bytes, cjxl {} bytes", settings.effort, settings.target, actual.len(), expected.len()));
+			}
+		}
+	}
+	let _ = fs::remove_dir_all(&dir);
+	assert!(mismatches.is_empty(), "GIF-TO-JXL PARITY FAILED for {} of {compared}:\n{}", mismatches.len(), mismatches.join("\n"));
+	eprintln!("GIF-TO-JXL PARITY OK: {compared} still GIFs byte-identical to cjxl");
+}

@@ -510,8 +510,8 @@ fn frame_options(s: &JxlSettings, jpeg: bool) -> Vec<(c_int, OptionValue)> {
 }
 
 /// The distance a target asks for, where `lossy_source` is whether `cjxl` would have
-/// decoded the input from a lossy format (a JPEG decoded to pixels), which makes its
-/// default lossless.
+/// decoded the input from a format it counts as lossy (a JPEG decoded to pixels, or a GIF),
+/// which makes its default lossless.
 fn distance(target: JxlTarget, lossy_source: bool) -> f32 {
 	match target {
 		JxlTarget::Default => {
@@ -592,6 +592,7 @@ impl Input {
 			SourceFormat::Jpeg => Self::jpeg(source),
 			SourceFormat::Pnm => Self::pnm(source),
 			SourceFormat::Pfm => Self::pfm(source),
+			SourceFormat::Gif => Self::gif(source),
 			_ => Self::other(source),
 		}
 	}
@@ -736,6 +737,14 @@ impl Input {
 			_ => return Self::other(source),
 		};
 		Self { width: source.width, height: source.height, bits_per_sample: 32, exponent_bits: 8, num_color_channels: if image.gray { 1 } else { 3 }, alpha_bits: 0, samples: Samples::F32(image.samples), colour: Colour::Encoding(srgb(image.gray, JXL_RENDERING_INTENT_PERCEPTUAL)), colour_given: false, colour_hints_ignored: false, intensity_target: 0.0, exif: Vec::new(), xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT }
+	}
+
+	/// `lib/extras/dec/gif.cc` for a still GIF: always three colour channels, alpha only
+	/// when a pixel is transparent (the transparent index reads as 0, 0, 0, 0, as it does
+	/// for `gif2webp`, which is how the pixels were decoded), sRGB with the perceptual
+	/// intent, and — `cjxl` counting GIF a lossy input, like JPEG — lossless by default.
+	fn gif(source: &SourceImage) -> Self {
+		Self { colour: Colour::Encoding(srgb(false, JXL_RENDERING_INTENT_PERCEPTUAL)), colour_given: false, lossy_source: true, ..Self::other(source) }
 	}
 
 	/// A format `cjxl` does not read (TIFF, WebP, AVIF, HEIC, or JPEG XL decoded to

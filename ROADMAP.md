@@ -1189,8 +1189,16 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       `enc_encoding.cc:314`) — `cjxl` itself fails the same PFM, so the PFM gate pins that
       both refuse it. Check whether a later libjxl fixes it before the next libjxl bump,
       and turn the pin into a parity case then.
-- [ ] More input formats the tools read: GIF and APNG into `cjxl` (it reads them itself,
-      not as `gif2webp` does), Y4M (`avifenc`, `heif-enc`), PGX and EXR (`cjxl`), raw pixels
+- [x] **A still GIF into JPEG XL, as `cjxl` reads it** (2026-10-01). `cjxl` reads GIF with
+      its own reader (`lib/extras/dec/gif.cc`): three colour channels, alpha only when a
+      pixel is transparent, perceptual sRGB — and it counts GIF a lossy input, so with no
+      `-d`/`-q` it encodes losslessly. Skidbladnir took the generic path (relative intent,
+      distance 1). **Gate:** `matches_cjxl_reading_a_still_gif` in `tests/gif.rs` — four
+      still GIFs (opaque, transparent index, local palette + interlaced, a loop extension) x
+      five settings including no target: 20 of 20 byte-identical to `cjxl`. Mutation: the
+      generic path fails 16, the distance-1 default fails 8.
+- [ ] More input formats the tools read: animated GIF and APNG into `cjxl` (with the
+      multi-image work below), Y4M (`avifenc`, `heif-enc`), PGX and EXR (`cjxl`), raw pixels
       (`heif-enc --raw`, `cwebp -s`), and `heif-enc`'s WebP and HEIF input.
 
 **Multi-image features the tools have, deferred by the owner (2026-09-28):**
