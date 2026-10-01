@@ -406,8 +406,9 @@ Known gaps:
 - **macOS is experimental.** The `.dmg`s (Apple silicon and Intel) are built by CI, and
   the test suite runs on macOS, but nobody has yet opened the app on a real Mac. The
   standard edition's Windows installer is installed and exercised by CI on every change,
-  the Linux app (both editions) is launched and driven by CI on every change, and the
-  published `.deb` and AppImage have been run by hand.
+  and the Linux app (both editions) is launched and driven by CI on every change, though
+  not from its `.deb` or AppImage. The published 0.5.0 `.deb` and AppImage were run
+  through that release's smoke test by hand.
 - The app is not code-signed on any platform;
   [Opening it the first time](#opening-it-the-first-time) shows how to get past each
   system's warning.
