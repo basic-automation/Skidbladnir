@@ -64,7 +64,7 @@ async function show(document: LegalDocument) {
 				{{ backendVersion }}
 			</p>
 			<div class="flex flex-wrap gap-2 pt-1">
-				<UButton v-for="document in documents" :key="document.value" size="sm" color="neutral" :variant="shown === document.value ? 'solid' : 'soft'" :aria-pressed="shown === document.value" @click="show(document.value)">
+				<UButton v-for="document in documents" :key="document.value" size="sm" color="neutral" variant="soft" :class="shown === document.value ? 'ring-1 ring-paleday-accent-text' : ''" :aria-pressed="shown === document.value" @click="show(document.value)">
 					{{ document.label }}
 				</UButton>
 			</div>

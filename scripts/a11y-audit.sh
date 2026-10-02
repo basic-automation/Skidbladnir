@@ -91,7 +91,7 @@ audit() {
 	local report
 	report=$("$HARNESS" exec --script '
 const results = await window.axe.run(document, { resultTypes: ["violations"] });
-return JSON.stringify(results.violations.map(v => ({ id: v.id, impact: v.impact, help: v.help, nodes: v.nodes.length })));
+return JSON.stringify(results.violations.map(v => ({ id: v.id, impact: v.impact, help: v.help, nodes: v.nodes.length, where: v.nodes.slice(0, 3).map(n => n.target.join(" ") + " " + (n.any[0]?.message ?? "")) })));
 ')
 	printf '%s' "$report" | THRESHOLD="$THRESHOLD" "$PY" -c '
 import json, os, sys
@@ -116,6 +116,8 @@ for v in violations:
     if marker == "FAIL":
         failed += 1
     print(f"{marker} [{impact}] {v["id"]}: {v["help"]} ({v["nodes"]} node(s))")
+    for where in v.get("where", []):
+        print(f"       {where}")
 
 print()
 if failed:
@@ -146,6 +148,7 @@ audit "with the About view open" \
 	 document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await sleep(300);
 	 [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Third-party notices').click();
 	 for (let i = 0; i < 50 && !document.querySelector('pre'); i++) await sleep(100);
+	 await sleep(500);
 	 return document.querySelector('pre') ? 'ok' : 'no licence text'"
 # Tauri's own drop event is the one way to hand the window a file without a native
 # dialog, and a preview needs a file.
