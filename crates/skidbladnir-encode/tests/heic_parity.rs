@@ -365,3 +365,29 @@ fn matches_heif_enc_through_a_premultiplied_tiff_when_asked() {
 	assert_ne!(fs::read(&ours).expect("read ours"), fs::read(&theirs).expect("read heif-enc's"), "by default the true colours are kept, unlike heif-enc");
 	finish(&run, "premultiplied TIFF inputs");
 }
+
+/// An 8-bit Y4M of one frame: Y, then `chroma` (width, height) Cb and Cr planes, under
+/// `header`'s `C` tag (or none).
+fn y4m_420(width: u32, height: u32, tag: &str) -> Vec<u8> {
+	let mut out = format!("YUV4MPEG2 W{width} H{height} F25:1 Ip A0:0{tag}\nFRAME\n").into_bytes();
+	let mut plane = |w: u32, h: u32, seed: u32| out.extend((0..h).flat_map(|y| (0..w).map(move |x| u8::try_from((x * 5 + y * 3 + seed * 40) % 236 + 16).expect("byte"))));
+	plane(width, height, 0);
+	plane(width.div_ceil(2), height.div_ceil(2), 1);
+	plane(width.div_ceil(2), height.div_ceil(2), 2);
+	out
+}
+
+/// Y4M input, which `heif-enc` reads as 8-bit 4:2:0 planes (`heifio/decoder_y4m.cc`) and
+/// encodes as they are: with no `C` tag, with each 4:2:0 tag, and at an odd size.
+#[test]
+fn matches_heif_enc_across_y4m_inputs() {
+	let Some(mut run) = prepare() else { return };
+	for (name, bytes) in [("no C tag", y4m_420(W, H, "")), ("C420jpeg", y4m_420(W, H, " C420jpeg")), ("C420mpeg2", y4m_420(W, H, " C420mpeg2")), ("C420, 61x45", y4m_420(61, 45, " C420"))] {
+		let input = run.dir.join(format!("{}.y4m", name.replace([',', ' '], "_")));
+		fs::write(&input, bytes).expect("write the fixture");
+		for (setting, heic) in [("default", d()), ("quality 30", HeicSettings { quality: 30, ..d() })] {
+			run.compare(&format!("{name}, {setting}"), &input, &heic);
+		}
+	}
+	finish(&run, "Y4M inputs");
+}
