@@ -734,7 +734,10 @@ prettier subset.
       cover the signed files.
 - [ ] winget (the standard edition only, or give the GPL edition its own identifier
       first) and Scoop (a bucket of our own now; Extras wants 100+ stars).
-- [ ] AUR `skidbladnir-bin` and AppImageHub, the latter after the AppStream metainfo below.
+- [ ] AUR `skidbladnir-bin` and AppImageHub (the AppStream metainfo is now in place).
+      *AUR waits on the update-check switch below:* a `-bin` package repackaging the
+      `.deb` carries a binary that identifies itself as a `.deb` install, so its updater
+      would try to install `.deb` updates on Arch (found 2026-10-01).
 - [ ] Flathub: metainfo, an app ID under `io.basicautomation.*` or
       `io.github.basic_automation.*`, an offline from-source build of every crate, npm
       package and submodule, and an owner-written manifest under Flathub's AI policy.
@@ -1473,6 +1476,6 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       0.27 (a Windows dev-server file read, fixed in 0.28.1) is pinned `^0.27` by
       `fontless` under `@nuxt/fonts`. Neither is in what ships; take each fix when its
       parent allows it.
+- [x] README: an acknowledgements and non-affiliation section (2026-10-01).
 - [ ] README: a dated "How it compares" table (Squoosh, XnConvert, Converseen/ImageMagick,
-      the raw CLIs; "not stated" for the others' parity), a short demo clip, and an
-      acknowledgements and non-affiliation section.
+      the raw CLIs; "not stated" for the others' parity), and a short demo clip.

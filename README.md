@@ -461,6 +461,30 @@ Known gaps:
   need one depends on where you are and what you do with the files; this is not legal
   advice.
 
+## Acknowledgements
+
+Skidbladnir is a window around other people's encoders, and is only as good as they are:
+[libwebp](https://chromium.googlesource.com/webm/libwebp) (the WebM project, Google),
+[libavif](https://github.com/AOMediaCodec/libavif) and
+[libaom](https://aomedia.googlesource.com/aom) (the Alliance for Open Media),
+[libjxl](https://github.com/libjxl/libjxl) (the JPEG XL authors),
+[libheif](https://github.com/strukturag/libheif) and
+[libde265](https://github.com/strukturag/libde265) (struktur AG),
+[Kvazaar](https://github.com/ultravideo/kvazaar) (Ultra Video Group, Tampere University),
+[x265](https://bitbucket.org/multicoreware/x265_git) (MulticoreWare) and
+[libjpeg-turbo](https://libjpeg-turbo.org) (which includes the work of the Independent
+JPEG Group). The decoders are [rav1d](https://github.com/memorysafety/rav1d) through
+[avif-decode](https://crates.io/crates/avif-decode), and
+[jxl-oxide](https://github.com/tirr-c/jxl-oxide). The window is
+[Tauri](https://tauri.app), [Nuxt](https://nuxt.com), [Nuxt UI](https://ui.nuxt.com) and
+[Tailwind CSS](https://tailwindcss.com), set in [Fira Code](https://github.com/tonsky/FiraCode),
+with icons from the collections [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) credits.
+
+Skidbladnir is an independent project. It is not affiliated with, sponsored or endorsed
+by Google, the Alliance for Open Media, the JPEG committee, Apple, Microsoft, or any of
+the projects above. WebP, AVIF, JPEG XL, HEIC and the other names here are used only to
+say which formats and tools it works with; they belong to their owners.
+
 ## License
 
 Skidbladnir's own code is ISC ([LICENSE](LICENSE)), as declared in the workspace
