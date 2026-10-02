@@ -674,9 +674,11 @@ prettier subset.
       Silicon runner as a fourth matrix entry; the dry run produced
       `Skidbladnir_<version>_x64.dmg` beside the `aarch64` one. Never launched, like the
       Apple Silicon build.
-- [ ] Stop attaching a locally-built `.deb` to a release that CI then overwrites with
-      `--clobber`. Attach CI's artifacts only, and verify the published files after the
-      fact as was done for 0.5.0 — the downloadable file is the one that matters.
+- [x] Stop attaching a locally-built `.deb` to a release that CI then overwrites with
+      `--clobber`. Since 1.0.0 releases carry CI's artifacts only. For 1.2.0 the CI-built
+      AppImages of both editions (release dry run 36960672813) passed the smoke test on the
+      dev host before the tag (42 and 43 checks), and the GPL `.deb` was checked to carry
+      the GPL metainfo, `COPYING` and its libheif.
 - [x] A `release.yml` workflow that builds all three targets and attaches them to the
       GitHub release for a tag. Triggers on `v*` tags, or manually with a tag input so a
       release whose build failed can be retried without moving the tag. `fail-fast: false`,
