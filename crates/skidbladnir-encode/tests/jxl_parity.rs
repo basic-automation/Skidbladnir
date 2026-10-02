@@ -199,9 +199,12 @@ fn prepare() -> Option<Run> {
 	Some(Run { cjxl, dir, mismatches: Vec::new(), total: 0 })
 }
 
-/// Distinguishes the scratch directories of tests running at once in one process.
-fn rand_suffix() -> u128 {
-	std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos())
+/// Distinguishes the scratch directories of tests running at once in one process: a
+/// counter, not the clock, which on macOS ticks in microseconds, so two tests could read
+/// the same time and share a directory that the first to finish deletes.
+fn rand_suffix() -> usize {
+	static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+	NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 fn finish(run: &Run, what: &str) {

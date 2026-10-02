@@ -84,6 +84,18 @@ export interface WebpSettings {
 	/** `0xRRGGBB`. */
 	blendAlpha: number | null
 	metadata: { exif: boolean, icc: boolean, xmp: boolean }
+	animation: WebpAnimation
+}
+
+/** The animation encoder's options (img2webp, gif2webp); `null` is the tool's default. */
+export interface WebpAnimation {
+	minimizeSize: boolean
+	allowMixed: boolean
+	kmin: number | null
+	kmax: number | null
+	loopCount: number | null
+	loopCompatibility: boolean
+	frameDuration: number | null
 }
 
 // ---- AVIF: avifenc ----------------------------------------------------------------------
@@ -250,6 +262,8 @@ export interface HeicSettings {
 	deblockStrength: number
 	deblockThreshold: number
 	sao: boolean
+	/** GPL edition: `-p x265:KEY=VALUE`, applied after every control above. */
+	x265Parameters: CodecOption[]
 }
 
 // ---- Results ----------------------------------------------------------------------------

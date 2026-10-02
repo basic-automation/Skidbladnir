@@ -169,6 +169,29 @@ check "refuses to overwrite the source" \
 	 try { await I.invoke('convert_image', { settings: s, input: '$out_dir/smoke.webp', outputDirectory: '$out_dir' }); return 'NOT REFUSED'; }
 	 catch (e) { return String(e); }" 'refusing to overwrite the source'
 
+# Replacing existing files can be turned off: the file already there is kept as it was.
+before=$(wc -c < "$scratch/out/smoke.webp")
+check "keeps an existing output when asked not to replace it" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const s=await I.invoke('default_settings'); s.webp.quality=5;
+	 try { await I.invoke('convert_image', { settings: s, input: '$in_png', outputDirectory: '$out_dir', replaceExisting: false }); return 'NOT KEPT'; }
+	 catch (e) { return String(e); }" 'already exists'
+if [ "$(wc -c < "$scratch/out/smoke.webp")" = "$before" ]; then printf 'ok   %s\n' "the kept file is unchanged"; else printf 'FAIL %s\n' "the kept file changed"; failures=$((failures + 1)); fi
+check "warns before two inputs write the same file" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const p=await I.invoke('plan_outputs', { format: 'webp', inputs: [{ path: '$in_png', relative: null }, { path: '$(app_path "$scratch/smoke.tif")', relative: null }], outputDirectory: '$out_dir' });
+	 return p.collisions.length + ' ' + p.collisions[0].inputs.length + ' ' + p.existing.length" '1 2 1'
+check "starts from cwebp's defaults" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const s=await I.invoke('default_settings');
+	 const w=await I.invoke('webp_cwebp_defaults', { webp: s.webp });
+	 return [w.quality, w.passes, w.alphaFiltering, w.autofilter, w.multiThreading].join(' ')" "75 1 fast false true"
+check "the About view reads the bundled licence" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const t=await I.invoke('legal_document', { document: 'license' });
+	 const n=await I.invoke('legal_document', { document: 'notices' });
+	 return t.startsWith('ISC License') + ' ' + (n.length > 10000)" "true true"
+
 # AVIF: the format switch, a real conversion checked on disk, and whether this platform's
 # webview can display the AVIF preview at all (WebKitGTK and WebView2 each decide that).
 check "switches to AVIF" \
@@ -337,9 +360,11 @@ d, w, h = sys.argv[1], 20, 12
 open(d + '/netpbm-p6.ppm', 'wb').write(b'P6\n%d %d\n255\n' % (w, h) + bytes((x * 12 + c * 40) % 256 for y in range(h) for x in range(w) for c in range(3)))
 open(d + '/netpbm-pam.pam', 'wb').write(b'P7\nWIDTH %d\nHEIGHT %d\nDEPTH 4\nMAXVAL 65535\nTUPLTYPE RGB_ALPHA\nENDHDR\n' % (w, h) + b''.join(struct.pack('>HHHH', x * 3000, y * 5000, 30000, 65535 - x * 1000) for y in range(h) for x in range(w)))
 open(d + '/netpbm-pfm.pfm', 'wb').write(b'PF\n%d %d\n-1.0\n' % (w, h) + b''.join(struct.pack('<fff', x / w, y / h, 0.5) for y in range(h) for x in range(w)))
+open(d + '/netpbm-svg.svg', 'wb').write(b'<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d"><rect width="10" height="12" fill="#c33"/><circle cx="15" cy="6" r="5" fill="#33c" fill-opacity="0.5"/></svg>' % (w, h))
+open(d + '/netpbm-pgx.pgx', 'wb').write(b'PG ML + 12 %d %d\n' % (w, h) + b''.join(struct.pack('>H', (x * 200 + y * 100) % 4096) for y in range(h) for x in range(w)))
 PNM
 mkdir -p "$scratch/from-netpbm"
-for kind in p6:ppm:PNM pam:pam:PNM pfm:pfm:PFM; do
+for kind in p6:ppm:PNM pam:pam:PNM pfm:pfm:PFM pgx:pgx:PGX svg:svg:SVG; do
 	IFS=: read -r name extension format <<< "$kind"
 	check "reads $format input (.$extension)" \
 		"const I=window.__TAURI_INTERNALS__;
@@ -351,6 +376,23 @@ for kind in p6:ppm:PNM pam:pam:PNM pfm:pfm:PFM; do
 		 const j=await I.invoke('convert_image', { settings: s, input, outputDirectory: out });
 		 return found[0].format + ' ' + [w, j].map(r => r.outputPath.split(/[\\\\/]/).pop() + ' ' + r.width + 'x' + r.height).join(' ')" "$format netpbm-$name.webp 20x12 netpbm-$name.jxl 20x12"
 done
+
+# Y4M: AVIF through avifenc's own reader, WebP through the conversion to RGB.
+"$PY" - "$scratch/smoke.y4m" <<'Y4M'
+import sys
+w, h = 20, 12
+planes = bytes((x * 9 + y * 5) % 256 for y in range(h) for x in range(w)) + bytes(128 for _ in range(2 * (w // 2) * (h // 2)))
+open(sys.argv[1], 'wb').write(b'YUV4MPEG2 W20 H12 F30:1 Ip A1:1 C420jpeg\nFRAME\n' + planes)
+Y4M
+check "reads Y4M input" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const input='$(app_path "$scratch/smoke.y4m")', out='$(app_path "$scratch/from-netpbm")';
+	 const found=await I.invoke('inspect_dropped_paths', { paths: [input] });
+	 const s=await I.invoke('default_settings');
+	 const w=await I.invoke('convert_image', { settings: s, input, outputDirectory: out });
+	 s.format='avif';
+	 const a=await I.invoke('convert_image', { settings: s, input, outputDirectory: out });
+	 return found[0].format + ' ' + [w, a].map(r => r.outputPath.split(/[\\\\/]/).pop() + ' ' + r.width + 'x' + r.height).join(' ')" "Y4M smoke.webp 20x12 smoke.avif 20x12"
 
 echo
 if [ "$failures" -gt 0 ]; then

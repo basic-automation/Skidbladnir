@@ -377,6 +377,131 @@ pub fn pfm_rgba(image: &Pfm) -> (Vec<u8>, Vec<u16>) {
 	(narrow, wide)
 }
 
+/// A PGX (the JPEG 2000 conformance format: one gray channel), read the way `cjxl` reads
+/// it (`lib/extras/dec/pgx.cc`): `PG`, a space, `ML` (big-endian) or `LM`, a space, `+`
+/// (unsigned; `-` is refused), an optional space, the bits per sample, single whitespace,
+/// width, single whitespace, height, and a `\n` or `\r\n` line break; then the samples,
+/// one byte each up to 8 bits and two above, at most 16.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Pgx {
+	/// Width in pixels.
+	pub width: u32,
+	/// Height in pixels.
+	pub height: u32,
+	/// Significant bits per sample, 1 to 16.
+	pub bits: u32,
+	/// The samples, top row first, as stored (native byte order now).
+	pub samples: Vec<u16>,
+}
+
+impl Pgx {
+	/// The largest sample value the file's bit depth allows.
+	#[must_use]
+	pub const fn max_value(&self) -> u32 {
+		(1 << self.bits) - 1
+	}
+
+	/// Whether `cjxl` reads this file as it is meant: it hands libjxl the samples at the
+	/// full range of their 8- or 16-bit container, so only those two depths come out at
+	/// the right brightness (a 12-bit sample of 4095 becomes 256 of 4095).
+	#[must_use]
+	pub const fn cjxl_reads_it_right(&self) -> bool {
+		self.bits == 8 || self.bits == 16
+	}
+
+	/// The samples as 8-bit gray, and as 16-bit gray when there are more than 8 bits,
+	/// rescaled from the file's own depth with rounding, so every depth reads at its
+	/// meant brightness. No reference tool but `cjxl` reads PGX.
+	#[must_use]
+	pub fn gray(&self) -> (Vec<u8>, Option<Vec<u16>>) {
+		let max = self.max_value();
+		let scale = |value: u16, to: u32| u16::try_from((u32::from(value).min(max) * to + max / 2) / max).unwrap_or(u16::MAX);
+		let narrow = self.samples.iter().map(|&v| u8::try_from(scale(v, 255)).unwrap_or(u8::MAX)).collect();
+		let deep = (self.bits > 8).then(|| self.samples.iter().map(|&v| scale(v, 65_535)).collect());
+		(narrow, deep)
+	}
+}
+
+/// Read a PGX as `cjxl` does. See [`Pgx`].
+///
+/// # Errors
+///
+/// `cjxl`'s refusals: a malformed header, signed samples, more than 16 bits, or too few
+/// samples.
+pub fn pgx(data: &[u8]) -> Result<Pgx, String> {
+	let mut at = 0;
+	let byte = |at: usize| data.get(at).copied();
+	let expect = |at: &mut usize, wanted: u8, what: &str| -> Result<(), String> {
+		if byte(*at) == Some(wanted) {
+			*at += 1;
+			Ok(())
+		} else {
+			Err(format!("PGX: expected {what}"))
+		}
+	};
+	let number = |at: &mut usize| -> Result<u32, String> {
+		let start = *at;
+		while byte(*at).is_some_and(|c| c.is_ascii_digit()) {
+			*at += 1;
+		}
+		std::str::from_utf8(&data[start..*at]).ok().and_then(|text| text.parse::<u32>().ok()).ok_or_else(|| "PGX: expected an unsigned number".to_owned())
+	};
+	let whitespace = |at: &mut usize| -> Result<(), String> {
+		if byte(*at).is_some_and(|c| matches!(c, b' ' | b'\t' | b'\r' | b'\n')) {
+			*at += 1;
+			Ok(())
+		} else {
+			Err("PGX: expected whitespace".to_owned())
+		}
+	};
+	expect(&mut at, b'P', "PG")?;
+	expect(&mut at, b'G', "PG")?;
+	expect(&mut at, b' ', "a space")?;
+	let big_endian = match (byte(at), byte(at + 1)) {
+		(Some(b'M'), Some(b'L')) => true,
+		(Some(b'L'), Some(b'M')) => false,
+		_ => return Err("PGX: invalid endianness".to_owned()),
+	};
+	at += 2;
+	expect(&mut at, b' ', "a space")?;
+	let signed = match byte(at) {
+		Some(b'+') => false,
+		Some(b'-') => true,
+		_ => return Err("PGX: invalid signedness".to_owned()),
+	};
+	at += 1;
+	if byte(at) == Some(b' ') {
+		at += 1;
+	}
+	let bits = number(&mut at)?;
+	whitespace(&mut at)?;
+	let width = number(&mut at)?;
+	whitespace(&mut at)?;
+	let height = number(&mut at)?;
+	match (byte(at), byte(at + 1)) {
+		(Some(b'\n'), _) => at += 1,
+		(Some(b'\r'), Some(b'\n')) => at += 2,
+		_ => return Err("PGX: expected a line break".to_owned()),
+	}
+	if bits > 16 {
+		return Err("PGX: more than 16 bits per sample is not supported (as in cjxl)".to_owned());
+	}
+	if signed {
+		return Err("PGX: signed samples are not supported (as in cjxl)".to_owned());
+	}
+	if bits == 0 {
+		return Err("PGX: bits per sample must be at least 1".to_owned());
+	}
+	if width == 0 || height == 0 {
+		return Err("PGX: the image is empty".to_owned());
+	}
+	let bytes_per_sample = if bits > 8 { 2 } else { 1 };
+	let count = (width as usize).checked_mul(height as usize).ok_or("PGX: image dimensions are too large")?;
+	let raw = data.get(at..).filter(|rest| rest.len() >= count * bytes_per_sample).ok_or("PGX: data too small")?;
+	let samples = if bytes_per_sample == 2 { raw.as_chunks::<2>().0[..count].iter().map(|&pair| if big_endian { u16::from_be_bytes(pair) } else { u16::from_le_bytes(pair) }).collect() } else { raw[..count].iter().map(|&v| u16::from(v)).collect() };
+	Ok(Pgx { width, height, bits, samples })
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -445,5 +570,17 @@ mod tests {
 		let _ = decode(b"P5\n1\x00 1\n255\n\x00");
 		assert!(scan_int(b"  -12x").is_some_and(|(v, rest)| v == -12 && rest == b"x"));
 		assert!(scan_int(b"x").is_none());
+	}
+
+	/// The header is read as `cjxl` reads it, strict where it is strict.
+	#[test]
+	fn reads_pgx_as_cjxl_does() {
+		let image = super::pgx(b"PG LM +12 2 1\r\n\xff\x0f\x00\x08").expect("a valid PGX");
+		assert_eq!((image.width, image.height, image.bits, image.samples.clone()), (2, 1, 12, vec![4095, 2048]));
+		assert_eq!(image.gray().0, vec![255, 128]);
+		assert!(!image.cjxl_reads_it_right());
+		for bad in [&b"PG ML+8 1 1\n\x00"[..], b"PGML + 8 1 1\n\x00", b"PG XX + 8 1 1\n\x00", b"PG ML + 8 1 1\r\x00", b"PG ML + 8 2 2\n\x00", b"PG ML - 8 1 1\n\x00", b"PG ML + 17 1 1\n\x00\x00\x00"] {
+			assert!(super::pgx(bad).is_err(), "{:?} must be refused", String::from_utf8_lossy(bad));
+		}
 	}
 }

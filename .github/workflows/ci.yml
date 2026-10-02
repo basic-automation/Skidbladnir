@@ -211,9 +211,17 @@ jobs:
   # read JPEG through the libjpeg-turbo we link (scripts/build-reference-tools.sh), so a
   # mismatch is an option or a reader that differs, never a version. A missing or
   # mismatched reference fails the job rather than skipping it.
+  #
+  # Linux x86-64, Linux on ARM64 and macOS on Apple silicon: the same sources built on
+  # each, so the comparison also covers libwebp's, libaom's and libjxl's ARM code paths, on
+  # both ARM systems the releases ship for.
   parity:
-    name: parity with the reference encoders
-    runs-on: ubuntu-latest
+    name: parity with the reference encoders / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -223,11 +231,19 @@ jobs:
         # libtiff is cwebp's TIFF reader; giflib is for gif2webp, the reference for GIF input.
         # avifdec, djxl and heif-info are the metadata gate's readers for AVIF, JPEG XL and
         # HEIC output (tests/metadata.rs), which has no byte-for-byte reference there.
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y libpng-dev libtiff-dev libgif-dev zlib1g-dev libavif-bin libjxl-tools libheif-examples libheif-plugin-libde265
 
+      - name: Install the reference tools' development files, and the decoders (macOS)
+        # The same, from Homebrew; zlib is the system's.
+        if: runner.os == 'macOS'
+        run: brew install libpng libtiff giflib libavif jpeg-xl libheif
+
       - name: Install nasm
+        # For x86 SIMD; Linux on ARM uses the system assembler.
+        if: runner.os != 'Linux' || runner.arch == 'X64'
         uses: ilammy/setup-nasm@v1
 
       - name: Build libheif (Kvazaar + libde265)
@@ -242,8 +258,8 @@ jobs:
         uses: actions/cache@v6
         with:
           path: build/reference
-          key: reference-${{ runner.os }}-${{ hashFiles('.gitmodules', 'Cargo.lock', 'scripts/build-reference-tools.sh', 'scripts/build-reference-avifenc.sh', 'scripts/build-libheif.sh') }}-${{ github.sha }}
-          restore-keys: reference-${{ runner.os }}-${{ hashFiles('.gitmodules', 'Cargo.lock', 'scripts/build-reference-tools.sh', 'scripts/build-reference-avifenc.sh', 'scripts/build-libheif.sh') }}-
+          key: reference-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.gitmodules', 'Cargo.lock', 'scripts/build-reference-tools.sh', 'scripts/build-reference-avifenc.sh', 'scripts/build-libheif.sh') }}-${{ github.sha }}
+          restore-keys: reference-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.gitmodules', 'Cargo.lock', 'scripts/build-reference-tools.sh', 'scripts/build-reference-avifenc.sh', 'scripts/build-libheif.sh') }}-
 
       - name: Build the reference encoders
         run: |
@@ -255,13 +271,14 @@ jobs:
           echo "SKIDBLADNIR_REQUIRE_PARITY=1" >> "$GITHUB_ENV"
 
       - name: byte parity with cwebp, img2webp, gif2webp, avifenc, cjxl and heif-enc
-        # Released builds are what the claim is about, so the comparison is too.
+        # Released builds are what the claim is about, so the comparison is too, and
+        # --no-fail-fast, so one failing gate cannot hide whether the others hold.
         # cmyk_jpeg rides along because it checks that cwebp still REFUSES a CMYK JPEG, the
         # one input Skidbladnir converts to WebP and cwebp does not. animation is animated
         # WebP against img2webp, gif is GIF input against gif2webp (and a still GIF against
         # cjxl), metadata is `-metadata` against cwebp, and pnm is PNM/PAM against cwebp and
         # cjxl and PFM against cjxl.
-        run: cargo test --release --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_parity --test jxl_parity --test heic_parity --test animation --test gif --test metadata --test pnm -- --nocapture
+        run: cargo test --release --no-fail-fast --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_parity --test jxl_parity --test heic_parity --test animation --test gif --test metadata --test pnm -- --nocapture
 
   # Drives the real window over WebDriver. Separate from the compile matrix because it
   # needs a display, a WebKit driver and a full release build, and because a flaky display
@@ -338,7 +355,9 @@ jobs:
         run: xvfb-run -a scripts/smoke-test.sh --edition ${{ matrix.edition }}
 
       - name: Accessibility audit
-        run: xvfb-run -a scripts/a11y-audit.sh
+        # At every severity, "minor" included: at the default ("serious") an <h1> outside
+        # any landmark went unnoticed in every state from the Nanna redesign until 1.2.
+        run: xvfb-run -a scripts/a11y-audit.sh --threshold minor
 
       - name: Capture the README screenshots
         if: matrix.edition == 'standard'

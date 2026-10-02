@@ -351,12 +351,33 @@ pub fn encode_source_with_progress(job: &EncodeJob, source: &SourceImage, on_pro
 	}
 	let reread = job.tiff_alpha_like_reference.then(|| crate::source::tiff_like_reference(source, job.format)).flatten();
 	let source = reread.as_ref().unwrap_or(source);
+	// An SVG with a resize and no crop is drawn again at the new size, which keeps its edges
+	// sharp where scaling the raster would blur them, and is then encoded as it is.
+	let redrawn = svg_at_resize(job, source);
+	let (job, source) = match &redrawn {
+		Some((job, source)) => (job, source),
+		None => (job, source),
+	};
 	match job.format {
 		OutputFormat::Webp => encode_webp(job, source, on_progress),
 		OutputFormat::Jxl => crate::jxl::encode(job, source, on_progress),
 		OutputFormat::Avif => crate::avif::encode(job, source, on_progress),
 		OutputFormat::Heic => crate::heic::encode(job, source, on_progress),
 	}
+}
+
+/// An SVG source drawn at the job's resize, and the job with nothing left to resize; `None`
+/// for any other source, a crop (which is in the drawing's own pixels), or no resize.
+fn svg_at_resize(job: &EncodeJob, source: &SourceImage) -> Option<(EncodeJob, SourceImage)> {
+	if source.format != SourceFormat::Svg || source.bytes.is_empty() || job.crop.is_some() {
+		return None;
+	}
+	let resize = job.resize.for_source(source.width, source.height);
+	if resize.is_noop() {
+		return None;
+	}
+	let raster = crate::svg::rasterise_at(&source.bytes, resize.width, resize.height).ok()?;
+	Some((EncodeJob { resize: Resize::default(), ..job.clone() }, SourceImage { width: raster.width, height: raster.height, pixels: raster.pixels, deep: None, gray: false, has_alpha: source.has_alpha, format: source.format, bytes: source.bytes.clone() }))
 }
 
 /// The source after the job's crop and resize, with every sample depth it carries.

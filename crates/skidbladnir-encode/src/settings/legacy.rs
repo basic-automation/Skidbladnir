@@ -14,7 +14,7 @@
 
 use serde::{Deserialize, Deserializer};
 
-use super::webp::{AlphaFiltering, FilterType, ImageHint, Preset, TargetMetric, WebpMetadata, WebpSettings};
+use super::webp::{AlphaFiltering, FilterType, ImageHint, Preset, TargetMetric, WebpAnimation, WebpMetadata, WebpSettings};
 
 /// The encoding mode, one of the five the pre-0.14 window offered.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
@@ -228,6 +228,7 @@ pub struct WebpWire {
 	keep_alpha: Option<bool>,
 	blend_alpha: Explicit<u32>,
 	metadata: Option<WebpMetadata>,
+	animation: Option<WebpAnimation>,
 }
 
 impl WebpWire {
@@ -253,7 +254,7 @@ impl WebpWire {
 			LegacyWebpSettings { mode: self.mode.unwrap_or_default(), preset: self.preset, quality, alpha_quality: self.alpha_quality.unwrap_or(d.alpha_quality), alpha_filtering: self.alpha_filtering.or(d.alpha_filtering), method: self.method.unwrap_or(d.method), segments: self.segments.unwrap_or(d.segments), partition_limit: self.partition_limit.unwrap_or(d.partition_limit), sns: self.sns.unwrap_or(d.sns), passes: self.passes.unwrap_or(d.passes), filter: self.filter.unwrap_or(d.filter), filter_strength: self.filter_strength.unwrap_or(d.filter_strength), filter_sharpness: self.filter_sharpness.unwrap_or(d.filter_sharpness), target: self.target.or(d.target), sharp_yuv: self.sharp_yuv.unwrap_or(d.sharp_yuv), low_memory: self.low_memory.unwrap_or(d.low_memory), multi_threading: self.multi_threading.unwrap_or(d.multi_threading) }.into_current()
 		} else {
 			let d = WebpSettings::default();
-			WebpSettings { lossless: self.lossless.unwrap_or(d.lossless), near_lossless: self.near_lossless.unwrap_or(d.near_lossless), exact: self.exact.unwrap_or(d.exact), quality: self.quality.map_or(d.quality, Quality::as_f32), alpha_quality: self.alpha_quality.unwrap_or(d.alpha_quality), alpha_compression: self.alpha_compression.unwrap_or(d.alpha_compression), alpha_filtering: self.alpha_filtering.or(Some(d.alpha_filtering)).unwrap_or(d.alpha_filtering), method: self.method.unwrap_or(d.method), image_hint: self.image_hint.unwrap_or(d.image_hint), target: self.target.or(d.target), segments: self.segments.unwrap_or(d.segments), sns: self.sns.unwrap_or(d.sns), filter_strength: self.filter_strength.unwrap_or(d.filter_strength), filter_sharpness: self.filter_sharpness.unwrap_or(d.filter_sharpness), filter_type: self.filter_type.unwrap_or(d.filter_type), autofilter: self.autofilter.unwrap_or(d.autofilter), passes: self.passes.unwrap_or(d.passes), qmin: self.qmin.unwrap_or(d.qmin), qmax: self.qmax.unwrap_or(d.qmax), preprocessing: self.preprocessing.unwrap_or(d.preprocessing), partition_limit: self.partition_limit.unwrap_or(d.partition_limit), jpeg_like: self.jpeg_like.unwrap_or(d.jpeg_like), sharp_yuv: self.sharp_yuv.unwrap_or(d.sharp_yuv), low_memory: self.low_memory.unwrap_or(d.low_memory), multi_threading: self.multi_threading.unwrap_or(d.multi_threading), keep_alpha: self.keep_alpha.unwrap_or(d.keep_alpha), blend_alpha: self.blend_alpha.or(d.blend_alpha), metadata: self.metadata.unwrap_or(d.metadata) }
+			WebpSettings { lossless: self.lossless.unwrap_or(d.lossless), near_lossless: self.near_lossless.unwrap_or(d.near_lossless), exact: self.exact.unwrap_or(d.exact), quality: self.quality.map_or(d.quality, Quality::as_f32), alpha_quality: self.alpha_quality.unwrap_or(d.alpha_quality), alpha_compression: self.alpha_compression.unwrap_or(d.alpha_compression), alpha_filtering: self.alpha_filtering.or(Some(d.alpha_filtering)).unwrap_or(d.alpha_filtering), method: self.method.unwrap_or(d.method), image_hint: self.image_hint.unwrap_or(d.image_hint), target: self.target.or(d.target), segments: self.segments.unwrap_or(d.segments), sns: self.sns.unwrap_or(d.sns), filter_strength: self.filter_strength.unwrap_or(d.filter_strength), filter_sharpness: self.filter_sharpness.unwrap_or(d.filter_sharpness), filter_type: self.filter_type.unwrap_or(d.filter_type), autofilter: self.autofilter.unwrap_or(d.autofilter), passes: self.passes.unwrap_or(d.passes), qmin: self.qmin.unwrap_or(d.qmin), qmax: self.qmax.unwrap_or(d.qmax), preprocessing: self.preprocessing.unwrap_or(d.preprocessing), partition_limit: self.partition_limit.unwrap_or(d.partition_limit), jpeg_like: self.jpeg_like.unwrap_or(d.jpeg_like), sharp_yuv: self.sharp_yuv.unwrap_or(d.sharp_yuv), low_memory: self.low_memory.unwrap_or(d.low_memory), multi_threading: self.multi_threading.unwrap_or(d.multi_threading), keep_alpha: self.keep_alpha.unwrap_or(d.keep_alpha), blend_alpha: self.blend_alpha.or(d.blend_alpha), metadata: self.metadata.unwrap_or(d.metadata), animation: self.animation.unwrap_or(d.animation) }
 		}
 	}
 }

@@ -73,6 +73,11 @@ impl Run {
 	}
 }
 
+/// Tells apart the scratch directories of tests running at once: a counter, not the
+/// clock, which on macOS ticks in microseconds, so two tests could read the same time and
+/// share a directory that the first to finish deletes.
+static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 fn prepare() -> Option<Run> {
 	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
 	let avifenc = match reference() {
@@ -84,8 +89,8 @@ fn prepare() -> Option<Run> {
 			return None;
 		}
 	};
-	let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-	let dir = env::temp_dir().join(format!("skidbladnir-avif-parity-{}-{nanos}", std::process::id()));
+	let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+	let dir = env::temp_dir().join(format!("skidbladnir-avif-parity-{}-{serial}", std::process::id()));
 	fs::create_dir_all(&dir).expect("create the scratch directory");
 	Some(Run { avifenc, dir, mismatches: Vec::new(), total: 0 })
 }
@@ -228,4 +233,79 @@ fn matches_avifenc_across_jpeg_inputs() {
 	let extended = [b"http://ns.adobe.com/xmp/extension/\0".as_slice(), guid, &u32::try_from(extension.len()).expect("small").to_be_bytes(), &0_u32.to_be_bytes(), extension].concat();
 	add(&mut run, "4:2:0 with extended XMP", &jpeg_with(JPEGS[0].1, &[(0xe1, standard), (0xe1, extended)]), &[("defaults", fast())]);
 	finish(&run, "JPEG inputs");
+}
+
+/// A Y4M (`YUV4MPEG2`) of one frame: `colorspace` as the header's `C` tag says it, planes
+/// filled with gradients so every plane matters, 16-bit little-endian samples above 8 bits.
+fn y4m(width: u32, height: u32, colorspace: &str, full_range: bool) -> Vec<u8> {
+	let (depth, chroma, alpha) = match colorspace {
+		"420jpeg" | "420" => (8, Some((2, 2)), false),
+		"422" => (8, Some((2, 1)), false),
+		"444" => (8, Some((1, 1)), false),
+		"444alpha" => (8, Some((1, 1)), true),
+		"mono" => (8, None, false),
+		"420p10" => (10, Some((2, 2)), false),
+		"444p12" => (12, Some((1, 1)), false),
+		other => panic!("no fixture for C{other}"),
+	};
+	let mut out = format!("YUV4MPEG2 W{width} H{height} F30:1 Ip A1:1 C{colorspace}{}\nFRAME\n", if full_range { " XCOLORRANGE=FULL" } else { "" }).into_bytes();
+	let max = (1_u32 << depth) - 1;
+	let mut plane = |w: u32, h: u32, seed: u32| {
+		for y in 0..h {
+			for x in 0..w {
+				let value = ((x * 7 + y * 5 + seed * 31) * max / (w * 7 + h * 5 + 64)).min(max);
+				if depth > 8 {
+					out.extend_from_slice(&u16::try_from(value).expect("fits").to_le_bytes());
+				} else {
+					out.push(u8::try_from(value).expect("fits"));
+				}
+			}
+		}
+	};
+	plane(width, height, 0);
+	if let Some((sx, sy)) = chroma {
+		let (cw, ch) = (width.div_ceil(sx), height.div_ceil(sy));
+		plane(cw, ch, 1);
+		plane(cw, ch, 2);
+	}
+	if alpha {
+		plane(width, height, 3);
+	}
+	out
+}
+
+/// Y4M input, read by `avifenc`'s own reader (`apps/shared/y4m.c`, compiled into the shim),
+/// so its planes are encoded as they are: each chroma format, 8, 10 and 12 bits, alpha,
+/// full range, odd sizes, and the options `avifenc` treats differently for Y4M (`-y` and
+/// `-r` are ignored, `-d` must match).
+#[test]
+fn matches_avifenc_across_y4m_inputs() {
+	let Some(mut run) = prepare() else { return };
+	let d = fast;
+	let files: Vec<(&str, Vec<u8>)> = vec![("420jpeg", y4m(W, H, "420jpeg", false)), ("420 odd", y4m(W + 1, H + 1, "420", false)), ("422", y4m(W, H, "422", false)), ("444", y4m(W, H, "444", false)), ("444 alpha", y4m(W, H, "444alpha", false)), ("mono", y4m(W, H, "mono", false)), ("420p10", y4m(W, H, "420p10", false)), ("444p12 full range", y4m(W, H, "444p12", true)), ("420 full range", y4m(W, H, "420", true))];
+	let settings: Vec<(&str, AvifSettings)> = vec![("defaults", d()), ("-q 80", AvifSettings { quality: Some(80), ..d() }), ("-y 444 -r limited, ignored", AvifSettings { yuv: YuvFormat::Yuv444, limited_range: true, ..d() }), ("--cicp 1/13/6", AvifSettings { cicp: Some(Cicp { primaries: 1, transfer: 13, matrix: 6 }), ..d() })];
+	for (name, bytes) in &files {
+		let input = run.dir.join(format!("{}.y4m", name.replace(' ', "_")));
+		fs::write(&input, bytes).expect("write the fixture");
+		for (label, settings) in &settings {
+			run.compare(&format!("{name}, {label}"), &input, settings);
+		}
+	}
+	let input = run.dir.join("444.y4m");
+	run.compare("444, lossless", &input, &AvifSettings { lossless: true, ..d() });
+	run.compare("420p10, -d 10", &run.dir.join("420p10.y4m"), &AvifSettings { depth: Some(10), ..d() });
+
+	// What avifenc refuses, we refuse: a depth it would have to convert, and lossless's
+	// identity matrix on subsampled planes.
+	for (name, file, settings) in [("-d 8 on 10-bit", "420p10.y4m", AvifSettings { depth: Some(8), ..d() }), ("lossless 4:2:0", "420jpeg.y4m", AvifSettings { lossless: true, ..d() })] {
+		let input = run.dir.join(file);
+		let job = EncodeJob { format: OutputFormat::Avif, avif: settings, ..Default::default() };
+		let refused = !Command::new(&run.avifenc).args(avifenc_args(&job, &input, &run.dir.join("refused.avif"))).output().expect("run avifenc").status.success();
+		assert!(refused, "avifenc accepted `{name}`, so this case should be compared instead");
+		run.total += 1;
+		if encode_file(&job, &input, &run.dir.join("refused-ours.avif")).is_ok() {
+			run.mismatches.push(format!("`{name}`: avifenc refuses it but we encoded it"));
+		}
+	}
+	finish(&run, "Y4M inputs");
 }

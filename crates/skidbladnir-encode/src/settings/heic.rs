@@ -24,7 +24,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::ValidationError;
+use super::{CodecOption, ValidationError};
 
 /// How libheif reduces chroma to 4:2:0 (`-C`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -449,11 +449,14 @@ pub struct HeicSettings {
 	pub deblock_threshold: i8,
 	/// x265 (GPL edition): sample adaptive offset, `-p x265:sao`.
 	pub sao: bool,
+	/// x265 (GPL edition): any other x265 parameter, `-p x265:KEY=VALUE`, in order and
+	/// after every control above, so one here overrides them.
+	pub x265_parameters: Vec<CodecOption>,
 }
 
 impl Default for HeicSettings {
 	fn default() -> Self {
-		Self { quality: 50, lossless: false, alpha: true, premultiplied_alpha: false, thumbnail: None, thumbnail_alpha: true, chroma_downsampling: None, color_profile: ColorProfile::default(), two_colr_boxes: false, clli: None, pasp: None, orientation: Orientation::Normal, cut_tiles: None, omaf_projection: None, description: String::new(), compatible_brands: Vec::new(), unif: false, mini: false, metadata: HeicMetadata { icc: true, exif: true, xmp: true }, chroma: HeicChroma::Yuv420, bit_depth: HeicBitDepth::Eight, preset: HeicPreset::Slow, tune: HeicTune::Ssim, tu_intra_depth: 2, aq_mode: HeicAqMode::Variance, aq_strength: 10, psy_rd: 10, psy_rdoq: 10, deblock: true, deblock_strength: 0, deblock_threshold: 0, sao: true }
+		Self { quality: 50, lossless: false, alpha: true, premultiplied_alpha: false, thumbnail: None, thumbnail_alpha: true, chroma_downsampling: None, color_profile: ColorProfile::default(), two_colr_boxes: false, clli: None, pasp: None, orientation: Orientation::Normal, cut_tiles: None, omaf_projection: None, description: String::new(), compatible_brands: Vec::new(), unif: false, mini: false, metadata: HeicMetadata { icc: true, exif: true, xmp: true }, chroma: HeicChroma::Yuv420, bit_depth: HeicBitDepth::Eight, preset: HeicPreset::Slow, tune: HeicTune::Ssim, tu_intra_depth: 2, aq_mode: HeicAqMode::Variance, aq_strength: 10, psy_rd: 10, psy_rdoq: 10, deblock: true, deblock_strength: 0, deblock_threshold: 0, sao: true, x265_parameters: Vec::new() }
 	}
 }
 
@@ -503,7 +506,14 @@ impl HeicSettings {
 				return Err(ValidationError::OutOfRangeSigned { field, value: i64::from(value), min: -6, max: 6 });
 			}
 		}
+		// heif-enc reads `-p x265:KEY=VALUE` up to the first `=`, and needs the value.
+		if self.x265_parameters.iter().any(|p| p.key.is_empty() || p.key.contains(['=', '\0']) || p.value.is_empty() || p.value.contains('\0')) {
+			return Err(ValidationError::Conflict("each x265 parameter needs a key with no `=` and a value"));
+		}
 		if !HEIC_X265 {
+			if !self.x265_parameters.is_empty() {
+				return Err(ValidationError::NeedsX265 { field: "heic.x265_parameters" });
+			}
 			if self.chroma != HeicChroma::Yuv420 {
 				return Err(ValidationError::NeedsX265 { field: "heic.chroma" });
 			}
@@ -519,13 +529,14 @@ impl HeicSettings {
 	/// In the GPL edition that is nothing. In the standard edition chroma and bit depth
 	/// return to Kvazaar's 8-bit 4:2:0, which is what lets a preset or preferences file saved
 	/// by the GPL edition still open there rather than being thrown away. The x265 tuning
-	/// rides along untouched; Kvazaar ignores it.
+	/// rides along untouched; Kvazaar ignores it. Free-form x265 parameters are dropped, as
+	/// Kvazaar would refuse them.
 	#[must_use]
 	pub fn for_this_edition(self) -> Self {
 		if HEIC_X265 {
 			return self;
 		}
-		Self { chroma: HeicChroma::Yuv420, bit_depth: HeicBitDepth::Eight, ..self }
+		Self { chroma: HeicChroma::Yuv420, bit_depth: HeicBitDepth::Eight, x265_parameters: Vec::new(), ..self }
 	}
 }
 
@@ -533,6 +544,25 @@ impl HeicSettings {
 mod tests {
 	use super::{ColorProfile, HEIC_X265, HeicAqMode, HeicBitDepth, HeicChroma, HeicMetadata, HeicPreset, HeicSettings, HeicTune, Orientation};
 	use crate::settings::ValidationError;
+
+	/// Free-form x265 parameters: the GPL edition's only, and each a key and a value.
+	#[test]
+	fn x265_parameters_are_checked_and_kept_to_the_gpl_edition() {
+		let with = |key: &str, value: &str| HeicSettings { x265_parameters: vec![super::CodecOption { key: key.into(), value: value.into() }], ..HeicSettings::default() };
+		for (key, value) in [("", "1"), ("rd", ""), ("rd=2", "1"), ("rd\0", "1")] {
+			assert!(matches!(with(key, value).validate(), Err(ValidationError::Conflict(_))), "{key:?}={value:?} must be refused");
+		}
+		let good = with("rd", "2");
+		if HEIC_X265 {
+			assert_eq!(good.validate(), Ok(()));
+			assert_eq!(good.clone().for_this_edition(), good);
+		} else {
+			assert_eq!(good.validate(), Err(ValidationError::NeedsX265 { field: "heic.x265_parameters" }));
+			assert!(good.for_this_edition().x265_parameters.is_empty(), "the standard edition drops them on load");
+		}
+		let loaded: HeicSettings = serde_json::from_str(r#"{"x265Parameters":[{"key":"rd","value":"2"}]}"#).expect("parse");
+		assert_eq!(loaded.x265_parameters, with("rd", "2").x265_parameters);
+	}
 
 	#[test]
 	fn a_settings_file_from_before_0_12_loads_with_its_quality() {

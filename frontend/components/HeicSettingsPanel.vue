@@ -111,6 +111,21 @@ const brands = computed({
 					These shape the colour image. libheif encodes transparency separately, with its own values for them.
 				</p>
 			</template>
+			<ControlDisclosure title="Other x265 parameters">
+				<p class="px-2.5 text-xs text-paleday-dim">
+					-p x265:KEY=VALUE · any of x265's own parameters, passed in order after the controls above, so one here overrides them; for example rd=4, rskip=0, limit-tu=2.
+				</p>
+				<div v-for="(parameter, index) in s.x265Parameters" :key="index" class="flex items-end gap-2">
+					<ControlText v-model="parameter.key" :label="`Parameter ${index + 1} key`" placeholder="rd" class="flex-1" />
+					<ControlText v-model="parameter.value" :label="`Parameter ${index + 1} value`" placeholder="4" class="flex-1" />
+					<UButton color="neutral" variant="ghost" icon="i-lucide-x" :aria-label="`Remove parameter ${index + 1}`" class="mb-2" @click="s.x265Parameters.splice(index, 1)" />
+				</div>
+				<div class="px-2.5">
+					<UButton size="sm" color="neutral" variant="soft" icon="i-material-symbols-add" @click="s.x265Parameters.push({ key: '', value: '' })">
+						Add a parameter
+					</UButton>
+				</div>
+			</ControlDisclosure>
 		</ControlPanel>
 
 		<ControlPanel title="Transparency and thumbnail">

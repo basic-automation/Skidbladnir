@@ -91,7 +91,7 @@ audit() {
 	local report
 	report=$("$HARNESS" exec --script '
 const results = await window.axe.run(document, { resultTypes: ["violations"] });
-return JSON.stringify(results.violations.map(v => ({ id: v.id, impact: v.impact, help: v.help, nodes: v.nodes.length })));
+return JSON.stringify(results.violations.map(v => ({ id: v.id, impact: v.impact, help: v.help, nodes: v.nodes.length, where: v.nodes.slice(0, 3).map(n => n.target.join(" ") + " " + (n.any[0]?.message ?? "")) })));
 ')
 	printf '%s' "$report" | THRESHOLD="$THRESHOLD" "$PY" -c '
 import json, os, sys
@@ -116,6 +116,8 @@ for v in violations:
     if marker == "FAIL":
         failed += 1
     print(f"{marker} [{impact}] {v["id"]}: {v["help"]} ({v["nodes"]} node(s))")
+    for where in v.get("where", []):
+        print(f"       {where}")
 
 print()
 if failed:
@@ -139,6 +141,21 @@ for format in 0:WebP 1:AVIF 2:"JPEG XL" 3:HEIC; do
 	audit "${format#*:}, every control showing" \
 		"[...document.querySelectorAll('[aria-label=\"Output format\"] [role=radio]')][${format%%:*}].click(); await sleep(300); $everything"
 done
+# The app settings popover, open, with its disabled "Recreate folder structure" switch.
+# Audited once its fade-in has finished: mid-animation its text is nearly transparent.
+settle='await sleep(100); await Promise.all(document.getAnimations().map(a => a.finished.catch(() => {}))); await sleep(100);'
+audit "with the app settings open" \
+	"document.querySelector('[aria-label=\"App settings\"]').click(); $settle return 'ok'"
+# The About view, opened from the app settings, with the longest licence text showing.
+audit "with the About view open" \
+	"const about = () => [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'About and licences');
+	 if (!about()) { document.querySelector('[aria-label=\"App settings\"]').click(); $settle }
+	 about().click(); $settle
+	 document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); $settle
+	 [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Third-party notices').click();
+	 for (let i = 0; i < 50 && !document.querySelector('pre'); i++) await sleep(100);
+	 $settle
+	 return document.querySelector('pre') ? 'ok' : 'no licence text'"
 # Tauri's own drop event is the one way to hand the window a file without a native
 # dialog, and a preview needs a file.
 audit "with a preview on screen" \

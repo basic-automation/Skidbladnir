@@ -24,13 +24,22 @@ use skidbladnir_encode::settings::EncodeJob;
 const FILE_NAME: &str = "preferences.json";
 
 /// What the app remembers between launches.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Preferences {
 	/// The encode settings last used.
 	pub settings: EncodeJob,
 	/// The destination directory last chosen, if it still exists.
 	pub output_directory: Option<PathBuf>,
+	/// Whether a conversion replaces a file already at its output path. On by default, as
+	/// every release before this option did; a file saved before it existed reads as on.
+	pub replace_existing: bool,
+}
+
+impl Default for Preferences {
+	fn default() -> Self {
+		Self { settings: EncodeJob::default(), output_directory: None, replace_existing: true }
+	}
 }
 
 /// Why a preferences file was not used, when it existed but could not be honoured.
@@ -118,7 +127,7 @@ mod tests {
 
 	use skidbladnir_encode::settings::{EncodeJob, HEIC_X265, HeicBitDepth, WebpSettings};
 
-	use super::{Preferences, PreferencesFallback, load_from, save_to};
+	use super::{FILE_NAME, Preferences, PreferencesFallback, load_from, save_to};
 
 	/// A scratch directory that cleans itself up. Nothing here touches a path outside the
 	/// temp directory.
@@ -142,11 +151,22 @@ mod tests {
 	#[test]
 	fn round_trips_settings_and_destination() {
 		let scratch = Scratch::new("roundtrip");
-		let preferences = Preferences { settings: EncodeJob::from(WebpSettings { lossless: true, quality: 92.0, sharp_yuv: true, ..Default::default() }), output_directory: Some(scratch.0.clone()) };
+		let preferences = Preferences { settings: EncodeJob::from(WebpSettings { lossless: true, quality: 92.0, sharp_yuv: true, ..Default::default() }), output_directory: Some(scratch.0.clone()), replace_existing: false };
 		save_to(&scratch.0, &preferences).expect("save");
 		let loaded = load_from(&scratch.0);
 		assert_eq!(loaded.fell_back, None);
 		assert_eq!(loaded.preferences, preferences);
+	}
+
+	/// A preferences file written before the option existed keeps replacing files, as
+	/// that release did.
+	#[test]
+	fn an_older_file_keeps_replacing_existing_outputs() {
+		let scratch = Scratch::new("older");
+		fs::write(scratch.0.join(FILE_NAME), r#"{"settings":{},"outputDirectory":null}"#).expect("write an older file");
+		let loaded = load_from(&scratch.0);
+		assert_eq!(loaded.fell_back, None);
+		assert!(loaded.preferences.replace_existing);
 	}
 
 	#[test]

@@ -184,6 +184,36 @@ impl WebpMetadata {
 	}
 }
 
+/// The animation encoder's own options, from `img2webp` and `gif2webp`. They apply only
+/// when the source is an animation (an animated WebP, or any GIF), and change nothing for a
+/// still image.
+///
+/// Every option left at its default is the tool's own default, so an untouched job still
+/// matches `img2webp` (animated WebP) and `gif2webp` (GIF) exactly.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct WebpAnimation {
+	/// Search harder for the smallest file; slower, and spaces no keyframes (`-min_size`).
+	pub minimize_size: bool,
+	/// Encode each frame lossy or lossless, whichever is smaller (`-mixed`).
+	pub allow_mixed: bool,
+	/// Minimum distance between keyframes (`-kmin`); `None` is the tool's default. Any
+	/// integer, as the tools take it: libwebp corrects an inconsistent pair itself.
+	pub kmin: Option<i32>,
+	/// Maximum distance between keyframes (`-kmax`); `None` is the tool's default, `0`
+	/// places no keyframes, `1` makes every frame one.
+	pub kmax: Option<i32>,
+	/// How many times the animation plays, `0` for forever (`img2webp -loop`); `None` keeps
+	/// the source's.
+	pub loop_count: Option<u16>,
+	/// Read a GIF's loop count as Chrome once did — repeats as plays, and no loop extension
+	/// as forever (`gif2webp -loop_compatibility`). GIF input only.
+	pub loop_compatibility: bool,
+	/// Show every frame for this many milliseconds, at least 1 (`img2webp -d`, given once
+	/// before every frame); `None` keeps each frame's own timing.
+	pub frame_duration: Option<u32>,
+}
+
 /// Every WebP control: the `cwebp` surface less the crop and resize, which belong to the
 /// [`super::EncodeJob`] because every output format shares them.
 ///
@@ -257,6 +287,8 @@ pub struct WebpSettings {
 	pub blend_alpha: Option<u32>,
 	/// Which of the source's metadata to copy (`-metadata`).
 	pub metadata: WebpMetadata,
+	/// The animation encoder's options, for an animated source.
+	pub animation: WebpAnimation,
 }
 
 impl Default for WebpSettings {
@@ -273,7 +305,14 @@ impl WebpSettings {
 	/// what `cwebp` encodes when given nothing but `-q 75`.
 	#[must_use]
 	pub const fn libwebp_defaults() -> Self {
-		Self { lossless: false, near_lossless: 100, exact: false, quality: 75.0, alpha_quality: 100, alpha_compression: true, alpha_filtering: AlphaFiltering::Fast, method: 4, image_hint: ImageHint::Default, target: None, segments: 4, sns: 50, filter_strength: 60, filter_sharpness: 0, filter_type: FilterType::Strong, autofilter: false, passes: 1, qmin: 0, qmax: 100, preprocessing: 0, partition_limit: 0, jpeg_like: false, sharp_yuv: false, low_memory: false, multi_threading: false, keep_alpha: true, blend_alpha: None, metadata: WebpMetadata { exif: false, icc: false, xmp: false } }
+		Self { lossless: false, near_lossless: 100, exact: false, quality: 75.0, alpha_quality: 100, alpha_compression: true, alpha_filtering: AlphaFiltering::Fast, method: 4, image_hint: ImageHint::Default, target: None, segments: 4, sns: 50, filter_strength: 60, filter_sharpness: 0, filter_type: FilterType::Strong, autofilter: false, passes: 1, qmin: 0, qmax: 100, preprocessing: 0, partition_limit: 0, jpeg_like: false, sharp_yuv: false, low_memory: false, multi_threading: false, keep_alpha: true, blend_alpha: None, metadata: WebpMetadata { exif: false, icc: false, xmp: false }, animation: WebpAnimation { minimize_size: false, allow_mixed: false, kmin: None, kmax: None, loop_count: None, loop_compatibility: false, frame_duration: None } }
+	}
+
+	/// Start again from what `cwebp` encodes when given no options at all —
+	/// [`Self::libwebp_defaults`] — keeping only multi-threading, which changes how fast the
+	/// file is written but not a byte of it.
+	pub fn reset_to_cwebp_defaults(&mut self) {
+		*self = Self { multi_threading: self.multi_threading, ..Self::libwebp_defaults() };
 	}
 
 	/// The Electron app's choices on top of libwebp's defaults.
@@ -283,13 +322,13 @@ impl WebpSettings {
 
 	/// Re-initialise every encoder field to a libwebp preset, keeping the quality — exactly
 	/// what `cwebp -preset` does at the point it appears on the command line. The picture
-	/// options (alpha, blending, metadata) are not part of the encoder config and are left
-	/// alone, as is multi-threading, which changes how fast the file is written but not a
+	/// options (alpha, blending, metadata) and the animation encoder's are not part of the
+	/// encoder config and are left alone, as is multi-threading, which changes how fast the file is written but not a
 	/// byte of it.
 	pub fn apply_preset(&mut self, preset: Preset) {
-		let kept = (self.quality, self.multi_threading, self.keep_alpha, self.blend_alpha, self.metadata);
+		let kept = (self.quality, self.multi_threading, self.keep_alpha, self.blend_alpha, self.metadata, self.animation);
 		*self = Self::libwebp_defaults();
-		(self.quality, self.multi_threading, self.keep_alpha, self.blend_alpha, self.metadata) = kept;
+		(self.quality, self.multi_threading, self.keep_alpha, self.blend_alpha, self.metadata, self.animation) = kept;
 		// config_enc.c, WebPConfigInitInternal's preset switch.
 		match preset {
 			Preset::Default => {}
@@ -354,6 +393,12 @@ impl WebpSettings {
 				return Err(ValidationError::OutOfRangeFloat { field: "target", value: psnr, min: 0.0, max: 10_000.0 });
 			}
 			_ => {}
+		}
+		// img2webp refuses a duration of 0 or less; its timestamps are C ints.
+		if let Some(duration) = self.animation.frame_duration
+			&& !(1..=i32::MAX.unsigned_abs()).contains(&duration)
+		{
+			return Err(ValidationError::OutOfRange { field: "animation.frame_duration", value: duration, min: 1, max: i32::MAX.unsigned_abs() });
 		}
 		if let Some(colour) = self.blend_alpha
 			&& colour > 0x00ff_ffff
