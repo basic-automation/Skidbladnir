@@ -192,7 +192,7 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 			false,
 			|t, v| {
 				if let Some(clli) = t.job().heic.clli.as_mut() {
-					clli[0] = to_u16(v)
+					clli[0] = to_u16(v);
 				}
 			},
 			cx,
@@ -209,7 +209,7 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 			false,
 			|t, v| {
 				if let Some(clli) = t.job().heic.clli.as_mut() {
-					clli[1] = to_u16(v)
+					clli[1] = to_u16(v);
 				}
 			},
 			cx,
@@ -245,7 +245,7 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 					false,
 					|t, v| {
 						if let Some(pasp) = t.job().heic.pasp.as_mut() {
-							pasp[0] = to_u32(v)
+							pasp[0] = to_u32(v);
 						}
 					},
 					cx,
@@ -262,7 +262,7 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 					false,
 					|t, v| {
 						if let Some(pasp) = t.job().heic.pasp.as_mut() {
-							pasp[1] = to_u32(v)
+							pasp[1] = to_u32(v);
 						}
 					},
 					cx,
@@ -299,7 +299,7 @@ fn edit_custom(this: &mut Skid, edit: impl FnOnce(&mut u16, &mut u16, &mut u16, 
 /// The compatible brands: a `UInputTags` (`max-length 4`, `variant soft`, `size sm`, on
 /// `bg-paleday-rule`) in the window's field frame. Enter adds the typed brand; each tag's
 /// cross removes it.
-#[expect(clippy::too_many_lines, reason = "one tag input: the tags, the field and their keys")]
+#[allow(clippy::too_many_lines, reason = "one tag input: the tags, the field and their keys")]
 fn brands_field(this: &mut Skid, brands: &[String], window: &Window, cx: &mut Context<Skid>) -> AnyElement {
 	let key: SharedString = "text-heic-compatible-brands".into();
 	let state = if let Some(state) = this.inputs.get(&key) {

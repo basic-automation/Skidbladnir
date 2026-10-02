@@ -112,7 +112,7 @@ impl Skid {
 		field().child(field_label(label.to_owned())).child(div().flex().items_center().gap(px(8.)).child(swatch).child(div().text_color(c(BRIGHT)).child(format!("0x{value:06x}")))).into_any_element()
 	}
 
-	#[expect(clippy::too_many_lines, reason = "one pop-up's element tree: the square, the strip and the field, with their keys")]
+	#[allow(clippy::too_many_lines, reason = "one pop-up's element tree: the square, the strip and the field, with their keys")]
 	fn color_panel(&mut self, key: &SharedString, value: u32, set: &Set<u32>, window: &Window, cx: &mut Context<Self>) -> AnyElement {
 		let (hue, saturation, brightness) = self.picker_hsv.unwrap_or_else(|| to_hsv(value));
 		let square_key: SharedString = format!("{key}-square").into();
