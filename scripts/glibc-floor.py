@@ -18,7 +18,8 @@ the loader refuses the binary on an older glibc all the same.
 usage: glibc-floor.py [--glibc 2.35] [--glibcxx 3.4.30] [--cxxabi 1.3.13] PATH...
 
 Each PATH is an ELF file, a directory (searched), a .deb (unpacked with dpkg-deb, or ar
-and tar) or an .AppImage (unpacked with unsquashfs, or with its own --appimage-extract).
+and tar), an .rpm (unpacked here: a gzip or xz cpio payload) or an .AppImage (unpacked
+with unsquashfs, or with its own --appimage-extract).
 Exit status: 0 within the floor, 1 above it, 2 when a PATH cannot be read or holds no ELF.
 """
 
@@ -112,6 +113,41 @@ def appimage_offset(path: pathlib.Path) -> int:
 	return int.from_bytes(shoff, order) + int.from_bytes(shentsize, order) * int.from_bytes(shnum, order)
 
 
+def unpack_rpm(path: pathlib.Path, target: pathlib.Path) -> None:
+	"""Extract an .rpm's files: past the lead and the two headers, a compressed newc cpio."""
+	import gzip, lzma
+	data = path.read_bytes()
+	def header_end(at: int) -> int:
+		if data[at:at + 3] != b"\x8e\xad\xe8":
+			raise ValueError(f"{path} has no RPM header at {at}")
+		count, size = int.from_bytes(data[at + 8:at + 12], "big"), int.from_bytes(data[at + 12:at + 16], "big")
+		return at + 16 + 16 * count + size
+	signature_end = header_end(96)
+	payload = data[header_end((signature_end + 7) // 8 * 8):]
+	if payload[:2] == b"\x1f\x8b":
+		archive = gzip.decompress(payload)
+	elif payload[:6] == b"\xfd7zXZ\x00":
+		archive = lzma.decompress(payload)
+	else:
+		raise ValueError(f"{path}: unsupported payload compression")
+	at = 0
+	while archive[at:at + 6] == b"070701":
+		fields = [int(archive[at + 6 + 8 * i:at + 14 + 8 * i], 16) for i in range(13)]
+		mode, size, name_size = fields[1], fields[6], fields[11]
+		name_at = at + 110
+		name = archive[name_at:name_at + name_size - 1].decode()
+		data_at = (name_at + name_size + 3) // 4 * 4
+		if name == "TRAILER!!!":
+			break
+		destination = target / name.lstrip("./")
+		if mode & 0o170000 == 0o100000:
+			destination.parent.mkdir(parents=True, exist_ok=True)
+			destination.write_bytes(archive[data_at:data_at + size])
+		elif mode & 0o170000 == 0o040000:
+			destination.mkdir(parents=True, exist_ok=True)
+		at = (data_at + size + 3) // 4 * 4
+
+
 def unpack(path: pathlib.Path, scratch: pathlib.Path) -> pathlib.Path:
 	"""The directory to search for `path`: itself, or where its package was unpacked."""
 	quiet = {"stdout": subprocess.DEVNULL, "check": True}
@@ -125,6 +161,10 @@ def unpack(path: pathlib.Path, scratch: pathlib.Path) -> pathlib.Path:
 			subprocess.run(["ar", "x", str(path.resolve())], cwd=members, **quiet)
 			target.mkdir()
 			subprocess.run(["tar", "-xf", str(next(members.glob("data.tar*"))), "-C", str(target)], **quiet)
+		return target
+	if path.name.endswith(".rpm"):
+		target = scratch / "root"
+		unpack_rpm(path, target)
 		return target
 	if path.name.endswith(".AppImage"):
 		target = scratch / "squashfs-root"

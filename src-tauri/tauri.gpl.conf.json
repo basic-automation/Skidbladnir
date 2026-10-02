@@ -14,6 +14,12 @@
           "/usr/share/metainfo/com.basicautomation.skidbladnir.metainfo.xml": "../resources/linux/com.basicautomation.skidbladnir.gpl.metainfo.xml"
         }
       },
+      "rpm": {
+        "files": {
+          "/usr/lib/skidbladnir/libheif.so.1": "../build/libheif-gpl/lib/libheif.so.1",
+          "/usr/share/metainfo/com.basicautomation.skidbladnir.metainfo.xml": "../resources/linux/com.basicautomation.skidbladnir.gpl.metainfo.xml"
+        }
+      },
       "appimage": {
         "files": {
           "/usr/share/metainfo/com.basicautomation.skidbladnir.metainfo.xml": "../resources/linux/com.basicautomation.skidbladnir.gpl.metainfo.xml"

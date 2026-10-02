@@ -41,7 +41,7 @@ fn each_edition_installs_its_own_metainfo() {
 	let path = "/usr/share/metainfo/com.basicautomation.skidbladnir.metainfo.xml";
 	let linux: serde_json::Value = serde_json::from_str(include_str!("../tauri.linux.conf.json")).expect("parse");
 	let gpl: serde_json::Value = serde_json::from_str(include_str!("../tauri.gpl.conf.json")).expect("parse");
-	for bundle in ["deb", "appimage"] {
+	for bundle in ["deb", "rpm", "appimage"] {
 		assert_eq!(linux["bundle"]["linux"][bundle]["files"][path], "../resources/linux/com.basicautomation.skidbladnir.metainfo.xml", "{bundle}");
 		assert_eq!(gpl["bundle"]["linux"][bundle]["files"][path], "../resources/linux/com.basicautomation.skidbladnir.gpl.metainfo.xml", "{bundle}");
 	}
