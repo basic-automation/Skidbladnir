@@ -211,9 +211,17 @@ jobs:
   # read JPEG through the libjpeg-turbo we link (scripts/build-reference-tools.sh), so a
   # mismatch is an option or a reader that differs, never a version. A missing or
   # mismatched reference fails the job rather than skipping it.
+  #
+  # Linux x86-64 and macOS on Apple silicon: the same sources built on each, so the
+  # comparison also covers libwebp's, libaom's and libjxl's ARM code paths, which a
+  # Linux-only gate never ran.
   parity:
-    name: parity with the reference encoders
-    runs-on: ubuntu-latest
+    name: parity with the reference encoders / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -223,9 +231,15 @@ jobs:
         # libtiff is cwebp's TIFF reader; giflib is for gif2webp, the reference for GIF input.
         # avifdec, djxl and heif-info are the metadata gate's readers for AVIF, JPEG XL and
         # HEIC output (tests/metadata.rs), which has no byte-for-byte reference there.
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y libpng-dev libtiff-dev libgif-dev zlib1g-dev libavif-bin libjxl-tools libheif-examples libheif-plugin-libde265
+
+      - name: Install the reference tools' development files, and the decoders (macOS)
+        # The same, from Homebrew; zlib is the system's.
+        if: runner.os == 'macOS'
+        run: brew install libpng libtiff giflib libavif jpeg-xl libheif
 
       - name: Install nasm
         uses: ilammy/setup-nasm@v1
