@@ -1204,6 +1204,14 @@ mod tests {
 			let conversion = encode_file(&EncodeJob { format, ..EncodeJob::default() }, &input, &output).unwrap_or_else(|error| panic!("{format:?}: {error}"));
 			assert_eq!((conversion.width, conversion.height), (30, 20), "{format:?}");
 		}
+		// Enlarged, it is drawn again at the new size: the rectangle's edge stays hard.
+		let output = scratch.join("drawing-big.webp");
+		let job = EncodeJob { resize: Resize::to(60, 0), ..EncodeJob::from(WebpSettings { lossless: true, exact: true, ..WebpSettings::default() }) };
+		let conversion = encode_file(&job, &input, &output).expect("convert");
+		assert_eq!((conversion.width, conversion.height), (60, 40));
+		let big = load(&output).expect("decode");
+		let alpha = |x: usize| big.pixels[x * 4 + 3];
+		assert_eq!((alpha(29), alpha(30)), (255, 0), "a hard edge at the rectangle's side, not a scaled blur");
 	}
 
 	/// A failed encode must not damage a file that is already there.

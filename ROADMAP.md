@@ -1415,8 +1415,13 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       resolver). Capped at 100 megapixels. Sniffed by content (the sniff window grew from 64
       bytes to 1 KiB for SVG's XML declaration and comments). Tested to every format; no
       reference tool reads SVG.
-- [ ] SVG input, next: draw it at the resize's size rather than resizing the raster, so a
-      small SVG enlarged stays sharp; and `.svgz`.
+- [x] SVG drawn at the resize's size (2026-10-01): an uncropped SVG with a resize is
+      redrawn at the target size before any format's encoder sees it
+      (`encoder::svg_at_resize`), the missing dimension derived as libwebp's rescaler
+      derives it, so sizes match every other source's. Tested: a hard edge survives a 2x
+      enlargement to lossless WebP (fails without it).
+- [ ] SVG input: `.svgz`, and drawing at the crop's size when a crop and a resize are both
+      set (a crop today keeps the raster route).
 - [ ] **SVG output** (owner request, 2026-09-28) — needs the owner's answer to the question
       below first. The original notes, input included: *Input* means rasterising:
       `resvg` is the obvious renderer (pure Rust, no C toolchain); it needs a size — the

@@ -52,8 +52,9 @@ with the exceptions listed under [What "every option" means](#what-every-option-
 - **Y4M** video frames (the first frame): any chroma format, 8 to 16 bits, with or without
   alpha
 - **PGX**, the JPEG 2000 test format (gray, 1 to 16 bits)
-- **SVG**, drawn at its own size with its transparency kept; text in the system's fonts,
-  and only images embedded in the file (one it links to is never opened)
+- **SVG**, drawn at its own size, or straight at the size a resize asks for so its edges
+  stay sharp, with its transparency kept; text in the system's fonts, and only images
+  embedded in the file (one it links to is never opened)
 - Each file's format is recognised from its contents, not its extension. An AVIF's crop,
   rotation and mirror are applied, so a sideways-stored portrait converts upright, and
   tiled (grid) AVIFs, as some cameras write large captures, are decoded whole.
