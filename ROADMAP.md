@@ -1201,6 +1201,17 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       loop); only if it still overflows, measure there. **The CRT is now consistent**
       (0.15.0, below); the overflow did not recur in that PR's Windows runs, which proves
       little for an intermittent failure — keep watching before ticking.
+- [ ] **Concurrent HEIC encodes can trip libheif's memory limit** (found 2026-10-01 by CI:
+      PR #68's macOS parity run 36963635699 failed one case, `4:4:0, -q 85 -t 24`, with
+      "Memory usage of 18446744073709539283 bytes ... exceeds the security limit"; the
+      same commit passed in the other run). libheif 1.23.5's `security_limits.cc` keys
+      its process-wide usage map by the `heif_security_limits` pointer, and each new
+      `TotalMemoryTracker` resets that key's counter to zero. Contexts sharing the
+      default limits reset each other's count mid-encode, and the frees then underflow
+      it. Reachable in the app when a HEIC preview overlaps a conversion. Fix: give each
+      context in `native/heic_shim.c` its own copy of the limits
+      (`heif_context_set_security_limits`), re-run the HEIC parity gates, and report it
+      upstream.
 - [x] **One C runtime on Windows** (2026-10-01): everything on the static runtime —
       `.cargo/config.toml` `+crt-static` for `x86_64-pc-windows-msvc`, and
       `CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded` for libjpeg-turbo, libaom and libavif in
