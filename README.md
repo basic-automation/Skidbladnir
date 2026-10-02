@@ -70,8 +70,9 @@ That is 3,827 cases in all. CI runs every one of them on Linux x86-64 and on mac
 Apple silicon, for every pull request and every push to `master`.
 
 The [GPL edition](#editions) writes HEIC with x265 instead, adding `heif-enc`'s `-L`
-lossless, 4:4:4 and 4:2:2 chroma, 10-bit output and a fixed set of x265's tuning controls;
-its HEIC is checked by decoding, not byte for byte against a reference.
+lossless, 4:4:4 and 4:2:2 chroma, 10-bit output, x265's main tuning controls and any
+other x265 parameter (`-p x265:KEY=VALUE`); its HEIC is checked by decoding, not byte for
+byte against a reference.
 
 - **WebP**: lossless and near-lossless, `-exact`, the libwebp presets and `-z` lossless
   levels, targets by size or PSNR, every lossy tuning control (SNS, segments, filter
@@ -148,8 +149,8 @@ Download the file for your computer from the
 **Not sure which edition?** Download the standard edition: the files above, named
 `Skidbladnir_…` with an underscore. Choose the GPL edition, the same files named
 `Skidbladnir-GPL_…`, only if you write HEIC and want the x265 encoder: `heif-enc -L`
-lossless, 4:4:4 and 4:2:2 chroma, 10-bit, and x265's preset, tune and a fixed set of its
-other tuning controls. Both are free. The licence matters only if you redistribute the
+lossless, 4:4:4 and 4:2:2 chroma, 10-bit, x265's preset and tune, its main tuning
+controls, and any other x265 parameter. Both are free. The licence matters only if you redistribute the
 app; [Editions](#editions) has the details.
 
 The release page lists other files too; they are not installers. The `.app.tar.gz` files
@@ -245,7 +246,7 @@ licence:
 | | Standard (`Skidbladnir_*`) | GPL (`Skidbladnir-GPL_*`) |
 |---|---|---|
 | HEIC encoder | Kvazaar (BSD-3-Clause) | x265 (GPL-2.0-or-later) |
-| HEIC controls | every `heif-enc` option Kvazaar honours | those, plus `-L` lossless, 4:4:4 and 4:2:2 chroma, 10-bit, and x265's preset, tune, TU depth, AQ, psy-rd/psy-rdoq, deblock and SAO (a fixed set, not every `-p x265:` parameter) |
+| HEIC controls | every `heif-enc` option Kvazaar honours | those, plus `-L` lossless, 4:4:4 and 4:2:2 chroma, 10-bit, and x265's preset, tune, TU depth, AQ, psy-rd/psy-rdoq, deblock and SAO as controls, with any other `-p x265:` parameter by name |
 | HEIC checked | byte for byte against `heif-enc -e kvazaar` | by decoding |
 | Licence of the build | ISC; ships libheif/libde265 as a separate, replaceable LGPL-3.0 library | GPL-3.0-or-later, as a whole |
 

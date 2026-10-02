@@ -1374,8 +1374,13 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
 - [ ] `img2webp`'s per-frame options (a different `-d`, `-lossy`/`-lossless`, `-q`, `-m`
       or `-exact` for each frame): they need per-frame settings in the window, which
       re-encoding one source does not have yet.
-- [ ] GPL edition: `heif-enc`'s `-p x265:<param>` beyond the fixed set of x265 controls
-      (preset, tune, TU depth, AQ, psy-rd/psy-rdoq, deblock, SAO).
+- [x] GPL edition: `heif-enc`'s `-p x265:<param>` beyond the fixed set of x265 controls
+      (2026-10-01): `HeicSettings::x265_parameters`, a list of `KEY=VALUE` passed after the
+      controls (so one overrides them), refused in the standard edition and dropped when a
+      GPL settings file loads there. **Gate** (GPL build): `free_form_x265_parameters_reach_x265`
+      — the controls' own value given again changes nothing, another value does, a
+      parameter with no control does, the result decodes, and an unknown parameter is an
+      error. Checked by decoding, like all x265 output.
 - [x] Parity on macOS again (2026-10-01): the `parity` job is a matrix over
       `ubuntu-latest` and `macos-latest` (Apple silicon), with `--no-fail-fast`. Its first
       macOS run found a test bug, not an encoder one: the AVIF, HEIC and JPEG XL gates named

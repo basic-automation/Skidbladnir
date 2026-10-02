@@ -261,6 +261,8 @@ export interface HeicSettings {
 	deblockStrength: number
 	deblockThreshold: number
 	sao: boolean
+	/** GPL edition: `-p x265:KEY=VALUE`, applied after every control above. */
+	x265Parameters: CodecOption[]
 }
 
 // ---- Results ----------------------------------------------------------------------------

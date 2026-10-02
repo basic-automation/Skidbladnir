@@ -562,6 +562,7 @@ pub(crate) fn x265_parameters(s: &HeicSettings, (width, height): (u32, u32)) -> 
 	parameters.push(("x265:psy-rdoq".to_owned(), tenths(s.psy_rdoq)));
 	parameters.push(("x265:deblock".to_owned(), if s.deblock { format!("{}:{}", s.deblock_strength, s.deblock_threshold) } else { "false".to_owned() }));
 	parameters.push(("x265:sao".to_owned(), (if s.sao { "true" } else { "false" }).to_owned()));
+	parameters.extend(s.x265_parameters.iter().map(|p| (format!("x265:{}", p.key), p.value.clone())));
 	parameters
 }
 
@@ -989,6 +990,25 @@ mod tests {
 			let off = HeicSettings { deblock: false, sao: false, aq_mode: HeicAqMode::Off, psy_rd: 0, psy_rdoq: 0, ..HeicSettings::default() };
 			let bytes = heic(&off, 64, 64, &pixels);
 			assert!(psnr(&pixels, &decode(&bytes).expect("decode").2) > 30.0);
+		}
+
+		/// A free-form `x265:` parameter reaches x265, after the controls: overriding one of
+		/// them with its own value changes nothing, with another value it does, and x265's
+		/// refusal of a parameter it does not know is an error, not a silent default.
+		#[test]
+		fn free_form_x265_parameters_reach_x265() {
+			use crate::settings::CodecOption;
+			let pixels = fixture(64, 64, false);
+			let with = |key: &str, value: &str| HeicSettings { x265_parameters: vec![CodecOption { key: key.into(), value: value.into() }], ..HeicSettings::default() };
+			let default = heic(&HeicSettings::default(), 64, 64, &pixels);
+			assert_eq!(heic(&with("aq-mode", "1"), 64, 64, &pixels), default, "the aq-mode control's own value, given again");
+			let changed = heic(&with("aq-mode", "0"), 64, 64, &pixels);
+			assert_ne!(changed, default, "a parameter after the controls overrides them");
+			assert!(psnr(&pixels, &decode(&changed).expect("decode").2) > 30.0);
+			let chroma = heic(&with("cbqpoffs", "12"), 64, 64, &pixels);
+			assert_ne!(chroma, default, "a parameter with no control");
+			assert!(psnr(&pixels, &decode(&chroma).expect("decode").2) > 25.0);
+			assert!(run(with("no-such-parameter", "1"), Resize::default(), 64, 64, &pixels, &mut |_| true).is_err(), "x265 refuses an unknown parameter, and so do we");
 		}
 	}
 
