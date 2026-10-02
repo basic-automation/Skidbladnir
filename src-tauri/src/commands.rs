@@ -10,9 +10,9 @@ use std::{
 	}
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use skidbladnir_encode::{
-	encoder::{linked_decoder_version, linked_encoder_version}, settings::{EncodeJob, HEIC_X265, WebpSettings}, source::{Conversion, FoundImage, PathInspection, encode_file_with_progress, inspect_paths, mirrored_output_path, output_path_in, scan_directory}
+	encoder::{linked_decoder_version, linked_encoder_version}, settings::{EncodeJob, HEIC_X265, OutputFormat, WebpSettings}, source::{Conversion, FoundImage, OutputCollision, PathInspection, encode_file_with_options, inspect_paths, mirrored_output_path, output_collisions, output_path_in, scan_directory}
 };
 use tauri::{Emitter as _, Manager as _};
 
@@ -232,6 +232,53 @@ pub fn scan_folder(directory: PathBuf, recursive: bool) -> Vec<FoundImage> {
 	scan_directory(&directory, recursive)
 }
 
+/// One queued input, as the window will convert it: `relative` is set when it came from a
+/// folder scan whose structure is recreated in the destination.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlannedInput {
+	/// The file to convert.
+	pub path: PathBuf,
+	/// Its place under the scanned folder, when the tree is mirrored.
+	pub relative: Option<PathBuf>,
+}
+
+/// What a run would write, before it starts.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputPlan {
+	/// Outputs more than one queued input would write.
+	pub collisions: Vec<OutputCollision>,
+	/// Outputs already in the destination, each once.
+	pub existing: Vec<PathBuf>,
+}
+
+/// Work out where each queued input would be written, with the same naming the
+/// conversion commands use, and report the names two inputs share and the files already
+/// there, so the window can warn before anything is replaced.
+#[tauri::command]
+#[must_use]
+#[expect(clippy::needless_pass_by_value, reason = "Tauri deserializes command arguments into owned values; the planner borrows them")]
+pub fn plan_outputs(format: OutputFormat, inputs: Vec<PlannedInput>, output_directory: PathBuf) -> OutputPlan {
+	let planned: Vec<(PathBuf, PathBuf)> = inputs
+		.iter()
+		.filter_map(|input| {
+			let output = match &input.relative {
+				Some(relative) => mirrored_output_path(&output_directory, relative, format)?,
+				None => output_path_in(output_directory.clone(), &input.path, format),
+			};
+			Some((input.path.clone(), output))
+		})
+		.collect();
+	let mut existing: Vec<PathBuf> = Vec::new();
+	for (_, output) in &planned {
+		if std::fs::symlink_metadata(output).is_ok() && !existing.contains(output) {
+			existing.push(output.clone());
+		}
+	}
+	OutputPlan { collisions: output_collisions(&planned), existing }
+}
+
 /// Convert one image found by a folder scan, mirroring its position under the scan root
 /// into the output directory.
 ///
@@ -243,7 +290,7 @@ pub fn scan_folder(directory: PathBuf, recursive: bool) -> Vec<FoundImage> {
 /// Returns the failure as a string for display, including a refusal if the relative path
 /// would write outside the chosen output directory.
 #[tauri::command]
-pub async fn convert_scanned(app: tauri::AppHandle, state: tauri::State<'_, CancelFlag>, settings: EncodeJob, input: PathBuf, relative: PathBuf, output_root: PathBuf) -> Result<ConversionReport, String> {
+pub async fn convert_scanned(app: tauri::AppHandle, state: tauri::State<'_, CancelFlag>, settings: EncodeJob, input: PathBuf, relative: PathBuf, output_root: PathBuf, replace_existing: Option<bool>) -> Result<ConversionReport, String> {
 	let Some(output_path) = mirrored_output_path(&output_root, &relative, settings.format) else {
 		return Err(format!("refusing to write `{}`: it would land outside the chosen folder", relative.display()));
 	};
@@ -259,7 +306,7 @@ pub async fn convert_scanned(app: tauri::AppHandle, state: tauri::State<'_, Canc
 	let reporting_path = input.clone();
 
 	tauri::async_runtime::spawn_blocking(move || {
-		let conversion = encode_file_with_progress(&settings, &input, &output_path, &mut |percent| {
+		let conversion = encode_file_with_options(&settings, &input, &output_path, replace_existing.unwrap_or(true), &mut |percent| {
 			let _ = app.emit("conversion-progress", ConversionProgress { input_path: reporting_path.clone(), percent });
 			!cancelled.load(Ordering::Relaxed)
 		})
@@ -334,9 +381,9 @@ pub fn delete_preset(app: tauri::AppHandle, name: String) -> Result<Vec<Preset>,
 /// # Errors
 ///
 /// Returns the failure as a string for display.
-pub fn convert_one(settings: &EncodeJob, input: PathBuf, output_directory: PathBuf, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<ConversionReport, String> {
+pub fn convert_one(settings: &EncodeJob, input: PathBuf, output_directory: PathBuf, replace_existing: bool, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<ConversionReport, String> {
 	let output_path = output_path_in(output_directory, &input, settings.format);
-	let conversion = encode_file_with_progress(settings, &input, &output_path, on_progress).map_err(|error| error.to_string())?;
+	let conversion = encode_file_with_options(settings, &input, &output_path, replace_existing, on_progress).map_err(|error| error.to_string())?;
 	Ok(ConversionReport::new(input, output_path, conversion))
 }
 
@@ -363,7 +410,7 @@ pub fn convert_one(settings: &EncodeJob, input: PathBuf, output_directory: PathB
 ///
 /// Returns the failure as a string for display, including a cancellation.
 #[tauri::command]
-pub async fn convert_image(app: tauri::AppHandle, state: tauri::State<'_, CancelFlag>, settings: EncodeJob, input: PathBuf, output_directory: PathBuf) -> Result<ConversionReport, String> {
+pub async fn convert_image(app: tauri::AppHandle, state: tauri::State<'_, CancelFlag>, settings: EncodeJob, input: PathBuf, output_directory: PathBuf, replace_existing: Option<bool>) -> Result<ConversionReport, String> {
 	// Each file starts uncancelled, so a cancel left over from a previous batch cannot kill
 	// the next one.
 	let cancelled = Arc::clone(&state.0);
@@ -371,7 +418,7 @@ pub async fn convert_image(app: tauri::AppHandle, state: tauri::State<'_, Cancel
 	let reporting_path = input.clone();
 
 	tauri::async_runtime::spawn_blocking(move || {
-		convert_one(&settings, input, output_directory, &mut |percent| {
+		convert_one(&settings, input, output_directory, replace_existing.unwrap_or(true), &mut |percent| {
 			// Emitting is best-effort: a failed event must not abort a conversion the user
 			// asked for.
 			let _ = app.emit("conversion-progress", ConversionProgress { input_path: reporting_path.clone(), percent });
@@ -384,11 +431,13 @@ pub async fn convert_image(app: tauri::AppHandle, state: tauri::State<'_, Cancel
 
 #[cfg(test)]
 mod tests {
+	use std::path::PathBuf;
+
 	use skidbladnir_encode::{
-		settings::{EncodeJob, WebpSettings}, source::Conversion
+		settings::{EncodeJob, OutputFormat, WebpSettings}, source::Conversion
 	};
 
-	use super::{ConversionReport, convert_one, default_settings, edition, encoder_version, inspect_dropped_paths, validate_settings, webp_apply_lossless_level, webp_apply_preset, webp_cwebp_defaults};
+	use super::{ConversionReport, PlannedInput, convert_one, default_settings, edition, encoder_version, inspect_dropped_paths, plan_outputs, validate_settings, webp_apply_lossless_level, webp_apply_preset, webp_cwebp_defaults};
 
 	/// The version string is shown to users, so it must actually contain versions rather
 	/// than a placeholder.
@@ -483,10 +532,34 @@ mod tests {
 		let bytes = skidbladnir_encode::encoder::encode_rgba(&EncodeJob::from(WebpSettings { lossless: true, exact: true, ..Default::default() }), &skidbladnir_encode::encoder::RgbaImage { width: 1, height: 1, pixels: &pixels }).expect("encode the fixture");
 		std::fs::write(&webp, &bytes).expect("write the fixture");
 
-		let error = convert_one(&EncodeJob::default(), webp.clone(), dir.clone(), &mut |_| true).expect_err("must refuse");
+		let error = convert_one(&EncodeJob::default(), webp.clone(), dir.clone(), true, &mut |_| true).expect_err("must refuse");
 		assert!(error.contains("refusing to overwrite the source"), "got {error}");
 		assert_eq!(std::fs::read(&webp).expect("read it back"), bytes, "the source must be untouched");
 
+		let _ = std::fs::remove_dir_all(&dir);
+	}
+
+	/// The plan names outputs exactly as the conversion commands will, flat and mirrored,
+	/// so its warning is about the files that would really be written.
+	#[test]
+	fn plan_outputs_finds_shared_names_and_existing_files() {
+		let dir = std::env::temp_dir().join(format!("skidbladnir-plan-{}", std::process::id()));
+		let _ = std::fs::remove_dir_all(&dir);
+		std::fs::create_dir_all(dir.join("sub")).expect("create the scratch directory");
+		std::fs::write(dir.join("other.webp"), b"already here").expect("seed an existing output");
+		let flat = |path: &str| PlannedInput { path: PathBuf::from(path), relative: None };
+		let plan = plan_outputs(OutputFormat::Webp, vec![flat("/in/photo.png"), flat("/in/other.png"), flat("/in/photo.jpg")], dir.clone());
+		assert_eq!(plan.collisions.len(), 1);
+		assert_eq!(plan.collisions[0].output, dir.join("photo.webp"));
+		assert_eq!(plan.collisions[0].inputs, vec![PathBuf::from("/in/photo.png"), PathBuf::from("/in/photo.jpg")]);
+		assert_eq!(plan.existing, vec![dir.join("other.webp")]);
+
+		// Mirrored, the same names in different folders are different files.
+		let mirrored = |path: &str, relative: &str| PlannedInput { path: PathBuf::from(path), relative: Some(PathBuf::from(relative)) };
+		let plan = plan_outputs(OutputFormat::Avif, vec![mirrored("/in/a.png", "a.png"), mirrored("/in/sub/a.png", "sub/a.png"), mirrored("/in/sub/a.jpg", "sub/a.jpg")], dir.clone());
+		assert_eq!(plan.collisions.len(), 1);
+		assert_eq!(plan.collisions[0].output, dir.join("sub").join("a.avif"));
+		assert_eq!(plan.existing, Vec::<PathBuf>::new());
 		let _ = std::fs::remove_dir_all(&dir);
 	}
 

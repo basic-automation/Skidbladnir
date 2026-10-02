@@ -34,4 +34,4 @@ pub use cwebp::cwebp_args;
 pub use encoder::{EncodeError, RgbaImage, encode_rgba, encode_rgba_with_progress, encode_source_with_progress, rescale_rgba};
 pub use inspect::{WebpCompression, WebpInfo, inspect_webp};
 pub use settings::{AlphaFiltering, AvifSettings, Crop, EncodeJob, FilterType, HeicAqMode, HeicBitDepth, HeicChroma, HeicPreset, HeicSettings, HeicTune, ImageHint, JxlSettings, OutputFormat, Preset, Resize, ResizeMode, TargetMetric, ValidationError, WebpMetadata, WebpSettings};
-pub use source::{Conversion, ConvertError, FoundImage, PathInspection, SourceError, SourceFormat, SourceImage, encode_file, encode_file_with_progress, inspect_paths, load, mirrored_output_path, scan_directory};
+pub use source::{Conversion, ConvertError, FoundImage, OutputCollision, PathInspection, SourceError, SourceFormat, SourceImage, encode_file, encode_file_with_options, encode_file_with_progress, inspect_paths, load, mirrored_output_path, output_collisions, scan_directory};

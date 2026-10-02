@@ -729,6 +729,37 @@ pub fn mirrored_output_path(output_root: &Path, relative: &Path, format: OutputF
 	Some(output_path_in(directory, relative, format))
 }
 
+/// Two or more inputs of one run that would be written to the same file: `photo.png` and
+/// `photo.jpg` both become `photo.webp`, and the later one replaces the earlier.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputCollision {
+	/// The output path they share, as the first of them would write it.
+	pub output: PathBuf,
+	/// The inputs, in the order they would be converted.
+	pub inputs: Vec<PathBuf>,
+}
+
+/// Find the outputs that more than one input would write, from `(input, output)` pairs in
+/// conversion order. Windows and macOS compare names without regard to case, as their
+/// usual filesystems do, so `Photo.webp` and `photo.webp` collide there and not on Linux.
+#[must_use]
+pub fn output_collisions(planned: &[(PathBuf, PathBuf)]) -> Vec<OutputCollision> {
+	fn key(path: &Path) -> String {
+		let text = path.to_string_lossy();
+		if cfg!(any(windows, target_os = "macos")) { text.to_lowercase() } else { text.into_owned() }
+	}
+	let mut groups: Vec<(String, OutputCollision)> = Vec::new();
+	for (input, output) in planned {
+		let key = key(output);
+		match groups.iter_mut().find(|(seen, _)| *seen == key) {
+			Some((_, group)) => group.inputs.push(input.clone()),
+			None => groups.push((key, OutputCollision { output: output.clone(), inputs: vec![input.clone()] })),
+		}
+	}
+	groups.into_iter().map(|(_, group)| group).filter(|group| group.inputs.len() > 1).collect()
+}
+
 /// What a completed conversion did, for the UI's before/after readout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -789,6 +820,12 @@ pub enum ConvertError {
 		/// The directory that is missing.
 		path: PathBuf,
 	},
+	/// A file is already at the output path and the caller asked not to replace it.
+	#[error("`{path}` already exists and replacing existing files is off")]
+	OutputExists {
+		/// The path that is already taken.
+		path: PathBuf,
+	},
 	/// Writing the output failed.
 	#[error("could not write `{path}`: {source}")]
 	Write {
@@ -844,6 +881,18 @@ pub fn encode_file(settings: &EncodeJob, input: &Path, output: &Path) -> Result<
 /// As [`encode_file`], plus a cancellation surfaced as [`ConvertError::Encode`] wrapping
 /// [`EncodeError::Cancelled`].
 pub fn encode_file_with_progress(settings: &EncodeJob, input: &Path, output: &Path, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Conversion, ConvertError> {
+	encode_file_with_options(settings, input, output, true, on_progress)
+}
+
+/// [`encode_file_with_progress`], with the choice of whether a file already at `output` is
+/// replaced. With `replace_existing` off the conversion is refused up front, before any
+/// encoding, and the name is claimed again at the moment of writing so a file that appears
+/// meanwhile is not replaced either. The source image is never replaced, whatever this says.
+///
+/// # Errors
+///
+/// As [`encode_file_with_progress`], plus [`ConvertError::OutputExists`].
+pub fn encode_file_with_options(settings: &EncodeJob, input: &Path, output: &Path, replace_existing: bool, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Conversion, ConvertError> {
 	let directory = output.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
 	if !directory.is_dir() {
 		return Err(ConvertError::MissingOutputDirectory { path: directory.to_path_buf() });
@@ -855,6 +904,9 @@ pub fn encode_file_with_progress(settings: &EncodeJob, input: &Path, output: &Pa
 		&& resolved_input == resolved_output
 	{
 		return Err(ConvertError::WouldOverwriteSource { path: input.to_path_buf() });
+	}
+	if !replace_existing && fs::symlink_metadata(output).is_ok() {
+		return Err(ConvertError::OutputExists { path: output.to_path_buf() });
 	}
 
 	let bytes = fs::read(input).map_err(|source| SourceError::Read { path: input.to_path_buf(), source })?;
@@ -876,8 +928,23 @@ pub fn encode_file_with_progress(settings: &EncodeJob, input: &Path, output: &Pa
 	// and is therefore atomic.
 	let staging = directory.join(format!(".skidbladnir-{}-{}.{}.part", std::process::id(), output.file_name().and_then(OsStr::to_str).unwrap_or("out"), settings.format.extension()));
 	fs::write(&staging, &encoded).map_err(|source| ConvertError::Write { path: staging.clone(), source })?;
+	// Not replacing: claim the name with an empty file that only succeeds if nothing is
+	// there, then rename over our own placeholder. This works on every filesystem (a hard
+	// link would not on FAT), and the rename keeps the write atomic.
+	if !replace_existing {
+		match fs::OpenOptions::new().write(true).create_new(true).open(output) {
+			Ok(_) => {}
+			Err(source) => {
+				let _ = fs::remove_file(&staging);
+				return Err(if source.kind() == io::ErrorKind::AlreadyExists { ConvertError::OutputExists { path: output.to_path_buf() } } else { ConvertError::Write { path: output.to_path_buf(), source } });
+			}
+		}
+	}
 	if let Err(source) = fs::rename(&staging, output) {
 		let _ = fs::remove_file(&staging);
+		if !replace_existing {
+			let _ = fs::remove_file(output);
+		}
 		return Err(ConvertError::Write { path: output.to_path_buf(), source });
 	}
 
@@ -909,7 +976,7 @@ mod tests {
 		fs, path::{Path, PathBuf}
 	};
 
-	use super::{Conversion, ConvertError, SourceFormat, encode_file, load, output_path_in};
+	use super::{Conversion, ConvertError, OutputCollision, SourceFormat, encode_file, encode_file_with_options, load, output_collisions, output_path_in};
 	use crate::settings::{AvifSettings, EncodeJob, OutputFormat, Resize, WebpSettings};
 
 	/// A scratch directory that cleans itself up. Every test in this module writes only
@@ -1027,6 +1094,56 @@ mod tests {
 		let error = encode_file(&EncodeJob::default(), &webp, &derived).expect_err("must refuse");
 		assert!(matches!(error, ConvertError::WouldOverwriteSource { .. }), "got {error}");
 		assert_eq!(fs::read(&webp).expect("read the file again"), original, "the source must be byte-identical after the refusal");
+	}
+
+	/// With replacing off, a file already at the output is left exactly as it was, and
+	/// nothing else is written; with it on (the default), it is replaced.
+	#[test]
+	fn keeps_an_existing_output_when_asked_not_to_replace() {
+		let scratch = Scratch::new("keep");
+		let input = scratch.join("source.png");
+		write_png(&input, 16, 16);
+		let output = scratch.join("taken.webp");
+		fs::write(&output, b"ALREADY HERE").expect("seed the output file");
+
+		let error = encode_file_with_options(&EncodeJob::default(), &input, &output, false, &mut |_| true).expect_err("must refuse");
+		assert!(matches!(error, ConvertError::OutputExists { .. }), "got {error}");
+		assert_eq!(fs::read(&output).expect("read the output"), b"ALREADY HERE");
+		assert_eq!(fs::read_dir(&scratch.0).expect("list").count(), 2, "nothing else written");
+
+		let fresh = scratch.join("fresh.webp");
+		encode_file_with_options(&EncodeJob::default(), &input, &fresh, false, &mut |_| true).expect("a free name converts");
+		assert_eq!(&fs::read(&fresh).expect("read the new output")[0..4], b"RIFF");
+		// Two inputs of one run with the same name: the second is refused, not written over the first.
+		let first = fs::read(&fresh).expect("read");
+		let error = encode_file_with_options(&EncodeJob::from(WebpSettings { quality: 10.0, ..Default::default() }), &input, &fresh, false, &mut |_| true).expect_err("the second must refuse");
+		assert!(matches!(error, ConvertError::OutputExists { .. }), "got {error}");
+		assert_eq!(fs::read(&fresh).expect("read"), first);
+
+		encode_file_with_options(&EncodeJob::default(), &input, &output, true, &mut |_| true).expect("replacing is allowed");
+		assert_eq!(&fs::read(&output).expect("read the output")[0..4], b"RIFF");
+	}
+
+	/// A cancelled conversion with replacing off leaves no placeholder behind.
+	#[test]
+	fn a_cancelled_conversion_that_keeps_files_writes_nothing() {
+		let scratch = Scratch::new("keep-cancel");
+		let input = scratch.join("source.png");
+		write_png(&input, 64, 64);
+		let output = scratch.join("out.webp");
+		assert!(encode_file_with_options(&EncodeJob::default(), &input, &output, false, &mut |_| false).is_err());
+		assert!(!output.exists(), "no placeholder may be left");
+		assert_eq!(fs::read_dir(&scratch.0).expect("list").count(), 1);
+	}
+
+	#[test]
+	fn finds_inputs_that_would_write_the_same_file() {
+		let plan = |pairs: &[(&str, &str)]| pairs.iter().map(|(input, output)| (PathBuf::from(input), PathBuf::from(output))).collect::<Vec<_>>();
+		let found = output_collisions(&plan(&[("/in/photo.png", "/out/photo.webp"), ("/in/other.png", "/out/other.webp"), ("/in/photo.jpg", "/out/photo.webp"), ("/in/a/photo.tif", "/out/photo.webp")]));
+		assert_eq!(found, vec![OutputCollision { output: PathBuf::from("/out/photo.webp"), inputs: vec![PathBuf::from("/in/photo.png"), PathBuf::from("/in/photo.jpg"), PathBuf::from("/in/a/photo.tif")] }]);
+		assert_eq!(output_collisions(&plan(&[("/in/a.png", "/out/a.webp"), ("/in/b.png", "/out/b.webp")])), Vec::new());
+		let case = output_collisions(&plan(&[("/in/Photo.png", "/out/Photo.webp"), ("/in/photo.jpg", "/out/photo.webp")]));
+		assert_eq!(case.len(), usize::from(cfg!(any(windows, target_os = "macos"))), "names differing only in case collide where the filesystem ignores case");
 	}
 
 	/// A failed encode must not damage a file that is already there.
