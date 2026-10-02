@@ -1353,9 +1353,17 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       conversion instead — correct colours, as with the TIFF cases, and no reference.
       **Gate:** `matches_heif_enc_across_y4m_inputs` 8 of 8 (no tag, `C420jpeg`,
       `C420mpeg2`, 61x45 `C420` x two qualities); the RGB route fails 8 of 8.
+- [x] **PGX input, held to `cjxl`** (2026-10-01): `src/pnm.rs` reads it as
+      `lib/extras/dec/pgx.cc` does, refusals included (signed, over 16 bits). `cjxl` hands
+      libjxl the samples at their container's full range, which is right only at 8 and 16
+      bits — run here, a 12-bit 4095 decodes as 256 of 4095 — so those two depths are
+      matched and every other depth is read as meant (rescaled), with no reference.
+      **Gate:** `matches_cjxl_reading_pgx` 16 of 16 (8- and 16-bit, both byte orders, CRLF,
+      the optional space; four settings), the 12-bit file checked to be read right and to
+      differ from `cjxl`, and both refusals. Mutation: the generic route fails 16 of 16.
 - [ ] More input formats the tools read: animated GIF and APNG into `cjxl` (with the
-      multi-image work below), PGX and EXR (`cjxl`), and raw pixels (`heif-enc --raw`,
-      `cwebp -s`).
+      multi-image work below), EXR (`cjxl`, needs OpenEXR), and raw pixels
+      (`heif-enc --raw`, `cwebp -s`, which need the size given in the window).
 - [x] Animated WebP's own options as controls (2026-10-01): `-mixed`, `-min_size`,
       `-kmin`/`-kmax`, `img2webp -loop` and `gif2webp -loop_compatibility`
       (`WebpAnimation`). Found on the way: under `-mixed` the encoder still reads the

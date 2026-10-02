@@ -51,6 +51,7 @@ with the exceptions listed under [What "every option" means](#what-every-option-
   floating-point images
 - **Y4M** video frames (the first frame): any chroma format, 8 to 16 bits, with or without
   alpha
+- **PGX**, the JPEG 2000 test format (gray, 1 to 16 bits)
 - Each file's format is recognised from its contents, not its extension. An AVIF's crop,
   rotation and mirror are applied, so a sideways-stored portrait converts upright, and
   tiled (grid) AVIFs, as some cameras write large captures, are decoded whole.
@@ -62,10 +63,10 @@ with the exceptions listed under [What "every option" means](#what-every-option-
 | WebP | `cwebp` 1.6.0 | libwebp 1.6.0 | 2,953 cases: every option, its no-option defaults, through PNG (every colour type, gamma), JPEG, TIFF (including premultiplied alpha, and straight alpha read as `cwebp` reads it on request), WebP and PNM files, and `-metadata` |
 | Animated WebP | `img2webp`, `gif2webp` and `webpmux` 1.6.0 | libwebp 1.6.0 | 191 cases: animated WebP and GIF input, every Skidbladnir setting those tools can express, their `-mixed`, `-min_size`, `-kmin`/`-kmax`, `-loop` and `-loop_compatibility`, and metadata (`gif2webp -metadata`, `webpmux -set`). `img2webp`'s per-frame options are not offered yet |
 | AVIF | `avifenc` 1.4.2 | libavif 1.4.2 + libaom 3.15.1 | 231 cases: every option, PNG inputs, JPEG and Y4M input |
-| JPEG XL | `cjxl` 0.12.0 | libjxl 0.12.0 | 254 cases: every option, PNG, PNM, PFM and still-GIF inputs, JPEG recompression and decoding |
+| JPEG XL | `cjxl` 0.12.0 | libjxl 0.12.0 | 270 cases: every option, PNG, PNM, PFM, PGX and still-GIF inputs, JPEG recompression and decoding |
 | HEIC | `heif-enc -e kvazaar` 1.23.5 | libheif 1.23.5 + Kvazaar 2.3.2 | 182 cases: every option, PNG, JPEG, TIFF (RGB, straight alpha, and premultiplied alpha read as `heif-enc` reads it on request), WebP, HEIC and 8-bit 4:2:0 Y4M inputs |
 
-That is 3,811 cases in all. CI runs every one of them on Linux x86-64 and on macOS with
+That is 3,827 cases in all. CI runs every one of them on Linux x86-64 and on macOS with
 Apple silicon, for every pull request and every push to `master`.
 
 The [GPL edition](#editions) writes HEIC with x265 instead, adding `heif-enc`'s `-L`
@@ -278,8 +279,10 @@ same source as the library the app links (`scripts/build-reference-tools.sh`). P
   inputs or `-T` tiled input, and `cjxl` from an animated GIF or APNG. They are queued in
   [ROADMAP.md](ROADMAP.md), Phase 8.
 - **The input formats Skidbladnir reads**: PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC,
-  GIF, PNM/PAM, PFM and Y4M. Some of the tools also read PGX, EXR or raw pixels, which
-  Skidbladnir does not yet. A Y4M is read by `avifenc`'s own reader and encoded to AVIF as
+  GIF, PNM/PAM, PFM, PGX and Y4M. Some of the tools also read EXR or raw pixels, which
+  Skidbladnir does not yet. `cjxl` reads only 8- and 16-bit PGX at the right brightness
+  (a 12-bit file comes out at a sixteenth of it), so those two depths are matched byte
+  for byte and the others are read as meant. A Y4M is read by `avifenc`'s own reader and encoded to AVIF as
   its planes are, and an 8-bit 4:2:0 one goes to HEIC as `heif-enc` reads it. `heif-enc`
   reads every other Y4M as if it were 8-bit 4:2:0 too, garbling it, so those are
   converted to RGB (BT.601) for HEIC instead, as they are for WebP and JPEG XL, which no

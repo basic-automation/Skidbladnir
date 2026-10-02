@@ -281,3 +281,78 @@ fn pfm_converts_to_every_format() {
 	}
 	let _ = fs::remove_dir_all(&dir);
 }
+
+/// A PGX: `header` then `samples` in the byte order its `ML` (big-endian) or `LM` says.
+fn pgx(header: &str, samples: &[u16], wide: bool, big_endian: bool) -> Vec<u8> {
+	let mut out = header.as_bytes().to_vec();
+	for &sample in samples {
+		match (wide, big_endian) {
+			(false, _) => out.push(u8::try_from(sample).expect("an 8-bit sample")),
+			(true, true) => out.extend_from_slice(&sample.to_be_bytes()),
+			(true, false) => out.extend_from_slice(&sample.to_le_bytes()),
+		}
+	}
+	out
+}
+
+/// A 21x13 gradient up to `max`.
+fn pgx_samples(max: u32) -> Vec<u16> {
+	(0..13_u32).flat_map(|y| (0..21_u32).map(move |x| u16::try_from((x * 11 + y * 17) * max / (20 * 11 + 12 * 17)).expect("fits"))).collect()
+}
+
+/// PGX into JPEG XL, as `cjxl` reads it (`lib/extras/dec/pgx.cc`), at the two depths it
+/// reads correctly: 8 and 16 bits, either byte order, with `\r\n` and the optional space
+/// after the sign. At any other depth `cjxl` hands libjxl the samples at the full range of
+/// their container (a 12-bit 4095 becomes 256 of 4095), so Skidbladnir reads those as
+/// meant instead, and this checks that it does and that the result then differs from
+/// `cjxl`'s. Signed and over-16-bit files are refused by both.
+#[test]
+fn matches_cjxl_reading_pgx() {
+	use skidbladnir_encode::source::load;
+
+	let Some((cjxl, dir)) = prepare("PGX cjxl", tool("SKIDBLADNIR_REFERENCE_CJXL", "cjxl", "--version", jxl::linked_version())) else { return };
+	let fixtures = [("8-bit ML", pgx("PG ML + 8 21 13\n", &pgx_samples(255), false, true)), ("8-bit LM, +8, CRLF", pgx("PG LM +8 21 13\r\n", &pgx_samples(255), false, false)), ("16-bit ML", pgx("PG ML + 16 21 13\n", &pgx_samples(65_535), true, true)), ("16-bit LM", pgx("PG LM + 16 21 13\n", &pgx_samples(65_535), true, false))];
+	let settings = [JxlSettings::default(), JxlSettings { effort: 3, ..JxlSettings::default() }, JxlSettings { effort: 7, target: JxlTarget::Distance(0.0), ..JxlSettings::default() }, JxlSettings { effort: 7, target: JxlTarget::Distance(2.0), ..JxlSettings::default() }];
+	let mut mismatches = Vec::new();
+	let mut total = 0;
+	let compare = |input: &Path, settings: &JxlSettings| -> (Vec<u8>, Vec<u8>) {
+		let job = EncodeJob { format: OutputFormat::Jxl, jxl: settings.clone(), ..EncodeJob::default() };
+		let (theirs, ours) = (dir.join("cjxl.jxl"), dir.join("ours.jxl"));
+		let run = Command::new(&cjxl).args(cjxl_args(&job, input, &theirs)).output().expect("run cjxl");
+		assert!(run.status.success(), "cjxl refused {}: {}", input.display(), String::from_utf8_lossy(&run.stderr));
+		encode_file(&job, input, &ours).unwrap_or_else(|error| panic!("ours failed on {}: {error}", input.display()));
+		(fs::read(&theirs).expect("read cjxl's"), fs::read(&ours).expect("read ours"))
+	};
+	for (fixture, bytes) in &fixtures {
+		let input = dir.join("input.pgx");
+		fs::write(&input, bytes).expect("write the fixture");
+		for settings in &settings {
+			let (expected, actual) = compare(&input, settings);
+			total += 1;
+			if expected != actual {
+				mismatches.push(format!("{fixture}, {:?} e{}: ours {} bytes, cjxl {} bytes", settings.target, settings.effort, actual.len(), expected.len()));
+			}
+		}
+	}
+
+	// 12 bits: read as meant, so not as cjxl reads it.
+	let input = dir.join("twelve.pgx");
+	fs::write(&input, pgx("PG ML + 12 21 13\n", &pgx_samples(4095), true, true)).expect("write the fixture");
+	let image = load(&input).expect("a 12-bit PGX loads");
+	let brightest = image.pixels.chunks(4).map(|p| p[0]).max().expect("pixels");
+	assert_eq!(brightest, 255, "the 12-bit maximum is white, not a sixteenth of it");
+	let (expected, actual) = compare(&input, &JxlSettings { effort: 7, target: JxlTarget::Distance(0.0), ..JxlSettings::default() });
+	assert_ne!(expected, actual, "cjxl now reads a 12-bit PGX at its depth: make 12 bits a parity case");
+
+	for (name, bytes) in [("signed", b"PG ML - 8 2 1\n\x01\x02".to_vec()), ("17 bits", b"PG ML + 17 1 1\n\x00\x00\x00\x00".to_vec())] {
+		let input = dir.join("refused.pgx");
+		fs::write(&input, bytes).expect("write the fixture");
+		let job = EncodeJob { format: OutputFormat::Jxl, ..EncodeJob::default() };
+		let run = Command::new(&cjxl).args(cjxl_args(&job, &input, &dir.join("refused.jxl"))).output().expect("run cjxl");
+		assert!(!run.status.success(), "cjxl now reads a {name} PGX");
+		assert!(encode_file(&job, &input, &dir.join("refused-ours.jxl")).is_err(), "we read a {name} PGX that cjxl refuses");
+	}
+	let _ = fs::remove_dir_all(&dir);
+	assert!(mismatches.is_empty(), "{} of {total} PGX conversions diverged from cjxl:\n  {}", mismatches.len(), mismatches.join("\n  "));
+	eprintln!("PGX PARITY OK: {total} PGX-to-JPEG XL conversions matched cjxl byte for byte.");
+}
