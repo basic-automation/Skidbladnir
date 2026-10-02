@@ -18,8 +18,14 @@ use std::{
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 
-/// The endpoint in `tauri.conf.json`.
-const MANIFEST: &str = "https://raw.githubusercontent.com/basic-automation/Skidbladnir/updater/latest.json";
+/// Each edition's own manifest, so a GPL install only ever updates to a GPL build: the
+/// endpoint in `tauri.conf.json` for the standard edition, and the one `tauri.gpl.conf.json`
+/// overrides it with for the GPL edition. `release.yml` publishes both.
+const MANIFEST: &str = if skidbladnir_encode::settings::HEIC_X265 {
+	"https://raw.githubusercontent.com/basic-automation/Skidbladnir/updater/latest-gpl.json"
+} else {
+	"https://raw.githubusercontent.com/basic-automation/Skidbladnir/updater/latest.json"
+};
 
 /// `plugins.updater.pubkey` in `tauri.conf.json`: a base64-wrapped minisign public key.
 const PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUwOThEOTc3MDc2NEQ2MjEKUldRaDFtUUhkOW1ZNEtMWHE0UFNrc1FtME5lWmlKdUN3cE5ta2dKaE8wOWo0UEozUFFvNmpXYk4K";

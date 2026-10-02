@@ -206,10 +206,6 @@ plus the AppImage runtime. The spike is one process.
 licences: Lucide, Material Symbols, MDI, Iconoir, VS Code Icons, Bootstrap Icons, Codicons,
 Elusive, Subway, IconaMoon, Google Material Icons.
 
-## Found along the way
-
-The updater manifest's Linux AppImage entry is the standard edition
-(`Skidbladnir_1.1.0_amd64.AppImage`), and there is no GPL entry. An updater running in the GPL
-AppImage, whether tauri-plugin-updater or this one, replaces it with the standard (Kvazaar)
-edition. `skid--jxl-format.svg` and the logo are the
+The updater reads its own edition's manifest: `latest.json` for the standard edition,
+`latest-gpl.json` for the GPL one, as `tauri.gpl.conf.json` points the Tauri app at it. `skid--jxl-format.svg` and the logo are the
 app's own.
