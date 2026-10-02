@@ -262,6 +262,9 @@ fn cases() -> Vec<(&'static str, WebpSettings, Vec<&'static str>)> {
 	add("-kmax 2 alone, -mixed", with(&lossy, WebpAnimation { kmax: Some(2), allow_mixed: true, ..a() }), vec!["-kmax", "2", "-mixed", "-q", "75", "-m", "4"]);
 	add("-loop 5", with(&lossless, WebpAnimation { loop_count: Some(5), ..a() }), vec!["-loop", "5", "-lossless", "-exact", "-q", "75", "-m", "4"]);
 	add("-loop 0", with(&lossless, WebpAnimation { loop_count: Some(0), ..a() }), vec!["-loop", "0", "-lossless", "-exact", "-q", "75", "-m", "4"]);
+	// -d given once, before every frame: every frame shown that long.
+	add("-d 40 for every frame", with(&lossless, WebpAnimation { frame_duration: Some(40), ..a() }), vec!["-lossless", "-exact", "-q", "75", "-m", "4", "-d", "40"]);
+	add("-d 250, lossy", with(&lossy, WebpAnimation { frame_duration: Some(250), ..a() }), vec!["-lossy", "-q", "75", "-m", "4", "-d", "250"]);
 	cases
 }
 
@@ -307,8 +310,13 @@ fn matches_reference_img2webp() {
 			}
 			// Frame options go before the frame they apply to; the encoder flags are
 			// repeated for none of them because they carry over from frame to frame.
+			// A case that sets the duration once gives the frames alone.
+			let one_duration = flags.contains(&"-d");
 			for (flag, value, path) in &frame_args {
-				command.arg(flag).arg(value).arg(path);
+				if !one_duration {
+					command.arg(flag).arg(value);
+				}
+				command.arg(path);
 			}
 			let run = command.arg("-o").arg(&output).output().expect("run the reference img2webp");
 			assert!(run.status.success(), "img2webp failed for {name}: {}", String::from_utf8_lossy(&run.stderr));

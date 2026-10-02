@@ -202,6 +202,11 @@ const alphaCompression = computed({
 					<ControlNumber v-model="s.animation.loopCount" label="Plays" :min="0" :max="65535" help="-loop · how many times it plays; 0 is forever" />
 				</ControlOptional>
 			</div>
+			<div class="grid grid-cols-3 gap-4">
+				<ControlOptional v-model="s.animation.frameDuration" label="Set every frame's duration" :fallback="100" unset="-d · not given: each frame keeps its own timing">
+					<ControlNumber v-model="s.animation.frameDuration" label="Milliseconds per frame" :min="1" :max="2147483647" unit="ms" help="-d · frame duration, given once for every frame" />
+				</ControlOptional>
+			</div>
 		</ControlDisclosure>
 
 		<ControlPanel title="Performance">

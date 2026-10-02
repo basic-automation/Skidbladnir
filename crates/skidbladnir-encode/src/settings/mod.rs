@@ -467,6 +467,11 @@ mod tests {
 		let back: EncodeJob = serde_json::from_value(serde_json::to_value(&partial).expect("serialize")).expect("deserialize");
 		assert_eq!(back, partial);
 		assert!(serde_json::from_str::<EncodeJob>(r#"{"webp":{"animation":{"loopCount":70000}}}"#).is_err(), "a loop count WebP cannot store is refused");
+		let mut zero = partial.webp.clone();
+		zero.animation.frame_duration = Some(0);
+		assert!(zero.validate().is_err(), "img2webp refuses a duration of 0");
+		zero.animation.frame_duration = Some(40);
+		assert_eq!(zero.validate(), Ok(()));
 		let mut preset = partial.webp.clone();
 		preset.apply_preset(Preset::Photo);
 		assert_eq!(preset.animation, partial.webp.animation, "a preset leaves the animation options alone");

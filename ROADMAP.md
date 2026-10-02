@@ -1374,8 +1374,11 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       **Gates:** `matches_reference_img2webp` 42 cases (was 18),
       `matches_reference_gif2webp_with_animation_options` 70 of 70; every option
       mutation-tested.
-- [ ] `img2webp`'s per-frame options (a different `-d`, `-lossy`/`-lossless`, `-q`, `-m`
-      or `-exact` for each frame): they need per-frame settings in the window, which
+- [x] `img2webp -d` given once for every frame (2026-10-01): `WebpAnimation::frame_duration`,
+      "Set every frame's duration". **Gate:** two cases in `matches_reference_img2webp`
+      (46 of 46 now); ignoring it fails 4.
+- [ ] `img2webp`'s options for each frame on its own (a different `-d`, `-lossy`/`-lossless`,
+      `-q`, `-m` or `-exact` per frame): they need per-frame settings in the window, which
       re-encoding one source does not have yet.
 - [x] GPL edition: `heif-enc`'s `-p x265:<param>` beyond the fixed set of x265 controls
       (2026-10-01): `HeicSettings::x265_parameters`, a list of `KEY=VALUE` passed after the

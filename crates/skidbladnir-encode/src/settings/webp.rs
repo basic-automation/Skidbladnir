@@ -209,6 +209,9 @@ pub struct WebpAnimation {
 	/// Read a GIF's loop count as Chrome once did — repeats as plays, and no loop extension
 	/// as forever (`gif2webp -loop_compatibility`). GIF input only.
 	pub loop_compatibility: bool,
+	/// Show every frame for this many milliseconds, at least 1 (`img2webp -d`, given once
+	/// before every frame); `None` keeps each frame's own timing.
+	pub frame_duration: Option<u32>,
 }
 
 /// Every WebP control: the `cwebp` surface less the crop and resize, which belong to the
@@ -302,7 +305,7 @@ impl WebpSettings {
 	/// what `cwebp` encodes when given nothing but `-q 75`.
 	#[must_use]
 	pub const fn libwebp_defaults() -> Self {
-		Self { lossless: false, near_lossless: 100, exact: false, quality: 75.0, alpha_quality: 100, alpha_compression: true, alpha_filtering: AlphaFiltering::Fast, method: 4, image_hint: ImageHint::Default, target: None, segments: 4, sns: 50, filter_strength: 60, filter_sharpness: 0, filter_type: FilterType::Strong, autofilter: false, passes: 1, qmin: 0, qmax: 100, preprocessing: 0, partition_limit: 0, jpeg_like: false, sharp_yuv: false, low_memory: false, multi_threading: false, keep_alpha: true, blend_alpha: None, metadata: WebpMetadata { exif: false, icc: false, xmp: false }, animation: WebpAnimation { minimize_size: false, allow_mixed: false, kmin: None, kmax: None, loop_count: None, loop_compatibility: false } }
+		Self { lossless: false, near_lossless: 100, exact: false, quality: 75.0, alpha_quality: 100, alpha_compression: true, alpha_filtering: AlphaFiltering::Fast, method: 4, image_hint: ImageHint::Default, target: None, segments: 4, sns: 50, filter_strength: 60, filter_sharpness: 0, filter_type: FilterType::Strong, autofilter: false, passes: 1, qmin: 0, qmax: 100, preprocessing: 0, partition_limit: 0, jpeg_like: false, sharp_yuv: false, low_memory: false, multi_threading: false, keep_alpha: true, blend_alpha: None, metadata: WebpMetadata { exif: false, icc: false, xmp: false }, animation: WebpAnimation { minimize_size: false, allow_mixed: false, kmin: None, kmax: None, loop_count: None, loop_compatibility: false, frame_duration: None } }
 	}
 
 	/// Start again from what `cwebp` encodes when given no options at all —
@@ -390,6 +393,12 @@ impl WebpSettings {
 				return Err(ValidationError::OutOfRangeFloat { field: "target", value: psnr, min: 0.0, max: 10_000.0 });
 			}
 			_ => {}
+		}
+		// img2webp refuses a duration of 0 or less; its timestamps are C ints.
+		if let Some(duration) = self.animation.frame_duration
+			&& !(1..=i32::MAX.unsigned_abs()).contains(&duration)
+		{
+			return Err(ValidationError::OutOfRange { field: "animation.frame_duration", value: duration, min: 1, max: i32::MAX.unsigned_abs() });
 		}
 		if let Some(colour) = self.blend_alpha
 			&& colour > 0x00ff_ffff

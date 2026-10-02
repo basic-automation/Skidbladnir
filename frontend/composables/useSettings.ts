@@ -95,6 +95,7 @@ export interface WebpAnimation {
 	kmax: number | null
 	loopCount: number | null
 	loopCompatibility: boolean
+	frameDuration: number | null
 }
 
 // ---- AVIF: avifenc ----------------------------------------------------------------------

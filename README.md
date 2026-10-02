@@ -61,12 +61,12 @@ with the exceptions listed under [What "every option" means](#what-every-option-
 | Format | Reference tool | Encoder in the app | Byte-for-byte parity, tested |
 |---|---|---|---|
 | WebP | `cwebp` 1.6.0 | libwebp 1.6.0 | 2,953 cases: every option, its no-option defaults, through PNG (every colour type, gamma), JPEG, TIFF (including premultiplied alpha, and straight alpha read as `cwebp` reads it on request), WebP and PNM files, and `-metadata` |
-| Animated WebP | `img2webp`, `gif2webp` and `webpmux` 1.6.0 | libwebp 1.6.0 | 191 cases: animated WebP and GIF input, every Skidbladnir setting those tools can express, their `-mixed`, `-min_size`, `-kmin`/`-kmax`, `-loop` and `-loop_compatibility`, and metadata (`gif2webp -metadata`, `webpmux -set`). `img2webp`'s per-frame options are not offered yet |
+| Animated WebP | `img2webp`, `gif2webp` and `webpmux` 1.6.0 | libwebp 1.6.0 | 195 cases: animated WebP and GIF input, every Skidbladnir setting those tools can express, their `-mixed`, `-min_size`, `-kmin`/`-kmax`, `-loop`, `-loop_compatibility` and `-d` for every frame, and metadata (`gif2webp -metadata`, `webpmux -set`). A different option for each frame is not offered yet |
 | AVIF | `avifenc` 1.4.2 | libavif 1.4.2 + libaom 3.15.1 | 231 cases: every option, PNG inputs, JPEG and Y4M input |
 | JPEG XL | `cjxl` 0.12.0 | libjxl 0.12.0 | 270 cases: every option, PNG, PNM, PFM, PGX and still-GIF inputs, JPEG recompression and decoding |
 | HEIC | `heif-enc -e kvazaar` 1.23.5 | libheif 1.23.5 + Kvazaar 2.3.2 | 182 cases: every option, PNG, JPEG, TIFF (RGB, straight alpha, and premultiplied alpha read as `heif-enc` reads it on request), WebP, HEIC and 8-bit 4:2:0 Y4M inputs |
 
-That is 3,827 cases in all. CI runs every one of them on Linux x86-64 and on macOS with
+That is 3,831 cases in all. CI runs every one of them on Linux x86-64 and on macOS with
 Apple silicon, for every pull request and every push to `master`.
 
 The [GPL edition](#editions) writes HEIC with x265 instead, adding `heif-enc`'s `-L`
@@ -273,8 +273,8 @@ same source as the library the app links (`scripts/build-reference-tools.sh`). P
 
 - **Still images**, and animated WebP out of an animated WebP or a GIF, as `img2webp` and
   `gif2webp` write it, including their keyframe (`-kmin`/`-kmax`), `-mixed`, `-min_size`,
-  `-loop` and `-loop_compatibility` options. `img2webp`'s per-frame options (a different
-  quality or duration for each frame) are not offered yet. Neither are other options
+  `-loop` and `-loop_compatibility` options and `img2webp -d` for every frame. A different
+  quality or duration for each frame is not offered yet. Neither are other options
   about more than one image: animated AVIF, HEIC or JPEG XL, image sequences,
   `avifenc --layered` and grids assembled from several files, `heif-enc` with several
   inputs or `-T` tiled input, and `cjxl` from an animated GIF or APNG. They are queued in
@@ -355,7 +355,7 @@ stated" means its page does not say, not that it cannot.
 
 | | Runs as | Batch | Writes | Encoder options | Byte parity with the reference tools |
 |---|---|---|---|---|---|
-| **Skidbladnir** | desktop app: Windows, macOS, Linux (x86-64 and ARM64) | yes, files or whole folders | WebP, AVIF, JPEG XL, HEIC | every option of `cwebp`, `avifenc`, `cjxl` and `heif-enc` for a still image | yes, tested: 3,827 cases ([above](#what-every-option-means)) |
+| **Skidbladnir** | desktop app: Windows, macOS, Linux (x86-64 and ARM64) | yes, files or whole folders | WebP, AVIF, JPEG XL, HEIC | every option of `cwebp`, `avifenc`, `cjxl` and `heif-enc` for a still image | yes, tested: 3,831 cases ([above](#what-every-option-means)) |
 | [Squoosh](https://github.com/GoogleChromeLabs/squoosh) | web app in the browser (installable), nothing uploaded | not stated | MozJPEG, WebP, AVIF, JPEG XL, OxiPNG, QOI, WebP 2 (its codec list); no HEIC | not stated | not stated |
 | [XnConvert](https://www.xnview.com/en/xnconvert/) | desktop app: Windows, macOS, Linux; free for private or educational use, paid in a company | yes | about 70 formats, including WebP, AVIF, JPEG XL and HEIC | not stated | not stated |
 | [Converseen](https://converseen.fasterland.net/) | desktop app on ImageMagick: Windows, Linux, macOS, FreeBSD; GPL-3.0 | yes | over 100 formats, including WebP, AVIF and HEIC; JPEG XL not mentioned | not stated | not stated |

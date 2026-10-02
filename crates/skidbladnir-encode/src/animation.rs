@@ -273,7 +273,7 @@ pub fn encode_with(settings: &WebpSettings, resize: Resize, animation: &Animatio
 		if unsafe { WebPAnimEncoderAdd(encoder.0, &raw mut picture.0, timestamp, &raw const config) } == 0 {
 			return Err(EncodeError::Libwebp("WebPAnimEncoderAdd"));
 		}
-		timestamp = timestamp.saturating_add(c_int::try_from(frame.duration_ms).unwrap_or(c_int::MAX));
+		timestamp = timestamp.saturating_add(c_int::try_from(options.frame_duration.unwrap_or(frame.duration_ms)).unwrap_or(c_int::MAX));
 
 		let done = u32::try_from((index + 1) * 100 / frame_count).unwrap_or(100);
 		if !on_progress(done) {
