@@ -69,6 +69,28 @@ void avifImageFixXMP(avifImage * image)
 #undef jpeg_stdio_src
 #undef fprintf
 #undef printf
+// avifenc's Y4M reader, apps/shared/y4m.c, compiled in as it is and reading from memory
+// too: the file it opens is a temporary file holding the bytes (tmpfile, since fmemopen
+// does not exist on Windows). Its messages are kept like the JPEG reader's.
+static SKID_THREAD_LOCAL const Memory * y4mSource;
+static FILE * y4mOpen(void)
+{
+	if (!y4mSource) return NULL;
+	FILE * file = tmpfile();
+	if (!file) return NULL;
+	if (fwrite(y4mSource->data, 1, y4mSource->size, file) != y4mSource->size || fseek(file, 0, SEEK_SET) != 0) {
+		fclose(file);
+		return NULL;
+	}
+	return file;
+}
+#define fopen(name, mode) y4mOpen()
+#define fprintf(stream, ...) jpegReport(__VA_ARGS__)
+#define printf(...) jpegSilent(__VA_ARGS__)
+#include "y4m.c"
+#undef fopen
+#undef fprintf
+#undef printf
 // avifutil.c's too, referenced only by avifJPEGWrite, which comes along with the reader
 // and is never called: the app writes no JPEG. MSVC's linker wants it defined anyway.
 avifResult avifApplyTransforms(avifRGBImage * dstView, avifRGBImage * srcImage, const avifImage * avif)
@@ -120,6 +142,9 @@ typedef struct SkidAvifInput {
 	int ignore_icc;
 	int ignore_exif;
 	int ignore_xmp;
+	// A Y4M file to read with avifenc's reader instead, its planes kept as they are.
+	const uint8_t * y4m;
+	size_t y4m_size;
 } SkidAvifInput;
 
 // avifenc's options. -1 (or 0 for the flags) means "not given on the command line".
@@ -366,6 +391,69 @@ cleanup:
 	return success;
 }
 
+// A Y4M as RGB, for everything but AVIF output: y4m.c's reading, converted with libavif's
+// defaults for an image with no colour signalling (BT.601, the file's range). 8-bit RGBA, or
+// 16-bit (native byte order) when the file has more than 8 bits. No reference tool makes
+// this conversion for WebP, JPEG XL or HEIC, so it has no parity to keep.
+int skid_y4m_decode(const uint8_t * data, size_t size, uint8_t ** out, uint32_t * width, uint32_t * height, uint32_t * depth, int * has_alpha, char * error, size_t error_size)
+{
+	int ok = 0;
+	*out = NULL;
+	avifRGBImage rgb;
+	memset(&rgb, 0, sizeof(rgb));
+	avifImage * image = avifImageCreateEmpty();
+	if (!image) {
+		fail(error, error_size, "out of memory");
+		return 0;
+	}
+	const Memory memory = { data, size };
+	y4mSource = &memory;
+	jpegMessage[0] = '\0';
+	const avifBool read = y4mRead("input", UINT32_MAX, image, NULL, NULL);
+	y4mSource = NULL;
+	if (!read) {
+		snprintf(error, error_size, "not a Y4M avifenc can read: %s", jpegMessage[0] ? jpegMessage : "unknown error");
+		const size_t length = strlen(error);
+		if (length && error[length - 1] == '\n') error[length - 1] = '\0';
+		goto cleanup;
+	}
+	avifRGBImageSetDefaults(&rgb, image);
+	rgb.format = AVIF_RGB_FORMAT_RGBA;
+	rgb.depth = image->depth > 8 ? 16 : 8;
+	if (avifRGBImageAllocatePixels(&rgb) != AVIF_RESULT_OK) {
+		fail(error, error_size, "out of memory");
+		goto cleanup;
+	}
+	{
+		const avifResult converted = avifImageYUVToRGB(image, &rgb);
+		if (converted != AVIF_RESULT_OK) {
+			snprintf(error, error_size, "conversion to RGB failed: %s", avifResultToString(converted));
+			goto cleanup;
+		}
+	}
+	{
+		const size_t row = (size_t)rgb.width * 4 * (rgb.depth > 8 ? 2 : 1);
+		uint8_t * pixels = avifAlloc(row * rgb.height); // Freed with skid_avif_free.
+		if (!pixels) {
+			fail(error, error_size, "out of memory");
+			goto cleanup;
+		}
+		for (uint32_t y = 0; y < rgb.height; ++y) {
+			memcpy(pixels + (size_t)y * row, rgb.pixels + (size_t)y * rgb.rowBytes, row);
+		}
+		*out = pixels;
+	}
+	*width = image->width;
+	*height = image->height;
+	*depth = rgb.depth;
+	*has_alpha = image->alphaPlane != NULL;
+	ok = 1;
+cleanup:
+	avifRGBImageFreePixels(&rgb);
+	avifImageDestroy(image);
+	return ok;
+}
+
 const char * skid_avif_versions(void)
 {
 	static char versions[256];
@@ -541,6 +629,28 @@ int skid_avif_encode(const SkidAvifInput * in, const SkidAvifSettings * s, uint8
 			// Trim the newline avifenc's messages end with.
 			const size_t length = strlen(error);
 			if (length && error[length - 1] == '\n') error[length - 1] = '\0';
+			goto cleanup;
+		}
+	} else if (in->y4m) {
+		// avifInputReadImage for a Y4M: y4m.c keeps the file's own format, depth and range,
+		// and avifenc refuses a depth it would have to convert.
+		if (s->depth_extension != 0) {
+			fail(error, error_size, "--depth D,Dextension is not supported for Y4M input");
+			goto cleanup;
+		}
+		const Memory memory = { in->y4m, in->y4m_size };
+		y4mSource = &memory;
+		jpegMessage[0] = '\0';
+		const avifBool read = y4mRead("input", UINT32_MAX, image, NULL, NULL);
+		y4mSource = NULL;
+		if (!read) {
+			snprintf(error, error_size, "avifenc cannot read this Y4M: %s", jpegMessage[0] ? jpegMessage : "unknown error");
+			const size_t length = strlen(error);
+			if (length && error[length - 1] == '\n') error[length - 1] = '\0';
+			goto cleanup;
+		}
+		if (s->depth != 0 && s->depth != (int)image->depth) {
+			snprintf(error, error_size, "--depth %d does not match the Y4M's bit depth, %u; avifenc does not convert a Y4M's depth", s->depth, image->depth);
 			goto cleanup;
 		}
 	} else {

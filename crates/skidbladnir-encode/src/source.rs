@@ -54,6 +54,9 @@ pub enum SourceFormat {
 	/// PFM, the floating-point PNM (`PF`, `Pf`), read the way `cjxl` reads it
 	/// ([`crate::pnm::pfm`]).
 	Pfm,
+	/// Y4M (`YUV4MPEG2`), its first frame, read by `avifenc`'s own reader
+	/// ([`crate::avif::decode_y4m`]).
+	Y4m,
 }
 
 impl SourceFormat {
@@ -74,6 +77,7 @@ impl SourceFormat {
 			[b'G', b'I', b'F', b'8', b'7' | b'9', b'a', ..] => Some(Self::Gif),
 			[b'P', b'5'..=b'7', b' ' | b'\t' | b'\r' | b'\n', ..] => Some(Self::Pnm),
 			[b'P', b'F' | b'f', b' ' | b'\t' | b'\r' | b'\n', ..] => Some(Self::Pfm),
+			[b'Y', b'U', b'V', b'4', b'M', b'P', b'E', b'G', b'2', b' ', ..] => Some(Self::Y4m),
 			_ => None,
 		}
 	}
@@ -92,6 +96,7 @@ impl SourceFormat {
 			Self::Gif => "GIF",
 			Self::Pnm => "PNM",
 			Self::Pfm => "PFM",
+			Self::Y4m => "Y4M",
 		}
 	}
 }
@@ -325,6 +330,10 @@ pub fn decode(path: &Path, bytes: Vec<u8>) -> Result<SourceImage, SourceError> {
 		SourceFormat::Pnm => {
 			let pnm = crate::pnm::decode(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?;
 			Decoded { width: pnm.header.width, height: pnm.header.height, pixels: pnm.pixels, deep: pnm.deep, gray: pnm.header.gray(), has_alpha: pnm.header.alpha() }
+		}
+		SourceFormat::Y4m => {
+			let (width, height, pixels, deep, has_alpha) = crate::avif::decode_y4m(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?;
+			Decoded { width, height, pixels, deep, gray: false, has_alpha }
 		}
 		SourceFormat::Pfm => {
 			let image = crate::pnm::pfm(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?;

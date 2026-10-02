@@ -375,6 +375,23 @@ for kind in p6:ppm:PNM pam:pam:PNM pfm:pfm:PFM; do
 		 return found[0].format + ' ' + [w, j].map(r => r.outputPath.split(/[\\\\/]/).pop() + ' ' + r.width + 'x' + r.height).join(' ')" "$format netpbm-$name.webp 20x12 netpbm-$name.jxl 20x12"
 done
 
+# Y4M: AVIF through avifenc's own reader, WebP through the conversion to RGB.
+"$PY" - "$scratch/smoke.y4m" <<'Y4M'
+import sys
+w, h = 20, 12
+planes = bytes((x * 9 + y * 5) % 256 for y in range(h) for x in range(w)) + bytes(128 for _ in range(2 * (w // 2) * (h // 2)))
+open(sys.argv[1], 'wb').write(b'YUV4MPEG2 W20 H12 F30:1 Ip A1:1 C420jpeg\nFRAME\n' + planes)
+Y4M
+check "reads Y4M input" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const input='$(app_path "$scratch/smoke.y4m")', out='$(app_path "$scratch/from-netpbm")';
+	 const found=await I.invoke('inspect_dropped_paths', { paths: [input] });
+	 const s=await I.invoke('default_settings');
+	 const w=await I.invoke('convert_image', { settings: s, input, outputDirectory: out });
+	 s.format='avif';
+	 const a=await I.invoke('convert_image', { settings: s, input, outputDirectory: out });
+	 return found[0].format + ' ' + [w, a].map(r => r.outputPath.split(/[\\\\/]/).pop() + ' ' + r.width + 'x' + r.height).join(' ')" "Y4M smoke.webp 20x12 smoke.avif 20x12"
+
 echo
 if [ "$failures" -gt 0 ]; then
 	echo "$failures check(s) failed."
