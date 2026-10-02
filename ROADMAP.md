@@ -1420,8 +1420,10 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       (`encoder::svg_at_resize`), the missing dimension derived as libwebp's rescaler
       derives it, so sizes match every other source's. Tested: a hard edge survives a 2x
       enlargement to lossless WebP (fails without it).
-- [ ] SVG input: `.svgz`, and drawing at the crop's size when a crop and a resize are both
-      set (a crop today keeps the raster route).
+- [x] `.svgz` input (2026-10-01): `resvg`'s `svgz` feature, and the sniff looks inside the
+      gzip stream, from the start of the file alone.
+- [ ] SVG input: drawing at the crop's size when a crop and a resize are both set (a crop
+      today keeps the raster route).
 - [ ] **SVG output** (owner request, 2026-09-28) — needs the owner's answer to the question
       below first. The original notes, input included: *Input* means rasterising:
       `resvg` is the obvious renderer (pure Rust, no C toolchain); it needs a size — the

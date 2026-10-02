@@ -25,9 +25,16 @@ pub struct Raster {
 
 /// Whether `bytes` (the start of a file is enough) is an SVG document: XML whose first
 /// element is `svg`, after any BOM, whitespace, XML declaration, comments or doctype. An
-/// HTML page with an inline `<svg>` is not one.
+/// HTML page with an inline `<svg>` is not one. A gzip stream (`.svgz`) is looked into.
 #[must_use]
 pub fn sniff(bytes: &[u8]) -> bool {
+	if bytes.starts_with(&[0x1f, 0x8b]) {
+		use std::io::Read as _;
+		// A truncated stream (only the start of the file) still yields what it holds.
+		let mut head = Vec::new();
+		let _ = flate2::read::GzDecoder::new(bytes).take(1024).read_to_end(&mut head);
+		return !head.starts_with(&[0x1f, 0x8b]) && sniff(&head);
+	}
 	let text = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes);
 	let start = text.iter().position(|b| !b.is_ascii_whitespace()).unwrap_or(text.len());
 	let text = &text[start..];
@@ -106,6 +113,18 @@ mod tests {
 		assert!(!sniff(b"<svgfoo/>"));
 		assert!(!sniff(b"not xml <svg>"));
 		assert!(!sniff(b"\x89PNG\r\n\x1a\n"));
+		let svgz = gzip(b"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"3\" height=\"2\"/>");
+		assert!(sniff(&svgz), "an svgz");
+		assert!(sniff(&svgz[..svgz.len() / 2]), "from the start of the file alone");
+		assert!(!sniff(&gzip(b"just some text")), "a gzip of something else");
+		assert_eq!(rasterise(&svgz).map(|r| (r.width, r.height)), Ok((3, 2)), "and it draws");
+	}
+
+	fn gzip(data: &[u8]) -> Vec<u8> {
+		use std::io::Write as _;
+		let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+		encoder.write_all(data).expect("compress");
+		encoder.finish().expect("finish")
 	}
 
 	/// The picture the file describes, at its size, transparency kept and colours
