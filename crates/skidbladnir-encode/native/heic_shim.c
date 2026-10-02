@@ -58,9 +58,14 @@ int skid_heic_load_jpeg(const unsigned char* data, size_t size, void** holder, s
 void skid_heic_jpeg_release(void* holder);
 void skid_heic_jpeg_free(unsigned char* data);
 
-/* An input image and what keeps it alive. */
+/* An input image and what keeps it alive. A decoded HEIC's image keeps its context too:
+ * libheif 1.23 counts an image's memory against its context's limits, keyed by their
+ * address, and a context freed first can have its address reused by a new one, whose count
+ * the image's eventual release would then take below zero (seen as "Memory usage of
+ * 18446744073709539283 bytes ... exceeds the security limit" in another encode). */
 typedef struct {
 	struct heif_image* image;
+	struct heif_context* context;
 	void* holder;
 	unsigned char* exif;
 	size_t exif_size;
@@ -76,6 +81,9 @@ static void release(Loaded* loaded)
 	}
 	else if (loaded->image) {
 		heif_image_release(loaded->image);
+	}
+	if (loaded->context) {
+		heif_context_free(loaded->context);
 	}
 	skid_heic_jpeg_free(loaded->exif);
 	skid_heic_jpeg_free(loaded->xmp);
@@ -346,7 +354,16 @@ static struct heif_error load_heif(const SkidHeicInput* in, Loaded* loaded)
 	loaded->orientation = 1;
 done:
 	if (handle) heif_image_handle_release(handle);
-	heif_context_free(ctx);
+	if (err.code == heif_error_Ok && loaded->image) {
+		loaded->context = ctx; /* freed by release(), after the image */
+	}
+	else {
+		if (loaded->image) {
+			heif_image_release(loaded->image);
+			loaded->image = NULL;
+		}
+		heif_context_free(ctx);
+	}
 	return err;
 }
 
@@ -501,7 +518,7 @@ int skid_heic_encode(const SkidHeicInput* in, const SkidHeicSettings* s, uint8_t
 	struct heif_context* ctx = NULL;
 	struct heif_encoder* encoder = NULL;
 	struct heif_encoding_options* options = NULL;
-	Loaded loaded = {NULL, NULL, NULL, 0, NULL, 0, 1};
+	Loaded loaded = {NULL, NULL, NULL, NULL, 0, NULL, 0, 1};
 	struct heif_image* image = NULL;
 	const uint8_t* exif;
 	const uint8_t* xmp;

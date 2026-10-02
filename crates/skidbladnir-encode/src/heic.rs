@@ -1012,6 +1012,46 @@ mod tests {
 		}
 	}
 
+	/// HEIC encodes running at once never trip libheif's memory limit. libheif 1.23 counts
+	/// an image's memory against its context's limits by their address; a HEIC source's
+	/// image that outlived its context could later take another context's count below zero,
+	/// and that encode then failed with "Memory usage of 18446744073709539283 bytes ...
+	/// exceeds the security limit" (seen on macOS CI, where addresses are reused readily).
+	#[test]
+	fn concurrent_encodes_keep_libheif_memory_accounting_sound() {
+		let dir = std::env::temp_dir().join(format!("skidbladnir-heic-threads-{}", std::process::id()));
+		let _ = std::fs::remove_dir_all(&dir);
+		std::fs::create_dir_all(&dir).expect("create");
+		let pixels = fixture(64, 48, false);
+		let job = EncodeJob { format: OutputFormat::Heic, ..EncodeJob::default() };
+		let source = SourceImage::from_rgba(&RgbaImage { width: 64, height: 48, pixels: &pixels });
+		let heic = dir.join("source.heic");
+		std::fs::write(&heic, encode(&job, &source, &mut |_| true).expect("make a HEIC source")).expect("write");
+		let png = dir.join("source.png");
+		image::RgbaImage::from_raw(64, 48, pixels).expect("buffer").save(&png).expect("write");
+		let failures: Vec<String> = std::thread::scope(|scope| {
+			let workers: Vec<_> = (0..8)
+				.map(|worker| {
+					let (dir, heic, png, job) = (&dir, &heic, &png, &job);
+					scope.spawn(move || {
+						let mut failed = Vec::new();
+						for round in 0..25 {
+							let input = if (worker + round) % 2 == 0 { heic } else { png };
+							let output = dir.join(format!("out-{worker}-{round}.heic"));
+							if let Err(error) = crate::source::encode_file(job, input, &output) {
+								failed.push(format!("worker {worker} round {round}: {error}"));
+							}
+						}
+						failed
+					})
+				})
+				.collect();
+			workers.into_iter().flat_map(|worker| worker.join().expect("a worker panicked")).collect()
+		});
+		let _ = std::fs::remove_dir_all(&dir);
+		assert!(failures.is_empty(), "{} of 200 concurrent encodes failed:\n{}", failures.len(), failures.join("\n"));
+	}
+
 	/// `heif-enc`'s Y4M reading is taken only where it is the file's own: 8-bit 4:2:0 with a
 	/// bare `FRAME` line. Everything else goes through RGB.
 	#[test]
