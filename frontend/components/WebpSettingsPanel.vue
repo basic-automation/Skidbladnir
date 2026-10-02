@@ -193,10 +193,10 @@ const alphaCompression = computed({
 			</div>
 			<div class="grid grid-cols-3 gap-4">
 				<ControlOptional v-model="s.animation.kmin" label="Minimum keyframe distance" :fallback="3" unset="-kmin · not given: the tool's default (gif2webp 9 lossless, 3 lossy)">
-					<ControlNumber v-model="s.animation.kmin" label="Frames" :min="-2147483648" :max="2147483647" help="-kmin · min distance between key frames" />
+					<ControlNumber v-model="s.animation.kmin" label="At least, in frames" :min="-2147483648" :max="2147483647" help="-kmin · min distance between key frames" />
 				</ControlOptional>
 				<ControlOptional v-model="s.animation.kmax" label="Maximum keyframe distance" :fallback="5" unset="-kmax · not given: the tool's default (gif2webp 17 lossless, 5 lossy)">
-					<ControlNumber v-model="s.animation.kmax" label="Frames" :min="-2147483648" :max="2147483647" help="-kmax · max distance between key frames; 1 makes every frame a keyframe, 0 none" />
+					<ControlNumber v-model="s.animation.kmax" label="At most, in frames" :min="-2147483648" :max="2147483647" help="-kmax · max distance between key frames; 1 makes every frame a keyframe, 0 none" />
 				</ControlOptional>
 				<ControlOptional v-model="s.animation.loopCount" label="Set the loop count" :fallback="0" unset="-loop · not given: the source's own loop count is kept">
 					<ControlNumber v-model="s.animation.loopCount" label="Plays" :min="0" :max="65535" help="-loop · how many times it plays; 0 is forever" />
