@@ -142,17 +142,19 @@ for format in 0:WebP 1:AVIF 2:"JPEG XL" 3:HEIC; do
 		"[...document.querySelectorAll('[aria-label=\"Output format\"] [role=radio]')][${format%%:*}].click(); await sleep(300); $everything"
 done
 # The app settings popover, open, with its disabled "Recreate folder structure" switch.
+# Audited once its fade-in has finished: mid-animation its text is nearly transparent.
+settle='await sleep(100); await Promise.all(document.getAnimations().map(a => a.finished.catch(() => {}))); await sleep(100);'
 audit "with the app settings open" \
-	"document.querySelector('[aria-label=\"App settings\"]').click(); await sleep(600); return 'ok'"
+	"document.querySelector('[aria-label=\"App settings\"]').click(); $settle return 'ok'"
 # The About view, opened from the app settings, with the longest licence text showing.
 audit "with the About view open" \
 	"const about = () => [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'About and licences');
-	 if (!about()) { document.querySelector('[aria-label=\"App settings\"]').click(); await sleep(300); }
-	 about().click(); await sleep(300);
-	 document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await sleep(300);
+	 if (!about()) { document.querySelector('[aria-label=\"App settings\"]').click(); $settle }
+	 about().click(); $settle
+	 document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); $settle
 	 [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Third-party notices').click();
 	 for (let i = 0; i < 50 && !document.querySelector('pre'); i++) await sleep(100);
-	 await sleep(500);
+	 $settle
 	 return document.querySelector('pre') ? 'ok' : 'no licence text'"
 # Tauri's own drop event is the one way to hand the window a file without a native
 # dialog, and a preview needs a file.
