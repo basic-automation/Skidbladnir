@@ -3,12 +3,11 @@
 
 use std::path::PathBuf;
 
-use gpui::{AnyElement, ClickEvent, Context, ElementId, InteractiveElement, IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, Window, div, px};
+use gpui::{AnyElement, Context, IntoElement, ParentElement, Styled, Window, div, px};
 use skidbladnir_encode::settings::{Cicp, CleanAperture, CodecOption, Fraction, Grid, MetadataSource, QuantizerRange, Tiling, YuvFormat};
 
-use crate::fade::FadeBg;
 use crate::{
-	app::Skid, controls::{help, icon}, panels::webp::{to_u8, to_u32}, theme::{FG, FIELD, RULE, Type, c, ca}
+	app::Skid, controls::help, panels::webp::{to_u8, to_u32}
 };
 
 const DEPTHS: [(Option<u8>, &str, Option<&str>); 4] = [(None, "Auto", None), (Some(8), "8", None), (Some(10), "10", None), (Some(12), "12", None)];
@@ -267,52 +266,24 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 		"avif-libaom",
 		"libaom options",
 		false,
-		move |this, _, cx| {
+		move |this, window, cx| {
 			let mut children = vec![help("-a KEY[=VALUE] · passed straight to libaom, in order. Prefix a key with color: or alpha: to apply it to one plane only, for example tune=ssim, color:aq-mode=1, alpha:end-usage=q.").px(px(10.)).into_any_element()];
 			for (index, option) in options.iter().enumerate() {
 				let key = this.text_field(&format!("avif-option-{index}-key"), &format!("Option {} key", index + 1), None, "tune", &option.key, move |t, v| set_option(t, index, |option| option.key = v), cx);
 				let value = this.text_field(&format!("avif-option-{index}-value"), &format!("Option {} value", index + 1), None, "ssim", &option.value, move |t, v| set_option(t, index, |option| option.value = v), cx);
-				// UButton color="neutral" variant="ghost" icon="i-lucide-x", size md.
-				let remove = div()
-					.id(ElementId::Name(SharedString::from(format!("avif-option-{index}-remove"))))
-					.flex_none()
-					.mb(px(8.))
-					.p(px(6.))
-					.rounded(px(6.))
-					.fade_bg_clear(format!("avif-option-{index}-remove"), c(FIELD))
-					.cursor_pointer()
-					.on_click(cx.listener(move |t, _: &ClickEvent, _, cx| {
-						let options = &mut t.job().avif.codec_options;
-						if index < options.len() {
-							options.remove(index);
-						}
-						t.changed(cx);
-					}))
-					.child(icon("lucide--x", 20., c(FG)));
+				let remove = crate::controls::icon_button(this, &format!("avif-option-{index}-remove"), "lucide--x", &format!("Remove option {}", index + 1), move |t, _, cx| {
+					let options = &mut t.job().avif.codec_options;
+					if index < options.len() {
+						options.remove(index);
+					}
+					t.changed(cx);
+				}, window, cx);
 				children.push(div().flex().items_end().gap(px(8.)).child(div().flex_1().min_w_0().flex().flex_col().child(key)).child(div().flex_1().min_w_0().flex().flex_col().child(value)).child(remove).into_any_element());
 			}
-			// UButton size="sm" color="neutral" variant="soft" icon="i-material-symbols-add".
-			let add = div()
-				.id("avif-option-add")
-				.flex()
-				.flex_none()
-				.items_center()
-				.gap(px(6.))
-				.px(px(10.))
-				.py(px(6.))
-				.rounded(px(9.))
-				.bg(c(FIELD))
-				.fade_bg("avif-option-add", c(FIELD), ca(RULE, 0.75))
-				.xs()
-				.medium()
-				.text_color(c(FG))
-				.cursor_pointer()
-				.on_click(cx.listener(|t, _: &ClickEvent, _, cx| {
-					t.job().avif.codec_options.push(CodecOption { key: String::new(), value: String::new() });
-					t.changed(cx);
-				}))
-				.child(icon("material-symbols--add", 16., c(FG)))
-				.child("Add an option");
+			let add = crate::controls::add_button(this, "avif-option-add", "Add an option", |t, _, cx| {
+				t.job().avif.codec_options.push(CodecOption { key: String::new(), value: String::new() });
+				t.changed(cx);
+			}, window, cx);
 			children.push(div().flex().px(px(10.)).child(add).into_any_element());
 			children
 		},
@@ -361,7 +332,7 @@ fn metadata(this: &mut Skid, id: &str, label: &str, help_text: &str, value: &Met
 	);
 	let file = if let MetadataSource::File(path) = value {
 		// `class="pl-5"` on ControlFile overrides its own `px-2.5` on the left: 20px in all.
-		let file = this.file(&format!("{id}-file"), &format!("{label} file"), None, &path.display().to_string(), move |t, v| *field(t) = MetadataSource::File(PathBuf::from(v)), cx);
+		let file = this.file(&format!("{id}-file"), &format!("{label} file"), None, &path.display().to_string(), move |t, v| *field(t) = MetadataSource::File(PathBuf::from(v)), window, cx);
 		Some(div().flex().flex_col().pl(px(10.)).child(file))
 	} else {
 		None

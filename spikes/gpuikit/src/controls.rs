@@ -9,6 +9,7 @@ use gpui::{
 	AnyElement, AppContext, Bounds, ClickEvent, Context, ElementId, FocusHandle, Hsla, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, ParentElement, Pixels, SharedString, StatefulInteractiveElement, Styled, Window, canvas, div, prelude::FluentBuilder, px, relative, svg
 };
 use gpuikit::{elements::input::input, input::InputState};
+use gpui::Focusable as _;
 
 use crate::{css_text::css_text, fade::FadeBg};
 
@@ -64,7 +65,15 @@ impl Skid {
 			.flex_col()
 			.w_full()
 			.gap(px(16.))
-			.child(div().flex().items_center().gap(px(12.)).child(div().relative().child(probe(&format!("h2 {title}"))).min_w_0().flex_1().sm().semibold().text_color(c(BRIGHT)).child(SharedString::from(title.to_owned()))).children(actions))
+			.child(
+				div()
+					.flex()
+					.items_center()
+					.gap(px(12.))
+					// `<h2>`: a level-2 heading, for a screen reader's heading navigation.
+					.child(div().id(ElementId::Name(format!("heading-{title}").into())).role(gpui::Role::Heading).aria_level(2).aria_label(title.to_owned()).relative().child(probe(&format!("h2 {title}"))).min_w_0().flex_1().sm().semibold().text_color(c(BRIGHT)).child(SharedString::from(title.to_owned())))
+					.children(actions),
+			)
 			.children(children)
 	}
 
@@ -111,11 +120,18 @@ impl Skid {
 			.child(
 				div().h(px(20.)).flex().items_center().mt(px(-2.)).child(
 					div()
+						.id(ElementId::Name(SharedString::from(format!("toggle-box-{id}"))))
+						.role(gpui::Role::CheckBox)
+						.aria_label(label.to_owned())
+						.aria_toggled(if checked { gpui::Toggled::True } else { gpui::Toggled::False })
+						.when_some(help_text, |box_, text| box_.aria_description(text.to_owned()))
 						.relative()
 						.size(px(16.))
 						.rounded(px(4.))
 						.bg(c(if checked { ACCENT } else { MUTED }))
-						.when(disabled, |box_| box_.opacity(0.75))
+						// Disabled, only the square dims (1.2.0): fading the label and help too
+						// took the help under WCAG AA's 4.5:1.
+						.when(disabled, |box_| box_.opacity(0.5))
 						.flex()
 						.items_center()
 						.justify_center()
@@ -138,7 +154,7 @@ impl Skid {
 					.flex_col()
 					.gap(px(4.))
 					.min_w_0()
-					.child(div().relative().child(probe(&format!("label {label}"))).xs().semibold().text_color(c(FG)).when(disabled, |label| label.opacity(0.75)).child(css_text(label.to_owned())))
+					.child(div().relative().child(probe(&format!("label {label}"))).xs().semibold().text_color(c(FG)).child(css_text(label.to_owned())))
 					.when_some(help_text, |wrapper, text| wrapper.child(help(text.to_owned()).relative().child(probe(&format!("p {}", &text.chars().take(24).collect::<String>()))))),
 			)
 			.into_any_element()
@@ -161,7 +177,8 @@ impl Skid {
 				// from the left, so the field is sized to its own text inside a right-aligned
 				// 64px slot, which puts the digits where the old window puts them.
 				let width = text_width(state.read(cx).content(), crate::theme::SEMIBOLD, window);
-				div().w(px(64.)).flex().justify_end().child(input(&state, cx).w(width).h(px(16.)).xs().semibold().text_color(c(ACCENT_TEXT)).bg(gpui::transparent_black())).into_any_element()
+				let field = named_input(&state, &format!("{id}-exact"), &format!("{label}, exact value"), None, cx).w(width).h(px(16.)).xs().semibold().text_color(c(ACCENT_TEXT)).bg(gpui::transparent_black());
+				self.stepping(div().w(px(64.)).flex().justify_end().child(field), &state, value, min, max, step, places, Rc::clone(&set), cx).into_any_element()
 			}
 			None => {
 				let text = divisor.map_or_else(|| format_number(value, 0), |divisor| format!("{:.1}", value / divisor));
@@ -212,6 +229,15 @@ impl Skid {
 							.border_2()
 							.border_color(c(ACCENT))
 							.bg(c(BG))
+							.id(ElementId::Name(format!("slider-thumb-{id}").into()))
+							.role(gpui::Role::Slider)
+							.aria_label(label.to_owned())
+							.aria_numeric_value(value)
+							.aria_min_numeric_value(min)
+							.aria_max_numeric_value(max)
+							.aria_numeric_value_step(step)
+							.aria_orientation(gpui::Orientation::Horizontal)
+							.when_some(help_text, |thumb_, text| thumb_.aria_description(text.to_owned()))
 							.track_focus(&focus)
 							.when(ring, |thumb_| thumb_.child(crate::controls::ring(3., ca(ACCENT, 0.25), 0., 9.)))
 							.on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
@@ -311,7 +337,8 @@ impl Skid {
 		for (index, handle) in handles.iter().enumerate() {
 			let _ = handle.clone().tab_stop(current.map_or(index == 0, |current| current == index));
 		}
-		let mut group = div().flex().when(vertical, |group| group.flex_col().gap(px(2.))).when(!vertical && !cards, |group| group.flex_wrap().gap(px(4.))).when(cards, |group| group.gap(px(16.)));
+		let size = items.len();
+		let mut group = div().id(ElementId::Name(format!("choice-group-{id}").into())).role(gpui::Role::RadioGroup).aria_label(label.to_owned()).flex().when(vertical, |group| group.flex_col().gap(px(2.))).when(!vertical && !cards, |group| group.flex_wrap().gap(px(4.))).when(cards, |group| group.gap(px(16.)));
 		for (index, (value, item_label, description)) in items.iter().enumerate() {
 			let value = *value;
 			let checked = value == selected;
@@ -322,6 +349,12 @@ impl Skid {
 			group = group.child(
 				div()
 					.id(ElementId::Name(format!("choice-{id}-{index}").into()))
+					.role(gpui::Role::RadioButton)
+					.aria_label((*item_label).to_owned())
+					.aria_toggled(if checked { gpui::Toggled::True } else { gpui::Toggled::False })
+					.aria_position_in_set(index + 1)
+					.aria_size_of_set(size)
+					.when_some(*description, |item, text| item.aria_description(text.to_owned()))
 					.relative()
 					.flex()
 					.flex_col()
@@ -369,7 +402,8 @@ impl Skid {
 	}
 
 	/// A `USelect` trigger in the window's soft skin, with its menu when open.
-	pub fn select_box<T: Copy + PartialEq + 'static>(&mut self, id: &str, items: &[(T, String)], selected: T, disabled: bool, set: impl Fn(&mut Self, T) + 'static, window: &Window, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+	#[allow(clippy::too_many_arguments)]
+	pub fn select_box<T: Copy + PartialEq + 'static>(&mut self, id: &str, name: &str, items: &[(T, String)], selected: T, disabled: bool, set: impl Fn(&mut Self, T) + 'static, window: &Window, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
 		let popup_id: SharedString = format!("select-{id}").into();
 		let open = matches!(&self.popup, Some(Popup::Select(open)) if *open == popup_id);
 		let focus = self.focus_handle_for(&popup_id, cx);
@@ -383,7 +417,7 @@ impl Skid {
 			// USelect's menu: the trigger's width, 8px below it, or above it when there is not
 			// room below and there is more above, as Reka's collision handling decides.
 			let trigger = self.bounds_of(&popup_id);
-			let mut list = div().flex().flex_col().p(px(4.));
+			let mut list = div().id(ElementId::Name(format!("{popup_id}-options").into())).role(gpui::Role::ListBox).aria_label(name.to_owned()).flex().flex_col().p(px(4.));
 			let mut height: f32 = 8.;
 			let highlight = self.menu_highlight;
 			self.menu_actions.clear();
@@ -402,6 +436,14 @@ impl Skid {
 				list = list.child(
 					div()
 						.id(ElementId::Name(format!("{popup_id}-{index}").into()))
+						.role(gpui::Role::ListBoxOption)
+						.aria_label(label.clone())
+						.aria_selected(chosen)
+						.aria_position_in_set(index + 1)
+						.aria_size_of_set(items.len())
+						// The highlighted option is the one a screen reader announces, while focus
+						// stays on the trigger.
+						.when(lit, |item| item.aria_active_descendant())
 						.relative()
 						.flex()
 						.items_start()
@@ -440,6 +482,10 @@ impl Skid {
 		});
 		div()
 			.id(ElementId::Name(popup_id.clone()))
+			.role(gpui::Role::ComboBox)
+			.aria_label(name.to_owned())
+			.aria_value(current.clone())
+			.aria_expanded(open)
 			.relative()
 			.flex()
 			.items_center()
@@ -481,18 +527,21 @@ impl Skid {
 	/// `ControlSelect`: a labelled drop-down.
 	#[allow(clippy::too_many_arguments)]
 	pub fn select<T: Copy + PartialEq + 'static>(&mut self, id: &str, label: &str, help_text: Option<&str>, items: &[(T, String)], selected: T, disabled: bool, set: impl Fn(&mut Self, T) + 'static, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-		let trigger = self.select_box(id, items, selected, disabled, set, window, cx);
+		let trigger = self.select_box(id, label, items, selected, disabled, set, window, cx);
 		field().child(field_label(label.to_owned())).child(trigger).when_some(help_text, |frame, text| frame.child(help(text.to_owned()))).into_any_element()
 	}
 
 	/// `ControlNumber`: a labelled number field with its unit.
 	#[allow(clippy::too_many_arguments)]
 	pub fn number(&mut self, id: &str, label: &str, help_text: Option<&str>, value: f64, min: f64, max: f64, decimals: usize, unit: Option<&str>, disabled: bool, set: impl Fn(&mut Self, f64) + 'static, cx: &mut Context<Self>) -> AnyElement {
-		let state = self.number_input(id, value, decimals, min, max, Rc::new(set), cx);
+		let set: Set<f64> = Rc::new(set);
+		let state = self.number_input(id, value, decimals, min, max, Rc::clone(&set), cx);
+		let field_ = named_input(&state, &format!("number-{id}"), label, None, cx).flex_1().min_w_0().h(px(28.)).px(px(10.)).py(px(6.)).rounded(px(9.)).bg(c(RULE)).xs().text_color(c(FG));
+		let row = self.stepping(div().flex().items_center().gap(px(8.)).child(field_), &state, value, min, max, 1., decimals, set, cx);
 		field()
 			.when(disabled, |frame| frame.opacity(0.75))
 			.child(field_label(label.to_owned()))
-			.child(div().flex().items_center().gap(px(8.)).child(input(&state, cx).flex_1().min_w_0().h(px(28.)).px(px(10.)).py(px(6.)).rounded(px(9.)).bg(c(RULE)).xs().text_color(c(FG))).when_some(unit, |row, unit| row.child(div().flex_none().text_color(c(DIM)).child(unit.to_owned()))))
+			.child(row.when_some(unit, |row, unit| row.child(div().flex_none().text_color(c(DIM)).child(unit.to_owned()))))
 			.when_some(help_text, |frame, text| frame.child(help(text.to_owned())))
 			.into_any_element()
 	}
@@ -529,7 +578,7 @@ impl Skid {
 		};
 		field()
 			.child(field_label(label.to_owned()))
-			.child(input(&state, cx).placeholder(placeholder.to_owned()).h(px(28.)).px(px(10.)).py(px(6.)).rounded(px(9.)).bg(c(RULE)).xs().text_color(c(FG)))
+			.child(named_input(&state, &format!("text-{id}"), label, Some(placeholder), cx).h(px(28.)).px(px(10.)).py(px(6.)).rounded(px(9.)).bg(c(RULE)).xs().text_color(c(FG)))
 			.when_some(help_text, |frame, text| frame.child(help(text.to_owned())))
 			.into_any_element()
 	}
@@ -559,6 +608,9 @@ impl Skid {
 			.child(
 				div()
 					.id(ElementId::Name(format!("disclosure-{id}").into()))
+					.role(gpui::Role::Button)
+					.aria_label(title.to_owned())
+					.aria_expanded(open)
 					.relative()
 					.flex()
 					.w_full()
@@ -582,39 +634,40 @@ impl Skid {
 	}
 
 	/// `ControlFile`: a file chosen by path.
-	pub fn file(&mut self, id: &str, label: &str, help_text: Option<&str>, value: &str, set: impl Fn(&mut Self, String) + 'static, cx: &mut Context<Self>) -> AnyElement {
+	#[allow(clippy::too_many_arguments)]
+	pub fn file(&mut self, id: &str, label: &str, help_text: Option<&str>, value: &str, set: impl Fn(&mut Self, String) + 'static, window: &Window, cx: &mut Context<Self>) -> AnyElement {
 		let set = Rc::new(set);
+		let choose = button_soft(&format!("file-{id}"), "Choose…", true).press(
+			self,
+			&format!("file-{id}"),
+			&format!("Choose a file for {label}"),
+			Ring::Neutral,
+			6.,
+			move |_, _, cx| {
+				let paths = cx.prompt_for_paths(gpui::PathPromptOptions { files: true, directories: false, multiple: false, prompt: None });
+				let set = Rc::clone(&set);
+				cx.spawn(async move |this, cx| {
+					if let Ok(Ok(Some(paths))) = paths.await
+						&& let Some(path) = paths.into_iter().next()
+					{
+						this.update(cx, |this, cx| {
+							set(this, path.display().to_string());
+							this.changed(cx);
+						})
+						.ok();
+					}
+				})
+				.detach();
+			},
+			window,
+			cx,
+		);
 		field()
 			.child(field_label(label.to_owned()))
-			.child(
-				div()
-					.flex()
-					.items_center()
-					.gap(px(8.))
-					.child(div().min_w_0().flex_1().truncate().text_color(c(BRIGHT)).child(if value.is_empty() { "No file chosen".to_owned() } else { value.to_owned() }))
-					.child(
-						button_soft(&format!("file-{id}"), "Choose…", true).on_click(cx.listener(move |_, _: &ClickEvent, _, cx| {
-							let paths = cx.prompt_for_paths(gpui::PathPromptOptions { files: true, directories: false, multiple: false, prompt: None });
-							let set = Rc::clone(&set);
-							cx.spawn(async move |this, cx| {
-								if let Ok(Ok(Some(paths))) = paths.await
-									&& let Some(path) = paths.into_iter().next()
-								{
-									this.update(cx, |this, cx| {
-										set(this, path.display().to_string());
-										this.changed(cx);
-									})
-									.ok();
-								}
-							})
-							.detach();
-						})),
-					),
-			)
+			.child(div().flex().items_center().gap(px(8.)).child(div().min_w_0().flex_1().truncate().text_color(c(BRIGHT)).child(if value.is_empty() { "No file chosen".to_owned() } else { value.to_owned() })).child(choose))
 			.when_some(help_text, |frame, text| frame.child(help(text.to_owned())))
 			.into_any_element()
 	}
-
 }
 
 /// A Nuxt UI `UButton` in `color="neutral" variant="soft"`, size `sm` or `xs`.
@@ -730,11 +783,11 @@ impl Ring {
 /// A button: focusable, pressed by a click or by Enter or Space, with its focus outline.
 pub trait Press: Sized {
 	#[allow(clippy::too_many_arguments)]
-	fn press(self, skid: &mut Skid, id: &str, ring: Ring, radius: f32, handler: impl Fn(&mut Skid, &mut Window, &mut Context<Skid>) + 'static, window: &Window, cx: &mut Context<Skid>) -> Self;
+	fn press(self, skid: &mut Skid, id: &str, name: &str, ring: Ring, radius: f32, handler: impl Fn(&mut Skid, &mut Window, &mut Context<Skid>) + 'static, window: &Window, cx: &mut Context<Skid>) -> Self;
 }
 
 impl Press for gpui::Stateful<gpui::Div> {
-	fn press(self, skid: &mut Skid, id: &str, ring: Ring, radius: f32, handler: impl Fn(&mut Skid, &mut Window, &mut Context<Skid>) + 'static, window: &Window, cx: &mut Context<Skid>) -> Self {
+	fn press(self, skid: &mut Skid, id: &str, name: &str, ring: Ring, radius: f32, handler: impl Fn(&mut Skid, &mut Window, &mut Context<Skid>) + 'static, window: &Window, cx: &mut Context<Skid>) -> Self {
 		let focus = skid.focus_handle_for(&format!("press-{id}"), cx);
 		// A dropdown menu takes focus into itself when it opens, so its trigger shows no
 		// outline meanwhile; a select's trigger keeps it.
@@ -742,8 +795,14 @@ impl Press for gpui::Stateful<gpui::Div> {
 		let visible = Skid::ring_visible(&focus, window) && !menu_has_focus;
 		// gpui clicks a focused element itself on Enter or Space (on key-up), so the click
 		// handler is the keyboard handler too.
-		self.relative()
+		// A button, named: gpui does not name a node from the text inside it.
+		self.role(gpui::Role::Button)
+			.aria_label(name.to_owned())
+			.relative()
 			.track_focus(&focus)
+			// A press on a control never reaches a drag region around it, as Tauri drags only
+			// when the press lands on the region itself.
+			.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
 			.on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
 				if !std::mem::take(&mut this.swallow_click) {
 					handler(this, window, cx);
@@ -808,5 +867,77 @@ impl Skid {
 
 	pub fn bounds_of(&self, id: &str) -> Option<Bounds<Pixels>> {
 		self.slider_bounds.borrow().get(id).copied()
+	}
+}
+
+/// `UButton color="neutral" variant="ghost" icon=…`, size md: an icon-only button with a name.
+#[allow(clippy::too_many_arguments)]
+pub fn icon_button(skid: &mut Skid, id: &str, icon_name: &str, label: &str, handler: impl Fn(&mut Skid, &mut Window, &mut Context<Skid>) + 'static, window: &Window, cx: &mut Context<Skid>) -> gpui::Stateful<gpui::Div> {
+	div()
+		.id(ElementId::Name(id.to_owned().into()))
+		.flex_none()
+		.p(px(6.))
+		.rounded(px(9.))
+		.fade_bg_clear(id.to_owned(), c(FIELD))
+		.child(icon(icon_name, 20., c(FG)))
+		.press(skid, id, label, Ring::Neutral, 9., handler, window, cx)
+}
+
+/// `UButton size="sm" color="neutral" variant="soft" icon="i-material-symbols-add"`.
+pub fn add_button(skid: &mut Skid, id: &str, label: &str, handler: impl Fn(&mut Skid, &mut Window, &mut Context<Skid>) + 'static, window: &Window, cx: &mut Context<Skid>) -> gpui::Stateful<gpui::Div> {
+	div()
+		.id(ElementId::Name(id.to_owned().into()))
+		.flex()
+		.flex_none()
+		.items_center()
+		.gap(px(6.))
+		.px(px(10.))
+		.py(px(6.))
+		.rounded(px(9.))
+		.fade_bg(id.to_owned(), c(FIELD), ca(RULE, 0.75))
+		.xs()
+		.medium()
+		.text_color(c(FG))
+		.child(icon("material-symbols--add", 16., c(FG)))
+		.child(SharedString::from(label.to_owned()))
+		.press(skid, id, label, Ring::Neutral, 9., handler, window, cx)
+}
+
+/// A gpuikit input announced as a named text field. gpuikit's input has no accessibility
+/// builders of its own, but any interactive element given an id has gpui's.
+pub fn named_input(state: &gpui::Entity<InputState>, id: &str, name: &str, placeholder: Option<&str>, cx: &gpui::App) -> gpui::Stateful<gpuikit::elements::input::Input> {
+	let field = input(state, cx);
+	let field = match placeholder {
+		Some(text) => field.placeholder(text.to_owned()),
+		None => field,
+	};
+	field.id(ElementId::Name(format!("input-{id}").into())).role(gpui::Role::TextInput).aria_label(name.to_owned()).aria_value(state.read(cx).content().to_owned())
+}
+
+impl Skid {
+	/// Reka's number field keys on a field: the arrows step it, Page Up and Page Down step
+	/// it ten times, Home and End take it to its ends. Caught before the input sees them.
+	#[allow(clippy::too_many_arguments)]
+	pub fn stepping(&self, row: gpui::Div, state: &gpui::Entity<InputState>, value: f64, min: f64, max: f64, step: f64, decimals: usize, set: Set<f64>, cx: &mut Context<Self>) -> gpui::Div {
+		let state = state.clone();
+		row.capture_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+			if !state.read(cx).focus_handle(cx).is_focused(window) {
+				return;
+			}
+			let next = match event.keystroke.key.as_str() {
+				"up" => value + step,
+				"down" => value - step,
+				"pageup" => value + step * 10.,
+				"pagedown" => value - step * 10.,
+				"home" if min.is_finite() && min > f64::MIN => min,
+				"end" if max.is_finite() && max < f64::MAX => max,
+				_ => return,
+			};
+			let next = next.clamp(min, max);
+			set(this, next);
+			state.update(cx, |state, cx| state.set_content_silent(format_number(next, decimals), cx));
+			this.changed(cx);
+			cx.stop_propagation();
+		}))
 	}
 }

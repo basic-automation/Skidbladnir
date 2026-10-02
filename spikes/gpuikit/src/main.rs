@@ -1,6 +1,7 @@
 //! Skidbladnir's window rebuilt with gpui and gpuikit, to match the 1.0.0 Tauri window
 //! exactly, so the two can be compared fairly. See README.md.
 
+mod about;
 mod app;
 mod assets;
 mod color_picker;
@@ -47,12 +48,15 @@ fn main() {
 				window_bounds: Some(WindowBounds::Windowed(bounds)),
 				titlebar: None,
 				window_min_size: Some(size(px(720.), px(560.))),
-				window_background: WindowBackgroundAppearance::Transparent,
+				window_background: if std::env::var_os("SKID_OPAQUE").is_some() { WindowBackgroundAppearance::Opaque } else { WindowBackgroundAppearance::Transparent },
 				window_decorations: Some(WindowDecorations::Client),
 				app_id: Some("skidbladnir".to_owned()),
 				..Default::default()
 			},
-			|window, cx| cx.new(|cx| app::Skid::new(window, cx)),
+			|window, cx| {
+				window.set_window_title("Skidbladnir");
+				cx.new(|cx| app::Skid::new(window, cx))
+			},
 		)
 		.expect("could not open the window");
 		cx.activate(true);

@@ -1,11 +1,11 @@
 //! `WebpSettingsPanel.vue`: every cwebp option that changes the file it writes, one control
 //! per flag, with cwebp's own help text.
 
-use gpui::{AnyElement, ClickEvent, Context, IntoElement, ParentElement, StatefulInteractiveElement, Styled, Window, div, px};
+use gpui::{AnyElement, Context, IntoElement, ParentElement, Styled, Window, div, px};
 use skidbladnir_encode::settings::{AlphaFiltering, FilterType, ImageHint, Preset, TargetMetric};
 
 use crate::{
-	app::Skid, controls::{button_soft, field, field_label, help}, theme::{ERROR, Type, c}
+	app::Skid, controls::{Press, Ring, button_soft, field, field_label, help}, theme::{ERROR, Type, c}
 };
 
 const FILTER_TYPES: [(FilterType, &str, Option<&str>); 2] = [(FilterType::Strong, "Strong", None), (FilterType::Simple, "Simple", None)];
@@ -87,37 +87,46 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 	}
 
 	let presets: Vec<(Preset, String)> = [(Preset::Default, "default"), (Preset::Photo, "photo"), (Preset::Picture, "picture"), (Preset::Drawing, "drawing"), (Preset::Icon, "icon"), (Preset::Text, "text")].into_iter().map(|(value, label)| (value, label.to_owned())).collect();
-	let preset_picker = this.select_box("webp-preset", &presets, this.webp_preset, false, |t, v| t.webp_preset = v, window, cx);
+	let preset_picker = this.select_box("webp-preset", "libwebp preset", &presets, this.webp_preset, false, |t, v| t.webp_preset = v, window, cx);
 	let levels: Vec<(u8, String)> = (0..=9).map(|level| (level, format!("-z {level}{}", if level == 0 { " (fastest)" } else if level == 9 { " (slowest)" } else { "" }))).collect();
-	let level_picker = this.select_box("webp-level", &levels, this.lossless_level, false, |t, v| t.lossless_level = v, window, cx);
+	let level_picker = this.select_box("webp-level", "Lossless level", &levels, this.lossless_level, false, |t, v| t.lossless_level = v, window, cx);
 	let preset_field = field()
 		.child(field_label("libwebp preset"))
 		.child(
-			div().flex().items_center().gap(px(8.)).child(preset_picker.flex_1().min_w_0()).child(button_soft("webp-preset-apply", "Apply", false).on_click(cx.listener(|t, _: &ClickEvent, _, cx| {
+			div().flex().items_center().gap(px(8.)).child(preset_picker.flex_1().min_w_0()).child(button_soft("webp-preset-apply", "Apply", false).press(this, "webp-preset-apply", "Apply", Ring::Neutral, 9., |t, _, cx| {
 				t.webp_preset_error.clear();
 				let preset = t.webp_preset;
 				t.job().webp.apply_preset(preset);
 				t.changed(cx);
-			}))),
+			}, window, cx)),
 		)
 		.child(help("-preset · resets every encoder control to the preset, keeping the quality"))
 		.into_any_element();
 	let level_field = field()
 		.child(field_label("Lossless level"))
 		.child(
-			div().flex().items_center().gap(px(8.)).child(level_picker.flex_1().min_w_0()).child(button_soft("webp-level-apply", "Apply", false).on_click(cx.listener(|t, _: &ClickEvent, _, cx| {
+			div().flex().items_center().gap(px(8.)).child(level_picker.flex_1().min_w_0()).child(button_soft("webp-level-apply", "Apply", false).press(this, "webp-level-apply", "Apply", Ring::Neutral, 9., |t, _, cx| {
 				t.webp_preset_error.clear();
 				let level = t.lossless_level;
 				if let Err(error) = t.job().webp.apply_lossless_preset(level) {
 					t.webp_preset_error = error.to_string();
 				}
 				t.changed(cx);
-			}))),
+			}, window, cx)),
 		)
 		.child(help("-z · lossless, with the method and effort of the level"))
 		.into_any_element();
 
-	let mut compression = vec![Skid::grid(3, 16., vec![lossless, quality, method]).into_any_element(), Skid::grid(3, 16., target_row).into_any_element(), Skid::grid(3, 16., vec![preset_field, level_field]).into_any_element()];
+	let defaults_field = field()
+		.child(field_label("cwebp's defaults"))
+		.child(div().flex().items_center().gap(px(8.)).child(button_soft("webp-cwebp-defaults", "Start from cwebp's defaults", false).press(this, "webp-cwebp-defaults", "Start from cwebp's defaults", Ring::Neutral, 9., |t, _, cx| {
+			t.webp_preset_error.clear();
+			t.job().webp.reset_to_cwebp_defaults();
+			t.changed(cx);
+		}, window, cx)))
+		.child(help("no options · every control as a plain cwebp sets it, so the file matches cwebp with no flags"))
+		.into_any_element();
+	let mut compression = vec![Skid::grid(3, 16., vec![lossless, quality, method]).into_any_element(), Skid::grid(3, 16., target_row).into_any_element(), Skid::grid(3, 16., vec![preset_field, level_field, defaults_field]).into_any_element()];
 	if !this.webp_preset_error.is_empty() {
 		compression.push(div().px(px(10.)).xs().text_color(c(ERROR)).child(this.webp_preset_error.clone()).into_any_element());
 	}
@@ -174,6 +183,31 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 	let xmp = this.toggle("webp-xmp", "Copy XMP", Some("-metadata xmp · copy XMP from the input if present"), s.metadata.xmp, false, |t, v| t.job().webp.metadata.xmp = v, window, cx);
 	sections.push(this.panel("Metadata", None, vec![Skid::grid(3, 16., vec![exif, icc, xmp]).into_any_element()]).into_any_element());
 
+	// Animation: img2webp's and gif2webp's own options.
+	let animation = s.animation;
+	sections.push(this.disclosure(
+		"webp-animation",
+		"Animation",
+		false,
+		move |this, window, cx| {
+			let note = help("For an animated WebP or a GIF only: img2webp's and gif2webp's own options. Still images ignore them.").px(px(10.)).into_any_element();
+			let min_size = this.toggle("webp-min-size", "Minimise size", Some("-min_size · search harder for the smallest file; slower, and places no keyframes"), animation.minimize_size, false, |t, v| t.job().webp.animation.minimize_size = v, window, cx);
+			let mixed = this.toggle("webp-mixed", "Mixed lossy and lossless", Some("-mixed · each frame lossy or lossless, whichever is smaller"), animation.allow_mixed, false, |t, v| t.job().webp.animation.allow_mixed = v, window, cx);
+			let loop_compat = this.toggle("webp-loop-compat", "GIF loop compatibility", Some("-loop_compatibility · gif2webp: read the GIF's loop count as Chrome up to M62 did"), animation.loop_compatibility, false, |t, v| t.job().webp.animation.loop_compatibility = v, window, cx);
+			let kmin_body = animation.kmin.map(|value| this.number("webp-kmin-value", "At least, in frames", Some("-kmin · min distance between key frames"), f64::from(value), f64::from(i32::MIN), f64::from(i32::MAX), 0, None, false, |t, v| t.job().webp.animation.kmin = Some(to_i32(v)), cx));
+			let kmin = this.optional("webp-kmin", "Minimum keyframe distance", None, Some("-kmin · not given: the tool's default (gif2webp 9 lossless, 3 lossy)"), animation.kmin.is_some(), |t, on| t.job().webp.animation.kmin = on.then_some(3), kmin_body, window, cx);
+			let kmax_body = animation.kmax.map(|value| this.number("webp-kmax-value", "At most, in frames", Some("-kmax · max distance between key frames; 1 makes every frame a keyframe, 0 none"), f64::from(value), f64::from(i32::MIN), f64::from(i32::MAX), 0, None, false, |t, v| t.job().webp.animation.kmax = Some(to_i32(v)), cx));
+			let kmax = this.optional("webp-kmax", "Maximum keyframe distance", None, Some("-kmax · not given: the tool's default (gif2webp 17 lossless, 5 lossy)"), animation.kmax.is_some(), |t, on| t.job().webp.animation.kmax = on.then_some(5), kmax_body, window, cx);
+			let loop_body = animation.loop_count.map(|value| this.number("webp-loop-value", "Plays", Some("-loop · how many times it plays; 0 is forever"), f64::from(value), 0., 65535., 0, None, false, |t, v| t.job().webp.animation.loop_count = Some(u16::try_from(to_u32(v).min(65535)).unwrap_or(u16::MAX)), cx));
+			let loops = this.optional("webp-loop", "Set the loop count", None, Some("-loop · not given: the source's own loop count is kept"), animation.loop_count.is_some(), |t, on| t.job().webp.animation.loop_count = on.then_some(0), loop_body, window, cx);
+			let duration_body = animation.frame_duration.map(|value| this.number("webp-duration-value", "Milliseconds per frame", Some("-d · frame duration, given once for every frame"), f64::from(value), 1., 2_147_483_647., 0, Some("ms"), false, |t, v| t.job().webp.animation.frame_duration = Some(to_u32(v)), cx));
+			let duration = this.optional("webp-duration", "Set every frame's duration", None, Some("-d · not given: each frame keeps its own timing"), animation.frame_duration.is_some(), |t, on| t.job().webp.animation.frame_duration = on.then_some(100), duration_body, window, cx);
+			vec![note, Skid::grid(3, 16., vec![min_size, mixed, loop_compat]).into_any_element(), Skid::grid(3, 16., vec![kmin, kmax, loops]).into_any_element(), Skid::grid(3, 16., vec![duration]).into_any_element()]
+		},
+		window,
+		cx,
+	));
+
 	let mt = this.toggle("webp-mt", "Multi-threading", Some("-mt · use multi-threading if available"), s.multi_threading, false, |t, v| t.job().webp.multi_threading = v, window, cx);
 	let low_memory = this.toggle("webp-low-memory", "Low memory", Some("-low_memory · reduce memory usage (slower encoding)"), s.low_memory, false, |t, v| t.job().webp.low_memory = v, window, cx);
 	sections.push(this.panel("Performance", None, vec![Skid::grid(3, 16., vec![mt, low_memory]).into_any_element()]).into_any_element());
@@ -185,6 +219,11 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn to_u8(value: f64) -> u8 {
 	value.round().clamp(0., 255.) as u8
+}
+
+#[allow(clippy::cast_possible_truncation)]
+pub fn to_i32(value: f64) -> i32 {
+	value.round().clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]

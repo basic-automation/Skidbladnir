@@ -13,6 +13,7 @@ fn main() {
 	let update = updater::check(&current).expect("an update newer than that is on offer");
 	println!("offered {} at {}", update.version, update.url);
 	let target = updater::appimage().expect("APPIMAGE names an existing file");
+	println!("install kind {:?}", updater::install_kind());
 	let mut reported = 0;
 	let installed = updater::install(&update, &mut |done, total| {
 		if let Some(total) = total
@@ -23,6 +24,7 @@ fn main() {
 		}
 	})
 	.expect("the update installs");
+	let updater::Restart::Launch(installed) = installed else { panic!("an AppImage relaunches itself") };
 	let data = std::fs::read(&installed).expect("the installed file reads");
 	println!("installed {} bytes into {}, signature verified", data.len(), target.display());
 	let mut tampered = data;

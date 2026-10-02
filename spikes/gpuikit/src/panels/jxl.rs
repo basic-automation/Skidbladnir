@@ -155,7 +155,7 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 		window,
 		cx,
 	);
-	let icc_body = s.icc_file.as_ref().map(|path| this.file("jxl-icc-file", "ICC profile", Some("-x icc_pathname · a binary file containing an ICC profile"), &path.display().to_string(), |t, v| t.job().jxl.icc_file = Some(PathBuf::from(v)), cx));
+	let icc_body = s.icc_file.as_ref().map(|path| this.file("jxl-icc-file", "ICC profile", Some("-x icc_pathname · a binary file containing an ICC profile"), &path.display().to_string(), |t, v| t.job().jxl.icc_file = Some(PathBuf::from(v)), window, cx));
 	let icc = this.optional("jxl-icc", "ICC profile for untagged input", None, Some("-x icc_pathname · not given"), s.icc_file.is_some(), |t, on| t.job().jxl.icc_file = on.then(PathBuf::new), icc_body, window, cx);
 	let intensity = this.number("jxl-intensity-target", "Intensity target", Some("--intensity_target · 0 = choose a sensible value based on the color encoding"), f64::from(s.intensity_target), 0., f64::from(f32::MAX), 3, Some("nits"), false, |t, v| t.job().jxl.intensity_target = to_f32(v), cx);
 	let bitdepth = this.number("jxl-override-bitdepth", "Bit depth", Some("--override_bitdepth · 0 = use the input image bit depth"), f64::from(s.override_bitdepth), 0., 32., 0, None, false, |t, v| t.job().jxl.override_bitdepth = to_u8(v), cx);
@@ -482,7 +482,7 @@ fn metadata(this: &mut Skid, id: &str, label: &str, help_text: &str, value: &Met
 		cx,
 	);
 	let file = match value {
-		MetadataSource::File(path) => Some(div().pl(px(20.)).child(this.file(&format!("{id}-file"), &format!("{label} file"), None, &path.display().to_string(), move |t, v| *field(&mut t.job().jxl) = MetadataSource::File(PathBuf::from(v)), cx))),
+		MetadataSource::File(path) => Some(div().pl(px(20.)).child(this.file(&format!("{id}-file"), &format!("{label} file"), None, &path.display().to_string(), move |t, v| *field(&mut t.job().jxl) = MetadataSource::File(PathBuf::from(v)), window, cx))),
 		_ => None,
 	};
 	div().flex().flex_col().min_w_0().child(choice).children(file).into_any_element()

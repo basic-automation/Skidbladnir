@@ -4,16 +4,20 @@
 //! chooser under WebKitGTK, Chromium's popup under WebView2, the colour panel on macOS. gpui
 //! has none, so this is one picker for every platform, in the window's own pop-up style: a
 //! saturation and brightness square, a hue strip, and a `#rrggbb` field.
+//!
+//! From the keyboard, the square and the strip are sliders: the arrows move them by 1%
+//! (shift: 10%), Home and End go to either end. Opening the picker focuses the square.
 
 use std::rc::Rc;
 
 use gpui::{
-	AnyElement, AppContext, Context, ElementId, Hsla, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, ParentElement, Pixels, Point, SharedString, Styled, Window, div, hsla, linear_color_stop, linear_gradient, px, rgb
+	prelude::FluentBuilder,
+	AnyElement, AppContext, Context, ElementId, Hsla, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, StatefulInteractiveElement, ParentElement, Pixels, Point, SharedString, Styled, Window, div, hsla, linear_color_stop, linear_gradient, px, rgb
 };
 use gpuikit::{elements::input::input, input::InputState};
 
 use crate::{
-	app::{Popup, Skid}, controls::{Press, Ring, field, field_label, place_local, popup_panel}, theme::{BRIGHT, FG, RULE, Type, c}
+	app::{Popup, Skid}, controls::{Press, Ring, field, field_label, place_local, popup_panel}, theme::{ACCENT, BRIGHT, FG, RULE, Type, c, ca}
 };
 
 const SQUARE_WIDTH: f32 = 224.;
@@ -87,7 +91,7 @@ impl Skid {
 		let open = self.popup == Some(Popup::Color(key.clone()));
 		let set: Rc<dyn Fn(&mut Self, u32)> = Rc::new(set);
 		let open_key = key.clone();
-		let panel = open.then(|| self.color_panel(&key, value, Rc::clone(&set), cx));
+		let panel = open.then(|| self.color_panel(&key, value, Rc::clone(&set), window, cx));
 		let swatch = div()
 			.id(ElementId::Name(key.clone()))
 			.children(panel)
@@ -100,11 +104,16 @@ impl Skid {
 			.press(
 				self,
 				&key,
+				label,
 				Ring::Neutral,
 				6.,
-				move |this, _, cx| {
+				move |this, window, cx| {
 					this.popup = if this.popup == Some(Popup::Color(open_key.clone())) { None } else { Some(Popup::Color(open_key.clone())) };
 					this.picker_hsv = Some(to_hsv(value));
+					if this.popup.is_some() {
+						let square = this.focus_handle_for(&format!("{open_key}-square"), cx);
+						window.focus(&square, cx);
+					}
 					cx.notify();
 				},
 				window,
@@ -117,10 +126,12 @@ impl Skid {
 			.into_any_element()
 	}
 
-	fn color_panel(&mut self, key: &SharedString, value: u32, set: Rc<dyn Fn(&mut Self, u32)>, cx: &mut Context<Self>) -> AnyElement {
+	fn color_panel(&mut self, key: &SharedString, value: u32, set: Rc<dyn Fn(&mut Self, u32)>, window: &Window, cx: &mut Context<Self>) -> AnyElement {
 		let (hue, saturation, brightness) = self.picker_hsv.unwrap_or_else(|| to_hsv(value));
 		let square_key: SharedString = format!("{key}-square").into();
 		let hue_key: SharedString = format!("{key}-hue").into();
+		let square_focus = self.focus_handle_for(&square_key, cx);
+		let hue_focus = self.focus_handle_for(&hue_key, cx);
 		let pure = hsla(hue, 1., 0.5, 1.);
 		let clear = |colour: Hsla| Hsla { a: 0., ..colour };
 		let white = hsla(0., 0., 1., 1.);
@@ -134,8 +145,44 @@ impl Skid {
 				this.drag_color(event.position, cx);
 			})
 		};
+		// The arrow keys, as on a slider: `step` turns a key into the new value of one channel.
+		let keys = |part: Part| {
+			let set = Rc::clone(&set);
+			cx.listener(move |this: &mut Self, event: &KeyDownEvent, _, cx| {
+				let (hue, saturation, brightness) = this.picker_hsv.unwrap_or((0., 0., 1.));
+				let step = if event.keystroke.modifiers.shift { 0.1 } else { 0.01 };
+				let key = event.keystroke.key.as_str();
+				let next = match (part, key) {
+					(Part::Square, "left") => (hue, (saturation - step).max(0.), brightness),
+					(Part::Square, "right") => (hue, (saturation + step).min(1.), brightness),
+					(Part::Square, "down") => (hue, saturation, (brightness - step).max(0.)),
+					(Part::Square, "up") => (hue, saturation, (brightness + step).min(1.)),
+					(Part::Square, "home") => (hue, 0., brightness),
+					(Part::Square, "end") => (hue, 1., brightness),
+					(Part::Hue, "left" | "down") => ((hue - step).max(0.), saturation, brightness),
+					(Part::Hue, "right" | "up") => ((hue + step).min(0.999), saturation, brightness),
+					(Part::Hue, "home") => (0., saturation, brightness),
+					(Part::Hue, "end") => (0.999, saturation, brightness),
+					_ => return,
+				};
+				this.picker_hsv = Some(next);
+				set(this, from_hsv(next.0, next.1, next.2));
+				this.changed(cx);
+				cx.stop_propagation();
+			})
+		};
+		let square_ring = Self::ring_visible(&square_focus, window);
+		let hue_ring = Self::ring_visible(&hue_focus, window);
+		#[allow(clippy::cast_possible_truncation)]
+		let percent = |fraction: f32| (fraction * 100.).round() as i32;
 		let square = div()
 			.id(ElementId::Name(square_key.clone()))
+			.role(gpui::Role::Slider)
+			.aria_label("Saturation and brightness")
+			.aria_description(SharedString::from(format!("Saturation {}%, brightness {}%", percent(saturation), percent(brightness))))
+			.aria_numeric_value(f64::from(percent(saturation)))
+			.track_focus(&square_focus)
+			.on_key_down(keys(Part::Square))
 			.relative()
 			.w(px(SQUARE_WIDTH))
 			.h(px(SQUARE_HEIGHT))
@@ -157,6 +204,7 @@ impl Skid {
 					.shadow_sm(),
 			)
 			.on_mouse_down(MouseButton::Left, start(Part::Square));
+		let square = div().relative().child(square).when(square_ring, |wrap| wrap.child(crate::controls::ring(3., ca(ACCENT, 0.25), 0., 6.)));
 		// Six segments, red to red, each a two-stop gradient.
 		let segments = (0..6).map(|segment| {
 			#[allow(clippy::cast_precision_loss)]
@@ -165,6 +213,12 @@ impl Skid {
 		});
 		let strip = div()
 			.id(ElementId::Name(hue_key.clone()))
+			.role(gpui::Role::Slider)
+			.aria_label("Hue")
+			.aria_numeric_value(f64::from((hue * 360.).round()))
+			.track_focus(&hue_focus)
+			.on_key_down(keys(Part::Hue))
+			.when(hue_ring, |strip| strip.child(crate::controls::ring(3., ca(ACCENT, 0.25), 0., 6.)))
 			.relative()
 			.w(px(SQUARE_WIDTH))
 			.h(px(12.))
@@ -185,8 +239,8 @@ impl Skid {
 			.p(px(12.))
 			.child(square)
 			.child(strip)
-			.child(div().flex().items_center().gap(px(8.)).child(div().size(px(28.)).flex_none().rounded(px(6.)).bg(rgb(value)).border_1().border_color(c(RULE))).child(input(&hex, cx).flex_1().h(px(28.)).px(px(10.)).py(px(6.)).rounded(px(9.)).bg(c(RULE)).xs().text_color(c(FG))));
-		place_local(gpui::Anchor::TopLeft, gpui::point(px(0.), anchor.size.height + px(8.)), popup_panel(&format!("{key}-panel"), None, body, cx)).into_any_element()
+			.child(div().flex().items_center().gap(px(8.)).child(div().size(px(28.)).flex_none().rounded(px(6.)).bg(rgb(value)).border_1().border_color(c(RULE))).child(input(&hex, cx).id(format!("{key}-hex-field")).aria_label("Hex colour").flex_1().h(px(28.)).px(px(10.)).py(px(6.)).rounded(px(9.)).bg(c(RULE)).xs().text_color(c(FG))));
+		place_local(gpui::Anchor::TopLeft, gpui::point(px(0.), anchor.size.height + px(8.)), popup_panel(&format!("{key}-panel"), None, body, cx).role(gpui::Role::Dialog).aria_label("Choose a colour")).into_any_element()
 	}
 
 	/// The `#rrggbb` field, kept in step with the colour unless it is being typed in.

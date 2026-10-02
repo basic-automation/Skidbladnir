@@ -2,7 +2,7 @@
 
 Skidbladnir's whole window, rebuilt with [gpui](https://www.gpui.rs) (and
 [gpuikit](https://github.com/iamnbutler/gpuikit)) to match the installed Tauri build:
-**Skidbladnir-GPL 1.1.0** on Linux (WebKitGTK), Hyprland, at 1.5× scale.
+**Skidbladnir-GPL 1.1.0** on Linux (since brought up to 1.2.0) (WebKitGTK), Hyprland, at 1.5× scale.
 
 The point was a fair comparison. A smaller mock-up would make any benchmark meaningless, so
 everything the old window draws is here:
@@ -137,28 +137,45 @@ lines of Vue that lean on Nuxt UI.
    field, styled like the window's other pop-ups.
 3. **Selecting text.** The old window lets paths, the version line and results be selected and
    copied. gpui text isn't selectable without a custom element; not done.
-4. **Updates install only into an AppImage.** `src/updater.rs` does what tauri-plugin-updater
-   does for one:
-   - reads the same manifest, picking the installer-specific platform entry first;
-   - downloads the release and checks its minisign signature against the key in
-     `tauri.conf.json`, refusing a mismatch;
-   - replaces the running AppImage and relaunches it.
-
-   Tried end to end against the real 1.1.0 release into a throwaway file
-   (`examples/update_install.rs`). The .deb, Windows and macOS installs aren't implemented and
-   say so.
-5. **Resizing the frameless window from its edges.** Possible with gpui's `start_window_resize`;
-   not done. Untested under a tiling compositor.
-6. **Number-field stepping.** UInputNumber's arrow-key stepping isn't reproduced on gpuikit's
-   input.
-7. **HEIC compatible-brands tags.** A hand-built tag input. Backspace-to-remove and comma-to-add
-   are missing.
-8. **Screen readers.** Roles and names aren't wired on the hand-built controls. gpui has
-    AccessKit underneath; not done.
-9. **Untested here:**
+4. **Untested here:**
     - dragging files over the window (no pointer automation);
-    - macOS and Windows;
-    - the standard (Kvazaar) edition.
+    - macOS and Windows, including their update installs;
+    - the standard (Kvazaar) edition;
+    - a screen reader reading the window (the roles and names are set, but no screen reader
+      was run against it).
+
+## Done since the first comparison
+
+- **Updates, every way the app is installed** (`src/updater.rs`). The same manifest and
+  minisign check as tauri-plugin-updater, then the same install it would do:
+  - AppImage: the running file is replaced and relaunched;
+  - .deb and .rpm: `pkexec dpkg -i` / `pkexec rpm -U`, then relaunch;
+  - Windows: the NSIS installer runs with `/P /UPDATE /R`, the MSI with `msiexec /i … /passive`,
+    and the app quits for it;
+  - macOS: the `.app.tar.gz` replaces the bundle, asking for an administrator when the bundle
+    isn't writable.
+
+  How the copy was installed is read from the bundle-type marker tauri-bundler writes into the
+  binary, with fallbacks (`$APPIMAGE`, the bundle path, `dpkg -S`, `rpm -qf`). Tried end to end
+  against the real 1.2.0 GPL release into a throwaway file (`examples/update_install.rs`),
+  including the refusal of a file with one byte changed.
+- **Resizing from the edges.** 6px grips on each side and corner of a floating window. They're
+  left off any side the compositor tiles, and off a maximised window.
+- **Keyboard and screen readers:**
+  - landmarks (navigation, complementary, main) and the page heading;
+  - the format rail as a radio group;
+  - the queue menu as a menu, with a checkbox item;
+  - every button, toggle, slider, select, number and text field named;
+  - progress, alerts and status messages;
+  - the preview images, named;
+  - number fields stepping with the arrows, Page Up/Down, Home and End;
+  - the brands tags (comma adds, Backspace removes);
+  - the colour picker's square and hue strip as sliders on the arrows;
+  - Escape closing a pop-up and returning focus to the button that opened it;
+  - Page Up/Down, Home and End scrolling the window.
+- **1.2.0:** "Replace existing files", the About view and its licence texts, the output-plan
+  warnings, cwebp's defaults, the WebP animation options, the x265 parameters, and the new
+  input types.
 
 ## Benchmarks
 

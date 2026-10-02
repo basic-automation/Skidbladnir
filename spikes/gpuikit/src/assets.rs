@@ -27,6 +27,7 @@ const FILES: &[(&str, &[u8])] = embedded![
 	"icons/lucide--chevron-down.svg",
 	"icons/lucide--folder-search.svg",
 	"icons/lucide--images.svg",
+	"icons/lucide--info.svg",
 	"icons/lucide--loader-circle.svg",
 	"icons/lucide--x.svg",
 	"icons/material-symbols--add.svg",

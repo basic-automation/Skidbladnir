@@ -2,13 +2,14 @@
 //! still image, with the edition's encoder (Kvazaar, or x265 in the GPL edition) and
 //! heif-enc's own help text.
 
-use gpui::{AnyElement, AppContext, ClickEvent, Context, ElementId, InteractiveElement, IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, Window, div, px};
-use gpuikit::{elements::input::input, input::InputStateEvent};
+use gpui::{prelude::FluentBuilder, KeyDownEvent, AnyElement, AppContext, Context, ElementId, InteractiveElement, IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, Window, div, px};
+use gpuikit::input::InputStateEvent;
 use skidbladnir_encode::settings::{
 	ChromaDownsampling, ColorProfile, HEIC_X265, HeicAqMode, HeicBitDepth, HeicChroma, HeicPreset, HeicTune, OmafProjection, Orientation
 };
 
 use crate::{
+	controls::{Press, Ring},
 	app::Skid, controls::{field, field_label, help, icon}, panels::webp::{to_u8, to_u32}, theme::{DIM, FG, FIELD, RULE, Type, c}
 };
 
@@ -124,6 +125,36 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 			x265_rows.push(Skid::grid(4, 12., vec![deblock, strength, threshold, sao]).into_any_element());
 			x265_rows.push(help("These shape the colour image. libheif encodes transparency separately, with its own values for them.").px(px(10.)).into_any_element());
 		}
+		// Any other x265 parameter, applied after every control above.
+		let parameters = s.x265_parameters.clone();
+		x265_rows.push(this.disclosure(
+			"heic-x265-parameters",
+			"Other x265 parameters",
+			false,
+			move |this, window, cx| {
+				let mut children = vec![help("-p x265:KEY=VALUE · any of x265's own parameters, passed in order after the controls above, so one here overrides them; for example rd=4, rskip=0, limit-tu=2.").px(px(10.)).into_any_element()];
+				for (index, parameter) in parameters.iter().enumerate() {
+					let key = this.text_field(&format!("heic-x265-{index}-key"), &format!("Parameter {} key", index + 1), None, "rd", &parameter.key, move |t, v| set_parameter(t, index, |parameter| parameter.key = v), cx);
+					let value = this.text_field(&format!("heic-x265-{index}-value"), &format!("Parameter {} value", index + 1), None, "4", &parameter.value, move |t, v| set_parameter(t, index, |parameter| parameter.value = v), cx);
+					let remove = crate::controls::icon_button(this, &format!("heic-x265-{index}-remove"), "lucide--x", &format!("Remove parameter {}", index + 1), move |t, _, cx| {
+						let parameters = &mut t.job().heic.x265_parameters;
+						if index < parameters.len() {
+							parameters.remove(index);
+						}
+						t.changed(cx);
+					}, window, cx);
+					children.push(div().flex().items_end().gap(px(8.)).child(div().flex_1().min_w_0().flex().flex_col().child(key)).child(div().flex_1().min_w_0().flex().flex_col().child(value)).child(div().mb(px(8.)).child(remove)).into_any_element());
+				}
+				let add = crate::controls::add_button(this, "heic-x265-add", "Add a parameter", |t, _, cx| {
+					t.job().heic.x265_parameters.push(skidbladnir_encode::settings::CodecOption { key: String::new(), value: String::new() });
+					t.changed(cx);
+				}, window, cx);
+				children.push(div().flex().px(px(10.)).child(add).into_any_element());
+				children
+			},
+			window,
+			cx,
+		));
 		sections.push(this.panel("x265", None, x265_rows).into_any_element());
 	}
 
@@ -217,7 +248,7 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 			let projection_body = s.omaf_projection.map(|projection| this.choice("heic-omaf-projection-kind", "Projection", Some("--omaf-image-projection"), &PROJECTIONS, projection, false, false, false, |t, v| t.job().heic.omaf_projection = Some(v), window, cx));
 			let projection = this.optional("heic-omaf-projection", "360° projection", None, Some("--omaf-image-projection · not given"), s.omaf_projection.is_some(), |t, on| t.job().heic.omaf_projection = on.then_some(OmafProjection::Equirectangular), projection_body, window, cx);
 			let description = this.text_field("heic-description", "Description", Some("--pitm-description · set user description for primary image"), "None", &s.description, |t, v| t.job().heic.description = v, cx);
-			let brands = brands_field(this, &s.compatible_brands, cx);
+			let brands = brands_field(this, &s.compatible_brands, window, cx);
 
 			let unif = this.toggle("heic-unif", "Unified IDs", Some("--unif · use unified ID namespace (adds 'unif' compatible brand)"), s.unif, false, |t, v| t.job().heic.unif = v, window, cx);
 			let mini = this.toggle("heic-mini", "Compact format", Some("--mini · use compact 'mini' box format, when the image allows it"), s.mini, false, |t, v| t.job().heic.mini = v, window, cx);
@@ -240,7 +271,7 @@ fn edit_custom(this: &mut Skid, edit: impl FnOnce(&mut u16, &mut u16, &mut u16, 
 /// The compatible brands: a `UInputTags` (`max-length 4`, `variant soft`, `size sm`, on
 /// `bg-paleday-rule`) in the window's field frame. Enter adds the typed brand; each tag's
 /// cross removes it.
-fn brands_field(this: &mut Skid, brands: &[String], cx: &mut Context<Skid>) -> AnyElement {
+fn brands_field(this: &mut Skid, brands: &[String], window: &Window, cx: &mut Context<Skid>) -> AnyElement {
 	let key: SharedString = "text-heic-compatible-brands".into();
 	let state = if let Some(state) = this.inputs.get(&key) {
 		state.clone()
@@ -259,25 +290,77 @@ fn brands_field(this: &mut Skid, brands: &[String], cx: &mut Context<Skid>) -> A
 				}
 				cx.notify();
 			}
-			InputStateEvent::Submit => {
-				// As Reka's TagsInput: a blank or repeated tag is not added.
-				let brand = state.read(cx).content().trim().to_owned();
-				if !brand.is_empty() && !this.job().heic.compatible_brands.contains(&brand) {
-					this.job().heic.compatible_brands.push(brand);
-					this.changed(cx);
-				}
-				state.update(cx, |state, cx| state.set_content_silent(String::new(), cx));
-			}
+			InputStateEvent::Submit => add_brand(this, &state, cx),
 			_ => {}
 		}));
 		this.inputs.insert(key, state.clone());
 		state
 	};
 
-	let mut tags = div().flex().flex_wrap().items_center().gap(px(6.)).min_h(px(28.)).px(px(10.)).py(px(6.)).rounded(px(9.)).bg(c(RULE));
+	// Reka's TagsInput keys, caught before the field sees them: a comma adds the tag; with
+	// the field empty, Backspace or the left arrow selects the last tag, the arrows move
+	// between tags, Backspace or Delete removes the selected one, and anything else goes
+	// back to the field.
+	let selected_tag = this.tag_selected.filter(|index| *index < brands.len());
+	let count = brands.len();
+	let key_state = state.clone();
+	let mut tags = div()
+		.id("heic-brands")
+		.role(gpui::Role::List)
+		.aria_label("Compatible brands")
+		.flex()
+		.flex_wrap()
+		.items_center()
+		.gap(px(6.))
+		.min_h(px(28.))
+		.px(px(10.))
+		.py(px(6.))
+		.rounded(px(9.))
+		.bg(c(RULE))
+		.capture_key_down(cx.listener(move |t, event: &KeyDownEvent, _, cx| {
+			let empty = key_state.read(cx).content().is_empty();
+			let selected = t.tag_selected.filter(|index| *index < count);
+			match event.keystroke.key.as_str() {
+				"," => {
+					add_brand(t, &key_state, cx);
+				}
+				"backspace" | "delete" if selected.is_some() => {
+					if let Some(index) = selected {
+						t.job().heic.compatible_brands.remove(index);
+						t.tag_selected = None;
+						t.changed(cx);
+					}
+				}
+				"backspace" | "left" if empty && selected.is_none() && count > 0 => t.tag_selected = Some(count - 1),
+				"left" if selected.is_some() => t.tag_selected = selected.map(|index| index.saturating_sub(1)),
+				"right" if selected.is_some() => t.tag_selected = selected.and_then(|index| (index + 1 < count).then_some(index + 1)),
+				_ => {
+					t.tag_selected = None;
+					return;
+				}
+			}
+			cx.stop_propagation();
+			cx.notify();
+		}));
 	for (index, brand) in brands.iter().enumerate() {
+		let remove = div()
+			.id(ElementId::Name(format!("heic-brand-remove-{index}").into()))
+			.rounded(px(2.))
+			.child(icon("lucide--x", 12., c(DIM)))
+			.press(this, &format!("heic-brand-remove-{index}"), &format!("Remove {brand}"), Ring::Neutral, 2., move |t, _, cx| {
+				let brands = &mut t.job().heic.compatible_brands;
+				if index < brands.len() {
+					brands.remove(index);
+				}
+				t.changed(cx);
+			}, window, cx);
 		tags = tags.child(
 			div()
+				.id(ElementId::Name(format!("heic-brand-{index}").into()))
+				.role(gpui::Role::ListItem)
+				.aria_label(brand.clone())
+				.aria_selected(selected_tag == Some(index))
+				.relative()
 				.flex()
 				.items_center()
 				.gap(px(2.))
@@ -289,22 +372,11 @@ fn brands_field(this: &mut Skid, brands: &[String], cx: &mut Context<Skid>) -> A
 				.medium()
 				.text_color(c(FG))
 				.child(brand.clone())
-				.child(
-					div()
-						.id(ElementId::Name(format!("heic-brand-remove-{index}").into()))
-						.cursor_pointer()
-						.on_click(cx.listener(move |t, _: &ClickEvent, _, cx| {
-							let brands = &mut t.job().heic.compatible_brands;
-							if index < brands.len() {
-								brands.remove(index);
-							}
-							t.changed(cx);
-						}))
-						.child(icon("lucide--x", 12., c(DIM))),
-				),
+				.child(remove)
+				.when(selected_tag == Some(index), |tag| tag.child(Ring::Primary.element(4.))),
 		);
 	}
-	let tags = tags.child(input(&state, cx).placeholder("e.g. mif2").flex_1().min_w(px(48.)).h(px(16.)).bg(gpui::transparent_black()).xs().text_color(c(FG)));
+	let tags = tags.child(crate::controls::named_input(&state, "heic-brands-field", "Add a compatible brand", Some("e.g. mif2"), cx).flex_1().min_w(px(48.)).h(px(16.)).bg(gpui::transparent_black()).xs().text_color(c(FG)));
 
 	field()
 		.child(field_label("Compatible brands"))
@@ -321,4 +393,20 @@ fn to_u16(value: f64) -> u16 {
 #[allow(clippy::cast_possible_truncation)]
 fn to_i8(value: f64) -> i8 {
 	value.round().clamp(f64::from(i8::MIN), f64::from(i8::MAX)) as i8
+}
+
+fn set_parameter(this: &mut Skid, index: usize, edit: impl FnOnce(&mut skidbladnir_encode::settings::CodecOption)) {
+	if let Some(parameter) = this.job().heic.x265_parameters.get_mut(index) {
+		edit(parameter);
+	}
+}
+
+/// Add the typed brand, as Reka's TagsInput does: not a blank or repeated one.
+fn add_brand(this: &mut Skid, state: &gpui::Entity<gpuikit::input::InputState>, cx: &mut Context<Skid>) {
+	let brand = state.read(cx).content().trim().trim_end_matches(',').to_owned();
+	if !brand.is_empty() && !this.job().heic.compatible_brands.contains(&brand) {
+		this.job().heic.compatible_brands.push(brand);
+		this.changed(cx);
+	}
+	state.update(cx, |state, cx| state.set_content_silent(String::new(), cx));
 }
