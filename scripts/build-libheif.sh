@@ -116,6 +116,13 @@ else
 	if [ "$(uname -s)" = Darwin ] && [ "${SKIDBLADNIR_TARGET_ARCH:-}" = x86_64 ]; then
 		x265_options+=(-DCMAKE_SYSTEM_NAME=Darwin -DCMAKE_SYSTEM_PROCESSOR=x86_64)
 	fi
+	# On ARM Linux, x265 compiles kernels for every extension it detects at run time,
+	# SVE2's with -march=armv9-a, which GCC before 12 (Ubuntu 22.04's is 11, the release
+	# build's) does not know. Leave SVE2 out there; Neon, its dot-product and I8MM forms
+	# and SVE stay.
+	if [ "$(uname -s)" = Linux ] && [ "$(uname -m)" = aarch64 ]; then
+		x265_options+=(-DENABLE_SVE2=OFF)
+	fi
 	# MSVC names the static library x265-static.lib; everything else libx265.a.
 	case "$(uname -s)" in
 		MINGW* | MSYS* | CYGWIN*) x265_lib=x265-static.lib;;
