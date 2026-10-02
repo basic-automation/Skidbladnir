@@ -40,8 +40,9 @@ common = [
 	(f"libjpeg-turbo {submodule('libjpeg-turbo')}", "IJG and BSD-3-Clause (and Zlib for its SIMD code)", "JPEG decoding, statically linked. This software is based in part on the work of the Independent JPEG Group.", [root / "third_party/libjpeg-turbo/LICENSE.md", root / "third_party/libjpeg-turbo/README.ijg"]),
 	(f"libheif {submodule('libheif')} image readers (heifio)", "MIT", "heif-enc's JPEG reader and Exif helpers (heifio/decoder_jpeg.cc, heifio/exif.cc), compiled into the app by native/heic_jpeg.cc. Unlike the rest of libheif they are MIT-licensed.", [(root / "third_party/libheif/heifio/decoder_jpeg.cc", "/*", "*/")]),
 ]
-# The window's frontend: the font and the Iconify icon collections it bundles, each as its
-# Iconify package declares it. The versions come from the frontend's lockfile.
+# The window's font and the Iconify icon collections it bundles (the webview window from npm,
+# the gpui window the same SVGs and cuts of the same font), each as its Iconify package
+# declares it. The versions come from the frontend's lockfile.
 lock = json.loads((root / "frontend/package-lock.json").read_text(encoding="utf-8"))["packages"]
 npm_version = lambda name: lock[f"node_modules/{name}"]["version"]
 third = root / "LICENSES/third-party"
@@ -62,7 +63,7 @@ icons = {
 declared = sorted(name.removeprefix("@iconify-json/") for name in json.loads((root / "frontend/package.json").read_text(encoding="utf-8"))["devDependencies"] if name.startswith("@iconify-json/"))
 if declared != sorted(icons):
 	sys.exit(f"the frontend's icon collections {declared} are not the ones described here {sorted(icons)}: add or remove their notices")
-frontend = [(f"Fira Code {npm_version('@fontsource-variable/fira-code')} (the window's font)", "OFL-1.1", "The window's typeface, bundled as web fonts from @fontsource-variable/fira-code.", [third / "fira-code.txt"])]
+frontend = [(f"Fira Code {npm_version('@fontsource-variable/fira-code')} (the window's font)", "OFL-1.1", "The window's typeface: bundled as web fonts from @fontsource-variable/fira-code in the webview window, and as two static cuts made from those (weights 450 and 600, the baseline moved 0.1em; crates/skidbladnir-gpui/tools/shift_baseline.py) in the gpui window.", [third / "fira-code.txt"])]
 frontend += [(f"{title} (Iconify icons, @iconify-json/{prefix} {npm_version('@iconify-json/' + prefix)})", spdx, what, files) for prefix, (title, spdx, what, files) in sorted(icons.items(), key=lambda item: (item[0] not in ("ic",), item[0]))]
 libpng = ("libpng 1.6.58 (arithmetic reproduced)", "libpng-2.0", "crates/skidbladnir-encode/src/png_gamma.rs reproduces libpng 1.6.58's gamma-correction arithmetic so that PNGs reach the WebP encoder exactly as cwebp hands them over; no libpng code is linked from it.", [third / "libpng.txt"])
 

@@ -75,6 +75,9 @@ start)
 	# updates at launch, and a smoke test would then depend on the network and on whatever
 	# the newest release is. Set it to the empty string to exercise the update check.
 	export SKIDBLADNIR_NO_UPDATE_CHECK="${SKIDBLADNIR_NO_UPDATE_CHECK-1}"
+	# WebDriver drives the webview window, which since 1.3.0 is the fallback: the app opens
+	# the gpui window unless asked for this one.
+	export SKIDBLADNIR_UI=webview
 	driver_log="${STATE%.json}.driver.log"
 	tauri-driver --port "$PORT" --native-port "$NATIVE_PORT" >"$driver_log" 2>&1 &
 	driver_pid=$!

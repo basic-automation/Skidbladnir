@@ -1,0 +1,4 @@
+(() => { const pick={
+ checkbox:'button[role=checkbox]', slider:'[role=slider]', radio:'button[role=radio]', select:'button[role=combobox]', numberInput:'input[role=spinbutton]', convert:'main button', apply:'button.rounded-md', rail:'nav button[role=radio]', gear:'nav > div > button', preset:'aside li button', queue:'aside button', collapse:'aside button', disclosure:'button[data-disclosure]', windowBtn:'main > div:first-child button' };
+ const out={}; for (const [k,s] of Object.entries(pick)) { const e=document.querySelector(s); if(!e){out[k]='none';continue} e.focus(); const c=getComputedStyle(e); out[k]=[document.activeElement===e, c.outlineStyle, c.outlineWidth, c.outlineColor, c.outlineOffset, c.borderRadius, c.boxShadow.replace(/rgba\(0, 0, 0, 0\) 0px 0px 0px 0px,? ?/g,'')].join(' | '); e.blur(); }
+ return JSON.stringify(out,null,1) })()

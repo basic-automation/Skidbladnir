@@ -108,10 +108,11 @@ jobs:
         # libavif-bin is libavif's `avifdec` and `avifenc`, for the AVIF gates, and
         # libjxl-tools is libjxl's `djxl`, the reference decoder for the JPEG XL gate,
         # and libheif-examples is libheif's `heif-dec`, the reference decoder for HEIC's.
+        # The xkbcommon, xcb, Wayland, fontconfig and FreeType headers are the gpui window's.
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev libavif-bin libjxl-tools libheif-examples libheif-plugin-libde265
+          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libwayland-dev libfontconfig-dev libfreetype-dev libavif-bin libjxl-tools libheif-examples libheif-plugin-libde265
 
       - uses: actions/setup-node@v7
         with:
@@ -305,6 +306,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
             libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libwayland-dev libfontconfig-dev libfreetype-dev \
             webkit2gtk-driver xvfb
 
       - uses: actions/setup-node@v7

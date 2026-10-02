@@ -2,12 +2,13 @@
 # of ROADMAP.md; that app's last source is at the `electron-final` tag.
 #
 # Layout (the Phase 1 decision, recorded in ROADMAP.md):
-#   crates/*    pure-Rust logic with no Tauri dependency — testable offline
+#   crates/*    pure-Rust logic with no Tauri dependency — testable offline — and the
+#               gpui window (crates/skidbladnir-gpui), the default UI since 1.3.0
 #   src-tauri/  the Tauri 2 application shell (added in Phase 1)
 #   frontend/   the Nuxt + Tailwind frontend (added in Phase 1)
 [workspace]
 resolver = "2"
-members = ["crates/skidbladnir-encode", "src-tauri"]
+members = ["crates/skidbladnir-encode", "crates/skidbladnir-gpui", "src-tauri"]
 
 [workspace.package]
 edition = "2024"
@@ -62,6 +63,7 @@ gif = { version = "0.14", default-features = false, features = ["std"] }
 # The version is not redundant with the path: a path dependency without one resolves as a
 # wildcard `*`, which `cargo deny` rejects and which would publish as an unbounded range.
 skidbladnir-encode = { path = "crates/skidbladnir-encode", version = "0.1" }
+skidbladnir-gpui = { path = "crates/skidbladnir-gpui", version = "0.1" }
 tauri = { version = "2", features = ["macos-private-api"] }
 # The native file and directory pickers. The app never browses the filesystem itself —
 # the user picks, and the app writes only where they pointed.

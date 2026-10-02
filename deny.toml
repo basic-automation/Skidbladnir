@@ -41,7 +41,13 @@ allow = [
 	"Apache-2.0 WITH LLVM-exception",
 	"BSD-2-Clause",
 	"BSD-3-Clause",
+	# bzip2's own permissive licence (BSD-style), for libbz2-rs-sys, the pure-Rust bzip2 that
+	# gpui's dependencies read compressed archives with.
+	"bzip2-1.0.6",
 	"CC0-1.0",
+	# Mozilla's root certificates as data (webpki-roots), which the gpui window's updater checks
+	# the release server against. Permissive: attribution only.
+	"CDLA-Permissive-2.0",
 	"ISC",
 	"MIT",
 	"MIT-0",

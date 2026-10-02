@@ -61,7 +61,13 @@ fn main() {
 		apply_gpl_overlay(&manifest);
 	}
 
-	tauri_build::build();
+	// gpui embeds a Windows application manifest of its own (Common Controls 6, per-monitor
+	// DPI awareness: everything Tauri's says, and more), and an executable can carry only one.
+	if env::var_os("CARGO_FEATURE_GPUI").is_some() && env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+		tauri_build::try_build(tauri_build::Attributes::new().windows_attributes(tauri_build::WindowsAttributes::new_without_app_manifest())).expect("tauri-build failed");
+	} else {
+		tauri_build::build();
+	}
 }
 
 /// Put the GPL edition's config overlay into `TAURI_CONFIG`, beneath what is already there.

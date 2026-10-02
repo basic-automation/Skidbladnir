@@ -204,7 +204,8 @@ drag Skidbladnir into Applications, and open it from there.
 
 - The `.deb` (Ubuntu, Debian, Linux Mint): in the folder you downloaded it to, run
   `sudo apt install ./Skidbladnir_<version>_amd64.deb`. apt installs what it needs
-  (WebKitGTK and GTK) and adds Skidbladnir to your applications menu.
+  (xkbcommon and the Vulkan loader for the window, and WebKitGTK and GTK for the webview
+  window it falls back to) and adds Skidbladnir to your applications menu.
 - The AppImage (any distribution): run `chmod +x Skidbladnir_<version>_amd64.AppImage`,
   then `./Skidbladnir_<version>_amd64.AppImage`. It adds no menu entry. It needs FUSE: a
   `fusermount3` or `fusermount` program (the `fuse3` or `fuse` package) and `/dev/fuse`;
@@ -378,7 +379,8 @@ libjpeg-turbo from source so they are linked statically. Clone with
 `--recurse-submodules`: those sources are pinned under `third_party/`. HEIC needs libheif,
 built with `scripts/build-libheif.sh` from the same pinned sources into `build/libheif`;
 without that build, the system libheif is linked instead. On Linux you also need
-`webkit2gtk-4.1` and its development headers.
+the development headers of `webkit2gtk-4.1`, and of xkbcommon (with `xkbcommon-x11`), xcb,
+Wayland, fontconfig and FreeType for the gpui window.
 
 ```bash
 npm --prefix frontend install        # also installs the Tauri CLI
@@ -415,8 +417,8 @@ tool to download and no subprocess.
 
 ```bash
 cargo test --workspace     # includes the encoder-parity tests
-scripts/smoke-test.sh      # drives the built window: renders, IPC, a real conversion
-scripts/a11y-audit.sh      # axe-core against the live window
+scripts/smoke-test.sh      # drives the webview window: renders, IPC, a real conversion
+scripts/a11y-audit.sh      # axe-core against the live webview window
 ```
 
 The parity tests compare each encoder with its reference tool and need them built from
@@ -434,8 +436,13 @@ those are missing.
 
 ## Status
 
-Skidbladnir is a **Rust + Tauri 2** app with a **Nuxt + Tailwind** frontend, for Windows,
-Linux and macOS, and it builds and passes its tests on all three in CI. Releases are
+Skidbladnir is a **Rust + Tauri 2** app for Windows, Linux and macOS, and it builds and
+passes its tests on all three in CI. Since 1.3.0 its window is drawn natively with
+[gpui](https://www.gpui.rs) (`crates/skidbladnir-gpui`): the same window, control for
+control, in about a third of the memory and starting about 30% sooner. The **Nuxt +
+Tailwind** webview window it replaces is still built in. It opens when the app is started
+with `SKIDBLADNIR_UI=webview`, or by itself when the gpui window cannot start (on a
+machine with no GPU driver it can use, say). Releases are
 stable from 1.0.0; the ones before it were prereleases. The work queue lives in
 [ROADMAP.md](ROADMAP.md).
 
