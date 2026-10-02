@@ -1425,7 +1425,7 @@ impl Render for Skid {
 					.flex()
 					.size_full()
 					.overflow_hidden()
-					.rounded(px(32.))
+					.rounded(px(frame_radius()))
 					.bg(c(BG))
 					.child(rail)
 					.children(sidebar)
@@ -1469,6 +1469,12 @@ fn thumb(scroll: &ScrollHandle) -> Option<(Pixels, Pixels)> {
 	}
 	let length = (viewport * (viewport / (viewport + max))).max(px(24.));
 	Some(((viewport - length) * (-scroll.offset().y / max), length))
+}
+
+/// The frame's corner radius: the design's 32px, except under Hyprland, which tiles the
+/// window edge to edge, so rounded corners would only show the desktop through them.
+fn frame_radius() -> f32 {
+	if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() { 0. } else { 32. }
 }
 
 /// `data-tauri-drag-region`: press to move the window, double-press to maximise it.
