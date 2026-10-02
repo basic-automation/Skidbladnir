@@ -352,7 +352,9 @@ jobs:
         run: xvfb-run -a scripts/smoke-test.sh --edition ${{ matrix.edition }}
 
       - name: Accessibility audit
-        run: xvfb-run -a scripts/a11y-audit.sh
+        # At every severity, "minor" included: at the default ("serious") an <h1> outside
+        # any landmark went unnoticed in every state from the Nanna redesign until 1.2.
+        run: xvfb-run -a scripts/a11y-audit.sh --threshold minor
 
       - name: Capture the README screenshots
         if: matrix.edition == 'standard'
