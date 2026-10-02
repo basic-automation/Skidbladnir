@@ -1477,5 +1477,9 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       `fontless` under `@nuxt/fonts`. Neither is in what ships; take each fix when its
       parent allows it.
 - [x] README: an acknowledgements and non-affiliation section (2026-10-01).
-- [ ] README: a dated "How it compares" table (Squoosh, XnConvert, Converseen/ImageMagick,
-      the raw CLIs; "not stated" for the others' parity), and a short demo clip.
+- [x] README: a dated "How it compares" table (2026-10-01): Squoosh, XnConvert,
+      Converseen and the raw CLIs, each from its own page
+      (<https://github.com/GoogleChromeLabs/squoosh>, its `codecs/` directory,
+      <https://www.xnview.com/en/xnconvert/>, <https://converseen.fasterland.net/>), "not
+      stated" wherever a page does not say. Re-check it when it is more than a few months old.
+- [ ] README: a short demo clip.

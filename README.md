@@ -348,6 +348,19 @@ against `cwebp` itself and with `avifdec`, `djxl` and `heif-info`. AVIF input is
 against `avifdec` across 17 colour encodings (bit depths, chroma subsampling, range,
 colour matrices, alpha), and JPEG XL input against `djxl`.
 
+## How it compares
+
+As each project describes itself on its own page, checked on 1 October 2026. "Not
+stated" means its page does not say, not that it cannot.
+
+| | Runs as | Batch | Writes | Encoder options | Byte parity with the reference tools |
+|---|---|---|---|---|---|
+| **Skidbladnir** | desktop app: Windows, macOS, Linux (x86-64 and ARM64) | yes, files or whole folders | WebP, AVIF, JPEG XL, HEIC | every option of `cwebp`, `avifenc`, `cjxl` and `heif-enc` for a still image | yes, tested: 3,827 cases ([above](#what-every-option-means)) |
+| [Squoosh](https://github.com/GoogleChromeLabs/squoosh) | web app in the browser (installable), nothing uploaded | not stated | MozJPEG, WebP, AVIF, JPEG XL, OxiPNG, QOI, WebP 2 (its codec list); no HEIC | not stated | not stated |
+| [XnConvert](https://www.xnview.com/en/xnconvert/) | desktop app: Windows, macOS, Linux; free for private or educational use, paid in a company | yes | about 70 formats, including WebP, AVIF, JPEG XL and HEIC | not stated | not stated |
+| [Converseen](https://converseen.fasterland.net/) | desktop app on ImageMagick: Windows, Linux, macOS, FreeBSD; GPL-3.0 | yes | over 100 formats, including WebP, AVIF and HEIC; JPEG XL not mentioned | not stated | not stated |
+| The reference command-line tools | command line | by scripting | one format each | all of them, by definition | they are the reference |
+
 ## Build from source
 
 Requires a stable Rust toolchain, Node.js and npm, **`nasm`** — libaom, libjpeg-turbo and
