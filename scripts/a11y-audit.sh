@@ -139,6 +139,14 @@ for format in 0:WebP 1:AVIF 2:"JPEG XL" 3:HEIC; do
 	audit "${format#*:}, every control showing" \
 		"[...document.querySelectorAll('[aria-label=\"Output format\"] [role=radio]')][${format%%:*}].click(); await sleep(300); $everything"
 done
+# The About view, opened from the app settings, with the longest licence text showing.
+audit "with the About view open" \
+	"document.querySelector('[aria-label=\"App settings\"]').click(); await sleep(300);
+	 [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'About and licences').click(); await sleep(300);
+	 document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await sleep(300);
+	 [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Third-party notices').click();
+	 for (let i = 0; i < 50 && !document.querySelector('pre'); i++) await sleep(100);
+	 return document.querySelector('pre') ? 'ok' : 'no licence text'"
 # Tauri's own drop event is the one way to hand the window a file without a native
 # dialog, and a preview needs a file.
 audit "with a preview on screen" \

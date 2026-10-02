@@ -17,7 +17,7 @@ use skidbladnir_encode::{
 use tauri::{Emitter as _, Manager as _};
 
 use crate::{
-	preferences::{self, LoadedPreferences, Preferences}, presets::{self, Preset}, preview::{self, Preview}
+	legal::{self, LegalDocument}, preferences::{self, LoadedPreferences, Preferences}, presets::{self, Preset}, preview::{self, Preview}
 };
 
 /// A human-readable description of the encode core, for the UI's about/diagnostics view.
@@ -58,6 +58,20 @@ pub struct Edition {
 #[must_use]
 pub fn edition() -> Edition {
 	if HEIC_X265 { Edition { name: "gpl", label: " (GPL edition)", license: "GPL-3.0-or-later", x265: true } } else { Edition { name: "standard", label: "", license: "ISC", x265: false } }
+}
+
+/// One of the licence texts this installation carries, for the About view: Skidbladnir's
+/// `LICENSE`, the third-party notices, or (GPL edition) `COPYING`. Asked for by name, so
+/// the window cannot make this read any other file.
+///
+/// # Errors
+///
+/// A message for display if the document is not in this installation or cannot be read.
+#[tauri::command]
+#[expect(clippy::needless_pass_by_value, reason = "Tauri injects AppHandle by value; there is no by-reference form of a command argument")]
+pub fn legal_document(app: tauri::AppHandle, document: LegalDocument) -> Result<String, String> {
+	let directory = app.path().resource_dir().map_err(|error| format!("the installation's resources could not be found: {error}"))?;
+	legal::read(&directory, document)
 }
 
 /// The settings a freshly opened window starts from.

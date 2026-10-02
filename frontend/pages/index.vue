@@ -45,6 +45,7 @@ const mirrorStructure = ref(true)
 // Whether a conversion may replace a file already at its output path; remembered between
 // launches. Off, such a file is kept and that input is reported as skipped.
 const replaceExisting = ref(true)
+const aboutOpen = ref(false)
 // Whether choosing a folder also takes the folders inside it. Off by default: a folder
 // often holds earlier output in a subfolder, and sweeping that up is rarely what was meant.
 const includeSubfolders = ref(false)
@@ -432,10 +433,6 @@ function basename(path: string): string {
 	<!-- The window's own frame: the Tauri window is frameless and transparent, so this
 	     rounded surface is the whole visible window. -->
 	<div class="flex h-full overflow-hidden rounded-[32px] bg-paleday-bg text-paleday-fg">
-		<h1 class="sr-only">
-			Skidbladnir
-		</h1>
-
 		<div
 			v-if="dragging"
 			class="pointer-events-none fixed inset-4 z-50 flex items-center justify-center rounded-[28px] bg-paleday-bg/90 text-sm font-semibold text-paleday-accent-text outline-2 outline-dashed outline-paleday-accent"
@@ -476,6 +473,9 @@ function basename(path: string): string {
 							<ControlToggle v-model="includeSubfolders" label="Include subfolders" help="Choosing a folder also takes every folder inside it. Off takes only the images directly in it." />
 							<ControlToggle v-model="mirrorStructure" label="Recreate folder structure" help="When subfolders are included, mirror them in the destination. Off writes every file side by side." :disabled="!includeSubfolders" />
 							<ControlToggle v-model="replaceExisting" label="Replace existing files" help="A file already in the destination with the output's name is replaced. Off keeps it and skips that input." />
+							<UButton color="neutral" variant="soft" size="sm" icon="i-lucide-info" class="mx-2.5 self-start" @click="aboutOpen = true">
+								About and licences
+							</UButton>
 							<p v-if="backendVersion" class="px-2.5 pb-1 text-paleday-dim" data-selectable>
 								{{ backendVersion }}
 							</p>
@@ -576,6 +576,10 @@ function basename(path: string): string {
 		</aside>
 
 		<main class="flex min-w-0 flex-1 flex-col gap-4 pb-1.5" :class="sidebarCollapsed ? 'pl-2' : 'pl-6'">
+			<!-- Inside a landmark, so a screen reader's landmark navigation reaches it. -->
+			<h1 class="sr-only">
+				Skidbladnir
+			</h1>
 			<!-- The title bar: a drag region with the window buttons at its end. -->
 			<div class="flex shrink-0 items-center gap-4" data-tauri-drag-region>
 				<UButton
@@ -628,6 +632,8 @@ function basename(path: string): string {
 					</div>
 
 					<UpdateBanner />
+
+					<AboutPanel v-if="aboutOpen" :app-version="appVersion" :backend-version="backendVersion" :edition="edition" @close="aboutOpen = false" />
 
 					<UAlert
 						v-if="preferencesNotice"

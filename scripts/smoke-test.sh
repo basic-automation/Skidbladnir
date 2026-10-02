@@ -169,6 +169,29 @@ check "refuses to overwrite the source" \
 	 try { await I.invoke('convert_image', { settings: s, input: '$out_dir/smoke.webp', outputDirectory: '$out_dir' }); return 'NOT REFUSED'; }
 	 catch (e) { return String(e); }" 'refusing to overwrite the source'
 
+# Replacing existing files can be turned off: the file already there is kept as it was.
+before=$(wc -c < "$scratch/out/smoke.webp")
+check "keeps an existing output when asked not to replace it" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const s=await I.invoke('default_settings'); s.webp.quality=5;
+	 try { await I.invoke('convert_image', { settings: s, input: '$in_png', outputDirectory: '$out_dir', replaceExisting: false }); return 'NOT KEPT'; }
+	 catch (e) { return String(e); }" 'already exists'
+if [ "$(wc -c < "$scratch/out/smoke.webp")" = "$before" ]; then printf 'ok   %s\n' "the kept file is unchanged"; else printf 'FAIL %s\n' "the kept file changed"; failures=$((failures + 1)); fi
+check "warns before two inputs write the same file" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const p=await I.invoke('plan_outputs', { format: 'webp', inputs: [{ path: '$in_png', relative: null }, { path: '$(app_path "$scratch/smoke.tif")', relative: null }], outputDirectory: '$out_dir' });
+	 return p.collisions.length + ' ' + p.collisions[0].inputs.length + ' ' + p.existing.length" '1 2 1'
+check "starts from cwebp's defaults" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const s=await I.invoke('default_settings');
+	 const w=await I.invoke('webp_cwebp_defaults', { webp: s.webp });
+	 return [w.quality, w.passes, w.alphaFiltering, w.autofilter, w.multiThreading].join(' ')" "75 1 fast false true"
+check "the About view reads the bundled licence" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const t=await I.invoke('legal_document', { document: 'license' });
+	 const n=await I.invoke('legal_document', { document: 'notices' });
+	 return t.startsWith('ISC License') + ' ' + (n.length > 10000)" "true true"
+
 # AVIF: the format switch, a real conversion checked on disk, and whether this platform's
 # webview can display the AVIF preview at all (WebKitGTK and WebView2 each decide that).
 check "switches to AVIF" \
