@@ -98,6 +98,15 @@ pub fn webp_apply_preset(mut webp: WebpSettings, preset: skidbladnir_encode::set
 	webp
 }
 
+/// Every WebP control back to what a bare `cwebp in -o out` encodes, keeping
+/// multi-threading, which changes no byte of the output.
+#[tauri::command]
+#[must_use]
+pub fn webp_cwebp_defaults(mut webp: WebpSettings) -> WebpSettings {
+	webp.reset_to_cwebp_defaults();
+	webp
+}
+
 /// `cwebp -z`: lossless, with the method and quality of one of libwebp's ten levels.
 ///
 /// # Errors
@@ -379,7 +388,7 @@ mod tests {
 		settings::{EncodeJob, WebpSettings}, source::Conversion
 	};
 
-	use super::{ConversionReport, convert_one, default_settings, edition, encoder_version, inspect_dropped_paths, validate_settings, webp_apply_lossless_level, webp_apply_preset};
+	use super::{ConversionReport, convert_one, default_settings, edition, encoder_version, inspect_dropped_paths, validate_settings, webp_apply_lossless_level, webp_apply_preset, webp_cwebp_defaults};
 
 	/// The version string is shown to users, so it must actually contain versions rather
 	/// than a placeholder.
@@ -415,6 +424,8 @@ mod tests {
 		let z9 = webp_apply_lossless_level(WebpSettings::default(), 9).expect("level 9");
 		assert!(z9.lossless && z9.method == 6);
 		assert!(webp_apply_lossless_level(WebpSettings::default(), 10).is_err());
+		let bare = webp_cwebp_defaults(WebpSettings { lossless: true, quality: 12.0, ..Default::default() });
+		assert_eq!(bare, WebpSettings { multi_threading: true, ..WebpSettings::libwebp_defaults() });
 	}
 
 	#[test]

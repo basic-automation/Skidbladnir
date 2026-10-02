@@ -276,6 +276,13 @@ impl WebpSettings {
 		Self { lossless: false, near_lossless: 100, exact: false, quality: 75.0, alpha_quality: 100, alpha_compression: true, alpha_filtering: AlphaFiltering::Fast, method: 4, image_hint: ImageHint::Default, target: None, segments: 4, sns: 50, filter_strength: 60, filter_sharpness: 0, filter_type: FilterType::Strong, autofilter: false, passes: 1, qmin: 0, qmax: 100, preprocessing: 0, partition_limit: 0, jpeg_like: false, sharp_yuv: false, low_memory: false, multi_threading: false, keep_alpha: true, blend_alpha: None, metadata: WebpMetadata { exif: false, icc: false, xmp: false } }
 	}
 
+	/// Start again from what `cwebp` encodes when given no options at all —
+	/// [`Self::libwebp_defaults`] — keeping only multi-threading, which changes how fast the
+	/// file is written but not a byte of it.
+	pub fn reset_to_cwebp_defaults(&mut self) {
+		*self = Self { multi_threading: self.multi_threading, ..Self::libwebp_defaults() };
+	}
+
 	/// The Electron app's choices on top of libwebp's defaults.
 	const fn with_app_defaults(self) -> Self {
 		Self { autofilter: true, multi_threading: true, alpha_filtering: AlphaFiltering::Best, passes: 6, ..self }

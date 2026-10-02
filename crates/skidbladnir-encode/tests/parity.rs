@@ -287,6 +287,43 @@ fn matches_reference_cwebp_across_the_whole_control_surface() {
 	eprintln!("PARITY OK: {total} settings matched the reference cwebp {}.{}.{} byte for byte.", linked.0, linked.1, linked.2);
 }
 
+/// The window's "Start from `cwebp`'s defaults" must be exactly a bare `cwebp in -o out`:
+/// no flag at all on the reference's side, so this holds `libwebp_defaults` to `cwebp`'s own
+/// defaults rather than to our reading of them, whatever the settings were before.
+#[test]
+fn cwebps_defaults_are_a_bare_cwebp() {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let Some(cwebp) = reference_cwebp().filter(|cwebp| reference_version(cwebp) == Some(skidbladnir_encode::encoder::linked_encoder_version())) else {
+		let message = "PARITY NOT RUN: no version-matched reference cwebp, so the cwebp-defaults reset is UNVERIFIED in this run.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+
+	let (width, height) = (64_u32, 48_u32);
+	let pixels = fixture(width, height);
+	let dir = env::temp_dir().join(format!("skidbladnir-parity-bare-{}", std::process::id()));
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+	let input = dir.join("fixture.pam");
+	write_pam(&input, &pixels, width, height);
+	let output = dir.join("bare.webp");
+	let run = Command::new(&cwebp).arg(&input).arg("-o").arg(&output).output().expect("run the reference cwebp");
+	assert!(run.status.success(), "bare cwebp failed: {}", String::from_utf8_lossy(&run.stderr));
+	let expected = fs::read(&output).expect("read the reference output");
+	let _ = fs::remove_dir_all(&dir);
+
+	let image = RgbaImage { width, height, pixels: &pixels };
+	let mut photo = WebpSettings::default();
+	photo.apply_preset(Preset::Photo);
+	let starts = [("the app's defaults", WebpSettings::default()), ("lossless, metadata kept", WebpSettings { lossless: true, near_lossless: 60, exact: true, metadata: WebpMetadata { exif: true, icc: true, xmp: true }, ..WebpSettings::default() }), ("the photo preset, single-threaded", WebpSettings { multi_threading: false, ..photo }), ("a size target, no alpha", WebpSettings { target: Some(TargetMetric::Size(900)), keep_alpha: false, blend_alpha: Some(0x00ff_0000), ..WebpSettings::default() })];
+	for (name, mut start) in starts {
+		start.reset_to_cwebp_defaults();
+		let actual = encode_rgba(&EncodeJob::from(start), &image).expect("encode");
+		assert!(actual == expected, "reset from {name}: ours {} bytes, bare cwebp {} bytes", actual.len(), expected.len());
+	}
+	eprintln!("PARITY OK: the cwebp-defaults reset matched a bare cwebp from 4 starting points.");
+}
+
 /// The same comparison, but through a **PNG file** rather than raw pixels.
 ///
 /// The main test deliberately removes the image decoder from the comparison so a mismatch

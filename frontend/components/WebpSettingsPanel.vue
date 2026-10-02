@@ -2,7 +2,7 @@
 // Every cwebp option that changes the file it writes, one control per flag. Help text is
 // cwebp's own (`cwebp -longhelp`), with the flag it sets.
 //
-// cwebp's two shorthands, -preset and -z, are buttons that set the controls the way they
+// cwebp's two shorthands, -preset and -z, and its no-option defaults are buttons that set the controls the way they
 // set the config on the command line: the Rust core applies them, so their values are
 // libwebp's own rather than a copy here.
 import { computed, ref } from 'vue'
@@ -34,6 +34,16 @@ async function applyPreset() {
 	presetError.value = ''
 	try {
 		model.value = await invokeCommand<WebpSettings>('webp_apply_preset', { webp: model.value, preset: preset.value })
+	}
+	catch (error) {
+		presetError.value = String(error)
+	}
+}
+
+async function startFromCwebpDefaults() {
+	presetError.value = ''
+	try {
+		model.value = await invokeCommand<WebpSettings>('webp_cwebp_defaults', { webp: model.value })
 	}
 	catch (error) {
 		presetError.value = String(error)
@@ -99,6 +109,17 @@ const alphaCompression = computed({
 					</div>
 					<p class="text-paleday-dim">
 						-z · lossless, with the method and effort of the level
+					</p>
+				</div>
+				<div class="flex min-w-0 flex-col gap-2 px-2.5 py-[7px] text-xs">
+					<span class="font-semibold text-paleday-fg">cwebp's defaults</span>
+					<div class="flex items-center gap-2">
+						<UButton size="sm" color="neutral" variant="soft" @click="startFromCwebpDefaults">
+							Start from cwebp's defaults
+						</UButton>
+					</div>
+					<p class="text-paleday-dim">
+						no options · every control as a plain cwebp sets it, so the file matches cwebp with no flags
 					</p>
 				</div>
 			</div>
