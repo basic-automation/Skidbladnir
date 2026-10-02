@@ -38,7 +38,7 @@ use std::ffi::c_int;
 use libwebp_sys::{WEBP_CSP_MODE, WEBP_DEMUX_ABI_VERSION, WEBP_MUX_ABI_VERSION, WebPAnimDecoder, WebPAnimDecoderDelete, WebPAnimDecoderGetInfo, WebPAnimDecoderGetNext, WebPAnimDecoderHasMoreFrames, WebPAnimDecoderNewInternal, WebPAnimDecoderOptions, WebPAnimDecoderOptionsInitInternal, WebPAnimEncoder, WebPAnimEncoderAdd, WebPAnimEncoderAssemble, WebPAnimEncoderDelete, WebPAnimEncoderNewInternal, WebPAnimEncoderOptions, WebPAnimEncoderOptionsInitInternal, WebPAnimInfo, WebPData, WebPDataClear, WebPMux, WebPMuxAssemble, WebPMuxCreateInternal, WebPMuxDelete, WebPMuxError, WebPMuxSetChunk};
 
 use crate::{
-	encoder::{EncodeError, RgbaImage, argb_picture, build_config, resize_picture}, settings::{Resize, WebpSettings}
+	encoder::{EncodeError, RgbaImage, argb_picture, build_config, resize_picture}, settings::{Resize, WebpAnimation, WebpSettings}
 };
 
 /// One frame of an animation, composited onto the full canvas.
@@ -225,16 +225,27 @@ pub enum Keyframes {
 ///
 /// As [`encode`].
 pub fn encode_with(settings: &WebpSettings, resize: Resize, animation: &Animation, keyframes: Keyframes, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
-	let config = build_config(settings)?;
+	let mut config = build_config(settings)?;
+	let options = settings.animation;
+	// `-mixed` lets the encoder pick lossy or lossless per frame, but each tool also leaves
+	// the config's own `lossless` somewhere, which the encoder still reads: `gif2webp -mixed`
+	// sets it to lossy, and `img2webp -mixed` ignores `-lossy` and `-lossless`, so it stays
+	// at img2webp's starting value, lossless.
+	if options.allow_mixed {
+		config.lossless = c_int::from(keyframes == Keyframes::Libwebp);
+	}
 	// "Never enlarge" is decided once, for the canvas, exactly as a still image decides it.
 	let resize = resize.for_source(animation.width, animation.height);
-	// gif2webp decides from the finished config, so near-lossless (lossless underneath)
-	// gets the lossless spacing too.
-	let spacing = match keyframes {
-		Keyframes::Libwebp => None,
-		Keyframes::Gif if config.lossless != 0 => Some((9, 17)),
-		Keyframes::Gif => Some((3, 5)),
+	// gif2webp decides its default spacing from the finished config, so near-lossless
+	// (lossless underneath) gets the lossless spacing too; `-kmin`/`-kmax` replace either
+	// value on its own. img2webp leaves libwebp's default for whichever is not given.
+	let defaults = match keyframes {
+		Keyframes::Libwebp => (None, None),
+		Keyframes::Gif if config.lossless != 0 => (Some(9), Some(17)),
+		Keyframes::Gif => (Some(3), Some(5)),
 	};
+	let spacing = (options.kmin.or(defaults.0), options.kmax.or(defaults.1));
+	let loop_count = options.loop_count.map_or(animation.loop_count, u32::from);
 	let frame_count = animation.frames.len();
 	if frame_count == 0 {
 		return Err(EncodeError::MalformedImage { width: animation.width, height: animation.height, actual: 0, expected: (animation.width as usize).saturating_mul(animation.height as usize).saturating_mul(4) });
@@ -251,7 +262,7 @@ pub fn encode_with(settings: &WebpSettings, resize: Resize, animation: &Animatio
 		let (width, height) = (picture.0.width, picture.0.height);
 		let (encoder, canvas_w, canvas_h) = match &encoder {
 			Some(existing) => existing,
-			None => encoder.insert((new_encoder(width, height, animation, spacing)?, width, height)),
+			None => encoder.insert((new_encoder(width, height, animation, loop_count, spacing, options)?, width, height)),
 		};
 		// Every frame goes through the same rescale, so a mismatch means a bug, not bad input.
 		if (width, height) != (*canvas_w, *canvas_h) {
@@ -285,23 +296,27 @@ pub fn encode_with(settings: &WebpSettings, resize: Resize, animation: &Animatio
 	}
 }
 
-/// Create an animation encoder for a `width` x `height` canvas, carrying over the source's
-/// loop count and background colour, with the keyframe spacing given as `(kmin, kmax)`.
-/// Every other option is libwebp's default, which is also what `img2webp` and `gif2webp`
-/// use.
-fn new_encoder(width: c_int, height: c_int, animation: &Animation, spacing: Option<(c_int, c_int)>) -> Result<Encoder, EncodeError> {
+/// Create an animation encoder for a `width` x `height` canvas with this loop count and the
+/// source's background colour, the keyframe spacing given as `(kmin, kmax)` (`None` leaves
+/// libwebp's default), and the minimise-size and mixed options. Every other option is
+/// libwebp's default, which is also what `img2webp` and `gif2webp` use.
+fn new_encoder(width: c_int, height: c_int, animation: &Animation, loop_count: u32, spacing: (Option<i32>, Option<i32>), options_wanted: WebpAnimation) -> Result<Encoder, EncodeError> {
 	// SAFETY: `options` is a live local for both calls; the encoder is owned by a guard.
 	unsafe {
 		let mut options = std::mem::zeroed::<WebPAnimEncoderOptions>();
 		if WebPAnimEncoderOptionsInitInternal(&raw mut options, WEBP_MUX_ABI_VERSION.cast_signed()) == 0 {
 			return Err(EncodeError::Libwebp("WebPAnimEncoderOptionsInit"));
 		}
-		options.anim_params.loop_count = c_int::try_from(animation.loop_count).unwrap_or(0);
+		options.anim_params.loop_count = c_int::try_from(loop_count).unwrap_or(0);
 		options.anim_params.bgcolor = animation.background;
-		if let Some((kmin, kmax)) = spacing {
+		if let Some(kmin) = spacing.0 {
 			options.kmin = kmin;
+		}
+		if let Some(kmax) = spacing.1 {
 			options.kmax = kmax;
 		}
+		options.minimize_size = c_int::from(options_wanted.minimize_size);
+		options.allow_mixed = c_int::from(options_wanted.allow_mixed);
 		let encoder = Encoder(WebPAnimEncoderNewInternal(width, height, &raw const options, WEBP_MUX_ABI_VERSION.cast_signed()));
 		if encoder.0.is_null() {
 			return Err(EncodeError::Libwebp("WebPAnimEncoderNew"));

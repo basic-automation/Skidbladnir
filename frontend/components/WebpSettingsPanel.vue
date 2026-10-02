@@ -182,6 +182,28 @@ const alphaCompression = computed({
 			</div>
 		</ControlPanel>
 
+		<ControlDisclosure title="Animation">
+			<p class="px-2.5 text-xs text-paleday-dim">
+				For an animated WebP or a GIF only: img2webp's and gif2webp's own options. Still images ignore them.
+			</p>
+			<div class="grid grid-cols-3 gap-4">
+				<ControlToggle v-model="s.animation.minimizeSize" label="Minimise size" help="-min_size · search harder for the smallest file; slower, and places no keyframes" />
+				<ControlToggle v-model="s.animation.allowMixed" label="Mixed lossy and lossless" help="-mixed · each frame lossy or lossless, whichever is smaller" />
+				<ControlToggle v-model="s.animation.loopCompatibility" label="GIF loop compatibility" help="-loop_compatibility · gif2webp: read the GIF's loop count as Chrome up to M62 did" />
+			</div>
+			<div class="grid grid-cols-3 gap-4">
+				<ControlOptional v-model="s.animation.kmin" label="Minimum keyframe distance" :fallback="3" unset="-kmin · not given: the tool's default (gif2webp 9 lossless, 3 lossy)">
+					<ControlNumber v-model="s.animation.kmin" label="Frames" :min="-2147483648" :max="2147483647" help="-kmin · min distance between key frames" />
+				</ControlOptional>
+				<ControlOptional v-model="s.animation.kmax" label="Maximum keyframe distance" :fallback="5" unset="-kmax · not given: the tool's default (gif2webp 17 lossless, 5 lossy)">
+					<ControlNumber v-model="s.animation.kmax" label="Frames" :min="-2147483648" :max="2147483647" help="-kmax · max distance between key frames; 1 makes every frame a keyframe, 0 none" />
+				</ControlOptional>
+				<ControlOptional v-model="s.animation.loopCount" label="Set the loop count" :fallback="0" unset="-loop · not given: the source's own loop count is kept">
+					<ControlNumber v-model="s.animation.loopCount" label="Plays" :min="0" :max="65535" help="-loop · how many times it plays; 0 is forever" />
+				</ControlOptional>
+			</div>
+		</ControlDisclosure>
+
 		<ControlPanel title="Performance">
 			<div class="grid grid-cols-3 gap-4">
 				<ControlToggle v-model="s.multiThreading" label="Multi-threading" help="-mt · use multi-threading if available" />

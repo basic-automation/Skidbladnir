@@ -28,7 +28,7 @@ pub use heic::{ChromaDownsampling, ColorProfile, HEIC_X265, HeicAqMode, HeicBitD
 pub use jxl::{JxlColorSpace, JxlSettings, JxlTarget, MetadataSource, Primaries, RenderingIntent, TransferFunction, Tristate, WhitePoint};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-pub use webp::{AlphaFiltering, FilterType, ImageHint, Preset, TargetMetric, WebpMetadata, WebpSettings};
+pub use webp::{AlphaFiltering, FilterType, ImageHint, Preset, TargetMetric, WebpAnimation, WebpMetadata, WebpSettings};
 
 /// Which format to write.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -454,6 +454,22 @@ mod tests {
 	fn nested_webp_controls_win_over_flat_ones() {
 		let job: EncodeJob = serde_json::from_str(r#"{"quality":10,"webp":{"quality":90}}"#).expect("deserialize");
 		assert!((job.webp.quality - 90.0).abs() < f32::EPSILON);
+	}
+
+	/// The animation options arrived in 1.2: a job saved before them has none, which is the
+	/// tools' defaults; a partial set fills in the rest; and they round-trip.
+	#[test]
+	fn the_animation_options_load_partially_and_round_trip() {
+		let older: EncodeJob = serde_json::from_str(r#"{"webp":{"lossless":true}}"#).expect("deserialize");
+		assert_eq!(older.webp.animation, WebpAnimation::default());
+		let partial: EncodeJob = serde_json::from_str(r#"{"webp":{"animation":{"kmax":2,"loopCount":4}}}"#).expect("deserialize");
+		assert_eq!(partial.webp.animation, WebpAnimation { kmax: Some(2), loop_count: Some(4), ..WebpAnimation::default() });
+		let back: EncodeJob = serde_json::from_value(serde_json::to_value(&partial).expect("serialize")).expect("deserialize");
+		assert_eq!(back, partial);
+		assert!(serde_json::from_str::<EncodeJob>(r#"{"webp":{"animation":{"loopCount":70000}}}"#).is_err(), "a loop count WebP cannot store is refused");
+		let mut preset = partial.webp.clone();
+		preset.apply_preset(Preset::Photo);
+		assert_eq!(preset.animation, partial.webp.animation, "a preset leaves the animation options alone");
 	}
 
 	#[test]

@@ -235,6 +235,8 @@ pub struct AnimatedSource {
 	/// The metadata the source carries: a GIF's ICC profile and XMP, as `gif2webp
 	/// -metadata` reads them, or an animated WebP's `ICCP`, `EXIF` and `XMP ` chunks.
 	pub metadata: crate::metadata::Metadata,
+	/// For a GIF, the loop count `gif2webp -loop_compatibility` reads from it.
+	pub compatible_loop_count: Option<u32>,
 }
 
 impl AnimatedSource {
@@ -247,7 +249,14 @@ impl AnimatedSource {
 	///
 	/// As [`crate::animation::encode_with`] and [`crate::animation::with_metadata`].
 	pub fn encode(&self, job: &EncodeJob, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, crate::encoder::EncodeError> {
-		let encoded = crate::animation::encode_with(&job.webp, job.resize, &self.animation, self.keyframes, on_progress)?;
+		let mut webp = job.webp.clone();
+		if webp.animation.loop_compatibility
+			&& webp.animation.loop_count.is_none()
+			&& let Some(compatible) = self.compatible_loop_count
+		{
+			webp.animation.loop_count = Some(u16::try_from(compatible).unwrap_or(u16::MAX));
+		}
+		let encoded = crate::animation::encode_with(&webp, job.resize, &self.animation, self.keyframes, on_progress)?;
 		let keep = job.webp.metadata;
 		crate::animation::with_metadata(encoded, self.metadata.icc.as_deref().filter(|_| keep.icc), self.metadata.exif.as_deref().filter(|_| keep.exif), self.metadata.xmp.as_deref().filter(|_| keep.xmp))
 	}
@@ -268,12 +277,12 @@ pub fn animated_source(path: &Path, bytes: &[u8]) -> Result<Option<AnimatedSourc
 
 	let failed = |format: SourceFormat, detail: String| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail };
 	if SourceFormat::sniff(bytes) == Some(SourceFormat::Gif) {
-		let animation = crate::gif_input::decode(bytes).map_err(|detail| failed(SourceFormat::Gif, detail))?;
-		return Ok(Some(AnimatedSource { animation, keyframes: Keyframes::Gif, metadata: crate::gif_input::metadata(bytes) }));
+		let (animation, compatible) = crate::gif_input::decode_with_compatible_loop(bytes).map_err(|detail| failed(SourceFormat::Gif, detail))?;
+		return Ok(Some(AnimatedSource { animation, keyframes: Keyframes::Gif, metadata: crate::gif_input::metadata(bytes), compatible_loop_count: Some(compatible) }));
 	}
 	if is_animated_webp(bytes) {
 		let animation = crate::animation::decode(bytes).ok_or_else(|| failed(SourceFormat::Webp, "libwebp could not read the animation".to_owned()))?;
-		return Ok(Some(AnimatedSource { animation, keyframes: Keyframes::Libwebp, metadata: crate::metadata::webp_chunks(bytes) }));
+		return Ok(Some(AnimatedSource { animation, keyframes: Keyframes::Libwebp, metadata: crate::metadata::webp_chunks(bytes), compatible_loop_count: None }));
 	}
 	Ok(None)
 }

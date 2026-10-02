@@ -32,7 +32,7 @@ use std::{
 };
 
 use skidbladnir_encode::{
-	animation::{self, Animation, Frame}, settings::{FilterType, Resize, ResizeMode, WebpSettings}
+	animation::{self, Animation, Frame}, settings::{FilterType, Resize, ResizeMode, WebpAnimation, WebpSettings}
 };
 
 const WIDTH: u32 = 48;
@@ -245,6 +245,23 @@ fn cases() -> Vec<(&'static str, WebpSettings, Vec<&'static str>)> {
 	add("lossy sharp yuv", WebpSettings { sharp_yuv: true, ..lossy.clone() }, vec!["-lossy", "-sharp_yuv", "-q", "75", "-m", "4"]);
 	add("near-lossless 60", WebpSettings { lossless: true, near_lossless: 60, ..Default::default() }, vec!["-near_lossless", "60"]);
 	add("near-lossless 0", WebpSettings { lossless: true, near_lossless: 0, ..Default::default() }, vec!["-near_lossless", "0"]);
+	// The animation encoder's own options (`WebpAnimation`).
+	let lossless = WebpSettings { lossless: true, exact: true, ..Default::default() };
+	let with = |base: &WebpSettings, animation: WebpAnimation| WebpSettings { animation, ..base.clone() };
+	let a = WebpAnimation::default;
+	add("lossless -min_size", with(&lossless, WebpAnimation { minimize_size: true, ..a() }), vec!["-min_size", "-lossless", "-exact", "-q", "75", "-m", "4"]);
+	add("lossy -min_size", with(&lossy, WebpAnimation { minimize_size: true, ..a() }), vec!["-min_size", "-lossy", "-q", "75", "-m", "4"]);
+	// img2webp ignores -lossy and -lossless once -mixed is given.
+	add("-mixed from lossy settings", with(&lossy, WebpAnimation { allow_mixed: true, ..a() }), vec!["-mixed", "-q", "75", "-m", "4"]);
+	add("-mixed q30 m6", with(&WebpSettings { quality: 30.0, method: 6, ..lossy.clone() }, WebpAnimation { allow_mixed: true, ..a() }), vec!["-mixed", "-lossy", "-q", "30", "-m", "6"]);
+	add("-mixed -min_size", with(&lossy, WebpAnimation { allow_mixed: true, minimize_size: true, ..a() }), vec!["-mixed", "-min_size", "-q", "75", "-m", "4"]);
+	add("-kmin 2 -kmax 3", with(&lossy, WebpAnimation { kmin: Some(2), kmax: Some(3), ..a() }), vec!["-kmin", "2", "-kmax", "3", "-lossy", "-q", "75", "-m", "4"]);
+	add("-kmax 1 (every frame a keyframe)", with(&lossless, WebpAnimation { kmax: Some(1), ..a() }), vec!["-kmax", "1", "-lossless", "-exact", "-q", "75", "-m", "4"]);
+	add("-kmax 0 (no keyframes)", with(&lossy, WebpAnimation { kmax: Some(0), ..a() }), vec!["-kmax", "0", "-lossy", "-q", "75", "-m", "4"]);
+	add("-kmin 1 alone", with(&lossy, WebpAnimation { kmin: Some(1), ..a() }), vec!["-kmin", "1", "-lossy", "-q", "75", "-m", "4"]);
+	add("-kmax 2 alone, -mixed", with(&lossy, WebpAnimation { kmax: Some(2), allow_mixed: true, ..a() }), vec!["-kmax", "2", "-mixed", "-q", "75", "-m", "4"]);
+	add("-loop 5", with(&lossless, WebpAnimation { loop_count: Some(5), ..a() }), vec!["-loop", "5", "-lossless", "-exact", "-q", "75", "-m", "4"]);
+	add("-loop 0", with(&lossless, WebpAnimation { loop_count: Some(0), ..a() }), vec!["-loop", "0", "-lossless", "-exact", "-q", "75", "-m", "4"]);
 	cases
 }
 
@@ -284,7 +301,8 @@ fn matches_reference_img2webp() {
 			let output = dir.join("reference.webp");
 			let mut command = Command::new(&img2webp);
 			command.args(&flags);
-			if loop_count > 0 {
+			// The source's loop count, unless the case sets its own.
+			if loop_count > 0 && !flags.contains(&"-loop") {
 				command.args(["-loop", &loop_count.to_string()]);
 			}
 			// Frame options go before the frame they apply to; the encoder flags are
