@@ -10,7 +10,7 @@ use gpui::{
 };
 use gpuikit::{elements::input::input, input::InputState};
 
-use crate::css_text::css_text;
+use crate::{css_text::css_text, fade::FadeBg};
 
 use crate::{
 	app::{Popup, Skid}, theme::{ACCENT, ACCENT_TEXT, BG, BRIGHT, DIM, FG, FIELD, MUTED, RULE, Type, VIOLET, c, ca}
@@ -329,7 +329,7 @@ impl Skid {
 					.gap(px(4.))
 					.border_l_4()
 					.border_color(if checked || ring { c(ACCENT) } else { gpui::transparent_black() })
-					.when(!checked, |item| item.rounded(px(12.)).when(!ring, |item| item.hover(|item| item.bg(ca(FIELD, 0.7)))))
+					.when(!checked, |item| item.rounded(px(12.)).when(!ring, |item| item.fade_bg_clear(format!("choice-{id}-{index}"), ca(FIELD, 0.7))))
 					.when(cards, |item| item.flex_1().min_w_0().px(px(10.)).py(px(7.)))
 					.when(!cards, |item| item.px(px(8.)).py(px(4.)))
 					.when(vertical, |item| item.w_full())
@@ -408,8 +408,8 @@ impl Skid {
 						.gap(px(6.))
 						.p(px(6.))
 						.xs()
-						.text_color(c(if lit { BRIGHT } else { FG }))
-						.when(lit, |item| item.child(div().absolute().top(px(1.)).left(px(1.)).right(px(1.)).bottom(px(1.)).rounded(px(9.)).bg(ca(FIELD, 0.5))))
+						.text_color(crate::fade::mix(c(FG), c(BRIGHT), crate::fade::fade(format!("{popup_id}-{index}"), lit)))
+						.child(div().absolute().top(px(1.)).left(px(1.)).right(px(1.)).bottom(px(1.)).rounded(px(9.)).bg(ca(FIELD, 0.5 * crate::fade::fade(format!("{popup_id}-{index}"), lit))))
 						.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
 							if *hovered {
 								this.menu_highlight = Some(index);
@@ -430,12 +430,13 @@ impl Skid {
 				Some(trigger) => {
 					let below = f32::from(window.viewport_size().height - trigger.bottom()) - 8.;
 					let above = f32::from(trigger.top()) - 8.;
-					if below < height && above > below { (gpui::Anchor::BottomLeft, gpui::point(trigger.left(), trigger.top() - px(8.))) } else { (gpui::Anchor::TopLeft, gpui::point(trigger.left(), trigger.bottom() + px(8.))) }
+					// Relative to the trigger's top-left corner, so the menu scrolls with it.
+					if below < height && above > below { (gpui::Anchor::BottomLeft, gpui::point(px(0.), px(-8.))) } else { (gpui::Anchor::TopLeft, gpui::point(px(0.), trigger.size.height + px(8.))) }
 				}
 				None => (gpui::Anchor::TopLeft, gpui::point(px(0.), px(0.))),
 			};
 			let width = trigger.map(|trigger| trigger.size.width);
-			place(anchor, at, popup_panel(&format!("{popup_id}-menu"), width, div().id(ElementId::Name(format!("{popup_id}-list").into())).max_h(px(240.)).overflow_y_scroll().child(list), cx))
+			place_local(anchor, at, popup_panel(&format!("{popup_id}-menu"), width, div().id(ElementId::Name(format!("{popup_id}-list").into())).max_h(px(240.)).overflow_y_scroll().child(list), cx))
 		});
 		div()
 			.id(ElementId::Name(popup_id.clone()))
@@ -614,23 +615,6 @@ impl Skid {
 			.into_any_element()
 	}
 
-	/// `ControlColor`: a colour as the `0xRRGGBB` number `cwebp -blend_alpha` takes.
-	pub fn color(&mut self, label: &str, value: u32) -> AnyElement {
-		field()
-			.child(field_label(label.to_owned()))
-			.child(
-				div()
-					.flex()
-					.items_center()
-					.gap(px(8.))
-					// The webview's `<input type="color">`: a swatch that opens the platform's
-					// colour chooser. gpui has no colour chooser, so this swatch only shows the
-					// colour (see README.md, "Not possible").
-					.child(div().size(px(28.)).rounded(px(6.)).p(px(4.)).child(div().size_full().rounded(px(2.)).bg(gpui::rgb(value)).border_1().border_color(c(RULE))))
-					.child(div().text_color(c(BRIGHT)).child(format!("0x{value:06x}"))),
-			)
-			.into_any_element()
-	}
 }
 
 /// A Nuxt UI `UButton` in `color="neutral" variant="soft"`, size `sm` or `xs`.
@@ -644,7 +628,7 @@ pub fn button_soft(id: &str, label: &str, extra_small: bool) -> gpui::Stateful<g
 		.when(extra_small, |button| button.px(px(8.)).py(px(4.)).rounded(px(6.)))
 		.when(!extra_small, |button| button.px(px(10.)).py(px(6.)).rounded(px(9.)))
 		.bg(c(FIELD))
-		.hover(|button| button.bg(ca(RULE, 0.75)))
+		.fade_bg(id.to_owned(), c(FIELD), ca(RULE, 0.75))
 		.xs()
 		.medium()
 		.text_color(c(FG))
@@ -790,6 +774,15 @@ pub fn popup_panel(id: &str, width: Option<Pixels>, body: impl IntoElement, cx: 
 		.child(body)
 }
 
+/// Put a pop-up over the window with its `anchor` corner at `at`, relative to the top-left
+/// corner of the element it is a child of (which must be `relative()`).
+///
+/// Inside the scrolling settings column a pop-up must be placed this way: one placed in
+/// window coordinates there is moved again by the scroll offset.
+pub fn place_local(anchor: gpui::Anchor, at: gpui::Point<Pixels>, panel: impl IntoElement) -> gpui::Div {
+	div().absolute().top_0().left_0().child(gpui::deferred(gpui::anchored().position_mode(gpui::AnchoredPositionMode::Local).anchor(anchor).position(at).snap_to_window_with_margin(px(8.)).child(panel)).with_priority(1))
+}
+
 /// Put a pop-up over the window with its `anchor` corner at `at`, in window coordinates.
 pub fn place(anchor: gpui::Anchor, at: gpui::Point<Pixels>, panel: impl IntoElement) -> gpui::Deferred {
 	gpui::deferred(gpui::anchored().anchor(anchor).position(at).snap_to_window_with_margin(px(8.)).child(panel)).with_priority(1)
@@ -800,8 +793,12 @@ impl Skid {
 	pub fn record(&self, id: &str) -> impl IntoElement {
 		let store = Rc::clone(&self.slider_bounds);
 		let id: SharedString = id.to_owned().into();
-		canvas(|_, _, _| (), move |bounds, (), _, _| {
-			store.borrow_mut().insert(id.clone(), bounds);
+		canvas(|_, _, _| (), move |bounds, (), window, _| {
+			// Pop-ups are placed from last frame's bounds; when they move (a scroll, a resize),
+			// draw once more so anything placed against them follows at once.
+			if store.borrow_mut().insert(id.clone(), bounds) != Some(bounds) {
+				window.refresh();
+			}
 		})
 		.absolute()
 		.top_0()

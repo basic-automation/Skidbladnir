@@ -132,7 +132,7 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 	// Transparency.
 	let discard = this.toggle("webp-noalpha", "Discard transparency", Some("-noalpha · discard any transparency information"), !s.keep_alpha, false, |t, discard| t.job().webp.keep_alpha = !discard, window, cx);
 	let exact = this.toggle("webp-exact", "Exact", Some("-exact · preserve RGB values in transparent area"), s.exact, false, |t, v| t.job().webp.exact = v, window, cx);
-	let blend_body = s.blend_alpha.map(|colour| this.color("Background", colour));
+	let blend_body = s.blend_alpha.map(|colour| this.color("webp-blend", "Background", colour, |t, v| t.job().webp.blend_alpha = Some(v), window, cx));
 	let blend = this.optional("webp-blend", "Blend onto a background", Some("-blend_alpha · blend colors against background color"), Some("-blend_alpha · not given: transparency is kept"), s.blend_alpha.is_some(), |t, on| t.job().webp.blend_alpha = on.then_some(0x00ff_ffff), blend_body, window, cx);
 	let alpha_quality = this.slider("webp-alpha-q", "Alpha quality", f64::from(s.alpha_quality), 0., 100., 1., None, Some("-alpha_q · transparency-compression quality (0..100)"), false, None, |t, v| t.job().webp.alpha_quality = to_u8(v), window, cx);
 	let alpha_method = this.choice("webp-alpha-method", "Alpha compression", Some("-alpha_method · transparency-compression method (0..1)"), &[(true, "Lossless", None), (false, "None", None)], s.alpha_compression, false, false, false, |t, v| t.job().webp.alpha_compression = v, window, cx);

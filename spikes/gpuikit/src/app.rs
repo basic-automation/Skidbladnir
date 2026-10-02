@@ -13,7 +13,7 @@ use gpui::{
 };
 use gpuikit::{elements::input::input, input::InputState};
 
-use crate::css_text::css_text;
+use crate::{css_text::css_text, fade::FadeBg};
 use skidbladnir_encode::{
 	EncodeJob, OutputFormat, settings::HEIC_X265, source::{self, Conversion, FoundImage, PathInspection}
 };
@@ -33,6 +33,7 @@ pub enum Popup {
 	QueueMenu,
 	PresetForm,
 	Select(SharedString),
+	Color(SharedString),
 }
 
 /// One converted file, as the Tauri `ConversionReport`.
@@ -113,11 +114,16 @@ pub struct Skid {
 	pub disclosures: HashMap<SharedString, bool>,
 	pub slider_bounds: Rc<RefCell<HashMap<SharedString, Bounds<Pixels>>>>,
 	pub drag: Option<SliderDrag>,
+	/// The colour picker: its hue, saturation and value while open, and what is being dragged.
+	pub picker_hsv: Option<(f32, f32, f32)>,
+	pub color_drag: Option<crate::color_picker::ColorDrag>,
 	pub scroll: ScrollHandle,
 	/// Where the scrollbar thumb was grabbed, while it is being dragged.
 	pub scrollbar_drag: Option<Pixels>,
 	/// `UpdateBanner.vue`: the version on offer, once the manifest says there is one.
-	pub update: Option<String>,
+	pub update: Option<crate::updater::Update>,
+	/// While installing: bytes downloaded, and the total when the server says.
+	pub installing: Option<(u64, Option<u64>)>,
 	pub update_dismissed: bool,
 	pub update_error: String,
 	pub subscriptions: Vec<Subscription>,
@@ -194,9 +200,12 @@ impl Skid {
 			disclosures: HashMap::new(),
 			slider_bounds: Rc::new(RefCell::new(HashMap::new())),
 			drag: None,
+			picker_hsv: None,
+			color_drag: None,
 			scroll: ScrollHandle::new(),
 			scrollbar_drag: None,
 			update: None,
+			installing: None,
 			update_dismissed: false,
 			update_error: String::new(),
 			subscriptions,
@@ -207,7 +216,7 @@ impl Skid {
 
 	/// Debugging aids for comparing the two windows state by state: `SKID_FORMAT` picks the
 	/// output format (not saved), `SKID_INPUTS` queues files as a drop would, `SKID_PREVIEW`
-	/// runs the preview, `SKID_OPEN` opens a pop-up (`settings`, `queue`,
+	/// runs the preview, `SKID_CHOOSE` opens Choose images…, `SKID_OPEN` opens a pop-up (`settings`, `queue`,
 	/// `preset-form`, or a select's id such as `select-webp-preset`), `SKID_SCROLL` scrolls
 	/// the settings column to that many pixels.
 	fn debug_state(mut self, cx: &mut Context<Self>) -> Self {
@@ -241,6 +250,9 @@ impl Skid {
 			})
 			.detach();
 		}
+		if std::env::var_os("SKID_CHOOSE").is_some() {
+			self.choose_inputs(cx);
+		}
 		let open = std::env::var("SKID_OPEN").ok();
 		let scroll = std::env::var("SKID_SCROLL").ok().and_then(|value| value.parse::<f32>().ok());
 		if open.is_some() || scroll.is_some() {
@@ -253,6 +265,7 @@ impl Skid {
 					}
 					this.popup = open.map(|open| match open.as_str() {
 						"settings" => Popup::Settings,
+						"color" => Popup::Color("color-webp-blend".into()),
 						"queue" => Popup::QueueMenu,
 						"preset-form" => Popup::PresetForm,
 						other => Popup::Select(other.to_owned().into()),
@@ -264,6 +277,56 @@ impl Skid {
 			.detach();
 		}
 		self
+	}
+
+	/// `install_update`: download, verify, replace, relaunch. Progress lands in the banner.
+	fn install_update(&mut self, cx: &mut Context<Self>) {
+		let Some(update) = self.update.clone() else { return };
+		self.update_error.clear();
+		self.installing = Some((0, None));
+		cx.notify();
+		cx.spawn(async move |this, cx| {
+			let (sender, mut receiver) = futures::channel::mpsc::unbounded::<(u64, Option<u64>)>();
+			let run = cx.background_spawn(async move {
+				let mut last = 0;
+				crate::updater::install(&update, &mut |done, total| {
+					// About a hundred updates over the download, not one per chunk.
+					if total.is_none_or(|total| done == total || done - last >= total / 100) {
+						last = done;
+						sender.unbounded_send((done, total)).ok();
+					}
+				})
+			});
+			let forward = {
+				let this = this.clone();
+				let mut cx = cx.clone();
+				async move {
+					use futures::StreamExt as _;
+					while let Some(progress) = receiver.next().await {
+						this.update(&mut cx, |this, cx| {
+							this.installing = Some(progress);
+							cx.notify();
+						})
+						.ok();
+					}
+				}
+			};
+			let (result, ()) = futures::join!(run, forward);
+			this.update(cx, |this, cx| {
+				this.installing = None;
+				match result {
+					// `app.restart()`: start the new AppImage, then leave.
+					Ok(appimage) => match std::process::Command::new(&appimage).spawn() {
+						Ok(_) => cx.quit(),
+						Err(error) => this.update_error = format!("installed, but could not restart: {error}"),
+					},
+					Err(error) => this.update_error = error,
+				}
+				cx.notify();
+			})
+			.ok();
+		})
+		.detach();
 	}
 
 	/// `check_for_update`: the same manifest, the same opt-out.
@@ -279,7 +342,7 @@ impl Skid {
 		}
 		if std::env::var_os("SKIDBLADNIR_NO_UPDATE_CHECK").is_none_or(|value| value.is_empty()) {
 			cx.spawn(async move |this, cx| {
-				let offered = cx.background_spawn(async move { crate::updater::check(APP_VERSION) }).await;
+				let offered = cx.background_spawn(async move { crate::updater::check(&current_version()) }).await;
 				if let Some(version) = offered {
 					this.update(cx, |this, cx| {
 						this.update = Some(version);
@@ -294,8 +357,15 @@ impl Skid {
 	}
 
 	fn update_banner(&mut self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
-		let version = self.update.as_ref().filter(|_| !self.update_dismissed)?;
-		let description = if self.update_error.is_empty() { format!("You have {APP_VERSION}. Installing restarts Skidbladnir.") } else { format!("The update could not be installed: {}", self.update_error) };
+		let version = self.update.as_ref().filter(|_| !self.update_dismissed)?.version.clone();
+		// `UpdateBanner.vue`'s description, state by state.
+		let description = match (self.installing, self.update_error.is_empty()) {
+			(_, false) => format!("The update could not be installed: {}", self.update_error),
+			(Some((done, Some(total))), true) if total > 0 => format!("Downloading… {}%", (done * 100 / total).min(100)),
+			(Some(_), true) => "Downloading…".to_owned(),
+			(None, true) => format!("You have {}. Installing restarts Skidbladnir.", current_version()),
+		};
+		let installing = self.installing.is_some();
 		Some(
 			div()
 				.flex()
@@ -327,28 +397,31 @@ impl Skid {
 								.py(px(4.))
 								.rounded(px(9.))
 								.bg(c(ACCENT))
-								.hover(|button| button.bg(ca(ACCENT, 0.75)))
+								.fade_bg("update-install", c(ACCENT), ca(ACCENT, 0.75))
 								.xs()
 								.medium()
 								.text_color(c(BG))
+								.when(installing, |button| button.opacity(0.75).child(icon("lucide--loader-circle", 16., c(BG))))
 								.child(if self.update_error.is_empty() { "Install and restart" } else { "Try again" })
 								.press(self, "update-install", Ring::Primary, 9., |this, _, cx|  {
-									// Downloading, verifying and swapping the binary is
-									// tauri-plugin-updater's job; the spike has no replacement for it.
-									this.update_error = "installing is not implemented in the gpuikit spike".to_owned();
-									cx.notify();
+									if this.installing.is_none() {
+										this.install_update(cx);
+									}
 								}, window, cx),
 						)
-						.child(
-							div()
-								.id("update-dismiss")
-								.rounded(px(9.))
-								.press(self, "update-dismiss", Ring::Neutral, 9., |this, _, cx|  {
-									this.update_dismissed = true;
-									cx.notify();
-								}, window, cx)
-								.child(icon("lucide--x", 20., c(DIM))),
-						),
+						// No close while it installs, as `:close="!installing"`.
+						.when(!installing, |actions| {
+							actions.child(
+								div()
+									.id("update-dismiss")
+									.rounded(px(9.))
+									.press(self, "update-dismiss", Ring::Neutral, 9., |this, _, cx|  {
+										this.update_dismissed = true;
+										cx.notify();
+									}, window, cx)
+									.child(icon("lucide--x", 20., c(DIM))),
+							)
+						}),
 				)
 				.into_any_element(),
 		)
@@ -380,10 +453,11 @@ impl Skid {
 	}
 
 	fn choose_inputs(&mut self, cx: &mut Context<Self>) {
-		// gpui's prompt has no file-type filter; the old dialog lists only images.
-		let picked = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: true, prompt: None });
+		if std::env::var_os("SKID_PROBE").is_some() {
+			eprintln!("choose images");
+		}
 		cx.spawn(async move |this, cx| {
-			let Ok(Ok(Some(paths))) = picked.await else { return };
+			let Some(paths) = crate::dialogs::pick_images().await.filter(|paths| !paths.is_empty()) else { return };
 			let inspected = cx.background_spawn({
 				let paths = paths.clone();
 				async move { source::inspect_paths(&paths) }
@@ -698,7 +772,7 @@ impl Skid {
 						.py(px(4.))
 						.border_l_1()
 						.border_color(if checked || ring { c(ACCENT) } else { gpui::transparent_black() })
-						.when(!checked && !ring, |item| item.hover(|item| item.bg(ca(FIELD, 0.5))))
+						.when(!checked && !ring, |item| item.fade_bg_clear(format!("format-{label}"), ca(FIELD, 0.5)))
 						.cursor_pointer()
 						.track_focus(&focus)
 						.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
@@ -733,7 +807,7 @@ impl Skid {
 			.px(px(8.))
 			.py(px(4.))
 			.rounded(px(9.))
-			.hover(|button| button.bg(c(FIELD)))
+			.fade_bg_clear("app-settings", c(FIELD))
 			.press(self, "app-settings", Ring::Neutral, 9., |this, window, cx|  {
 				this.popup = if this.popup == Some(Popup::Settings) { None } else { Some(Popup::Settings) };
 				if this.popup.is_some() {
@@ -802,7 +876,7 @@ impl Skid {
 							.pr(px(32.))
 							.xs()
 							.when(active, |item| item.border_color(c(BROWN)).semibold().text_color(c(ACCENT_TEXT)))
-							.when(!active, |item| item.rounded(px(12.)).border_color(gpui::transparent_black()).text_color(c(BRIGHT)).hover(|item| item.bg(ca(FIELD, 0.7))))
+							.when(!active, |item| item.rounded(px(12.)).border_color(gpui::transparent_black()).text_color(c(BRIGHT)).fade_bg_clear(format!("preset-apply-{index}"), ca(FIELD, 0.7)))
 							.press(self, "preset-apply", Ring::Plain(BRIGHT), 12., move |this, _, cx|  {
 								if let Some(preset) = this.presets.iter().find(|preset| preset.name == name) {
 									this.settings = Some(preset.settings.clone());
@@ -822,7 +896,7 @@ impl Skid {
 							.rounded(px(9.))
 							.opacity(0.)
 							.group_hover(group, |button| button.opacity(1.))
-							.hover(|button| button.bg(c(FIELD)))
+							.fade_bg_clear(format!("preset-delete-{index}"), c(FIELD))
 							.press(self, "preset-delete", Ring::Neutral, 9., move |this, _, cx|  {
 								this.preset_error.clear();
 								match shell::presets::delete_from(&shell::config_directory(), &delete_name) {
@@ -899,7 +973,7 @@ impl Skid {
 									.id("preset-add")
 									.child(self.record("preset-add"))
 									.rounded(px(9.))
-									.hover(|button| button.bg(c(FIELD)))
+									.fade_bg_clear("preset-add", c(FIELD))
 									.press(self, "preset-add", Ring::Neutral, 9., |this, window, cx|  {
 										this.popup = if this.popup == Some(Popup::PresetForm) { None } else { Some(Popup::PresetForm) };
 										if this.popup.is_some() {
@@ -940,6 +1014,7 @@ impl Skid {
 		];
 		let item = |id: &str, index: usize, icon_name: Option<&str>| {
 			let lit = highlight == Some(index);
+			let shown = crate::fade::fade(format!("menu-{id}"), lit);
 			div()
 				.id(SharedString::from(id.to_owned()))
 				.relative()
@@ -956,9 +1031,9 @@ impl Skid {
 				// Nuxt UI's item ends in an empty trailing slot, which still takes a gap.
 				.pr(px(12.))
 				.sm()
-				.text_color(c(if lit { BRIGHT } else { FG }))
-				.when(lit, |item| item.child(div().absolute().top(px(1.)).left(px(1.)).right(px(1.)).bottom(px(1.)).rounded(px(9.)).bg(ca(FIELD, 0.5))))
-				.when_some(icon_name.map(str::to_owned), move |item, name| item.child(div().relative().child(icon(&name, 20., c(if lit { FG } else { DIM })))))
+				.text_color(crate::fade::mix(c(FG), c(BRIGHT), shown))
+				.child(div().absolute().top(px(1.)).left(px(1.)).right(px(1.)).bottom(px(1.)).rounded(px(9.)).bg(ca(FIELD, 0.5 * shown)))
+				.when_some(icon_name.map(str::to_owned), move |item, name| item.child(div().relative().child(icon(&name, 20., crate::fade::mix(c(DIM), c(FG), shown)))))
 		};
 		let menu = div()
 			.flex()
@@ -991,7 +1066,7 @@ impl Skid {
 	}
 
 	fn title_bar(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-		let window_button = |id: &str, icon_name: &str, wide: bool| div().id(SharedString::from(id.to_owned())).flex_none().pt(px(16.)).pb(px(16.)).pl(px(16.)).pr(px(if wide { 32. } else { 16. })).hover(|button| button.bg(c(FIELD))).child(icon(icon_name, 16., c(FG)));
+		let window_button = |id: &str, icon_name: &str, wide: bool| div().id(SharedString::from(id.to_owned())).flex_none().pt(px(16.)).pb(px(16.)).pl(px(16.)).pr(px(if wide { 32. } else { 16. })).fade_bg_clear(id.to_owned(), c(FIELD)).child(icon(icon_name, 16., c(FG)));
 		div()
 			.id("title-bar")
 			.flex()
@@ -1058,7 +1133,7 @@ impl Skid {
 				.py(px(10.))
 				.rounded(px(6.))
 				.bg(if enabled { c(VIOLET) } else { ca(VIOLET, 0.6) })
-				.when(enabled, |button| button.hover(|button| button.bg(ca(VIOLET, 0.9))))
+				.when(enabled, |button| button.fade_bg("convert", c(VIOLET), ca(VIOLET, 0.9)))
 				.sm()
 				.semibold()
 				.text_color(c(ON_VIOLET))
@@ -1148,7 +1223,7 @@ impl Skid {
 			.id("dismiss-results")
 			.p(px(4.))
 			.rounded(px(9.))
-			.hover(|button| button.bg(c(FIELD)))
+			.fade_bg_clear("dismiss-results", c(FIELD))
 			.press(self, "dismiss-results", Ring::Neutral, 9., |this, _, cx|  {
 				this.reports.clear();
 				this.failures.clear();
@@ -1208,7 +1283,7 @@ impl Skid {
 					.py(px(7.))
 					.rounded(px(6.))
 					.bg(c(ACCENT))
-					.hover(|button| button.bg(ca(ACCENT, 0.85)))
+					.fade_bg("preview-run", c(ACCENT), ca(ACCENT, 0.85))
 					.xs()
 					.semibold()
 					.text_color(c(FG))
@@ -1308,6 +1383,9 @@ impl Skid {
 impl Render for Skid {
 	fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
 		crate::controls::print_probes();
+		if crate::fade::take_moving() {
+			window.request_animation_frame();
+		}
 		if std::env::var_os("SKID_BENCH").is_some()
 			&& let Some((what, started)) = self.bench
 			&& ((what == "preview" && self.preview.is_some() && !self.previewing) || (what == "convert" && !self.busy && !self.reports.is_empty()))
@@ -1372,6 +1450,8 @@ impl Render for Skid {
 			.on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
 				if this.drag.is_some() && event.pressed_button == Some(MouseButton::Left) {
 					this.drag_slider(event.position.x, cx);
+				} else if this.color_drag.is_some() && event.pressed_button == Some(MouseButton::Left) {
+					this.drag_color(event.position, cx);
 				} else if let Some(grab) = this.scrollbar_drag
 					&& event.pressed_button == Some(MouseButton::Left)
 				{
@@ -1384,12 +1464,16 @@ impl Render for Skid {
 				MouseButton::Left,
 				cx.listener(|this, _: &MouseUpEvent, _, cx| {
 					this.drag = None;
+					this.color_drag = None;
 					this.scrollbar_drag = None;
 					cx.notify();
 				}),
 			)
 			.on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
 				let menu_open = matches!(this.popup, Some(Popup::QueueMenu | Popup::Select(_)));
+				if std::env::var_os("SKID_PROBE").is_some() {
+					eprintln!("root key {} menu_open {menu_open} highlight {:?} actions {}", event.keystroke.key, this.menu_highlight, this.menu_actions.len());
+				}
 				match event.keystroke.key.as_str() {
 					"escape" if this.popup.is_some() => {
 						this.popup = None;
@@ -1460,6 +1544,12 @@ impl Render for Skid {
 	}
 }
 
+/// The version this copy reports to the updater. `SKID_VERSION` overrides it, for trying an
+/// update without an older build to hand.
+fn current_version() -> String {
+	std::env::var("SKID_VERSION").unwrap_or_else(|_| APP_VERSION.to_owned())
+}
+
 /// The thumb's top and length in the scroll viewport, when there is anything to scroll.
 fn thumb(scroll: &ScrollHandle) -> Option<(Pixels, Pixels)> {
 	let viewport = scroll.bounds().size.height;
@@ -1517,7 +1607,7 @@ fn sidebar_button(id: &str, icon_name: &str, title: &str, subtitle: &str, badge:
 		.rounded(px(12.))
 		.px(px(10.))
 		.py(px(7.))
-		.hover(|button| button.bg(ca(FIELD, 0.7)))
+		.fade_bg_clear(id.to_owned(), ca(FIELD, 0.7))
 		.child(
 			div()
 				.flex()
@@ -1542,7 +1632,7 @@ fn primary_button(id: &str, label: &str, disabled: bool) -> gpui::Stateful<gpui:
 		.rounded(px(9.))
 		.bg(c(ACCENT))
 		.when(disabled, |button| button.opacity(0.75))
-		.when(!disabled, |button| button.hover(|button| button.bg(ca(ACCENT, 0.75))))
+		.when(!disabled, |button| button.fade_bg(id.to_owned(), c(ACCENT), ca(ACCENT, 0.75)))
 		.xs()
 		.medium()
 		.text_color(c(BG))

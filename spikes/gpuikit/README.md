@@ -40,6 +40,8 @@ Debug switches, for putting the window in a given state:
 | `SKID_CONVERT` | Runs a conversion |
 | `SKID_OPEN` | Opens a pop-up |
 | `SKID_SCROLL` | Scrolls the window |
+| `SKID_CHOOSE` | Opens "Choose images…" |
+| `SKID_VERSION` | Pretends to be an older version, to try an update |
 | `SKID_PROBE` | Prints layout bounds |
 | `SKID_BENCH` | Prints timings |
 
@@ -88,6 +90,14 @@ What it took:
     room;
   - the settings popover is bottom-aligned 8px right of the gear;
   - the queue menu is sized to its content, with the item's empty trailing slot.
+- **Hover colour fades** (`src/fade.rs`). Tailwind's `transition-colors`, 150ms on
+  `cubic-bezier(0.4, 0, 0.2, 1)`, reversing mid-way as CSS does. It covers every hover
+  background and the menu highlights. gpui's `.hover()` style switches instantly, so each
+  element records its hover state, and the window draws frames while a fade is moving.
+- **"Choose images…" with the old dialog's Images filter** (`src/dialogs.rs`). gpui's dialog
+  has no filters. On Linux the desktop's file-chooser portal is asked directly, through the
+  same `ashpd` gpui uses, with each extension in both cases. Elsewhere it uses `rfd`, as
+  tauri-plugin-dialog does.
 - **CSS line breaking** (`src/css_text.rs`). gpui's wrapper counts the space after a word
   toward the line, and breaks at any punctuation. CSS lets that space hang and doesn't break
   at `/`, `(` or `,`. Text is measured with gpui's own shaper and broken the CSS way, so every
@@ -120,27 +130,32 @@ lines of Vue that lean on Nuxt UI.
      CSS px by the Resize heading. Text is sharper than the old window's downsampled text.
    - **Fix:** needs a patch to gpui's Wayland backend (render at 2×) or to its rounding. gpui
      has no setting for either. At 1× or 2× the two would agree.
-2. **Colour transitions.** The old window fades hover colours over 150ms (`transition-colors`).
-   gpui has no style transitions, so hovers switch instantly. Each could be animated by hand;
-   not done.
-3. **The colour chooser.** `<input type="color">` opens GTK's colour dialog. gpui has none, so
-   the Blend background swatch only shows the colour.
-4. **File-type filters in Open.** gpui's `PathPromptOptions` has no filters, so "Choose
-   images…" lists every file.
-5. **Selecting text.** The old window lets paths, the version line and results be selected and
+2. **The colour chooser isn't the platform's own.** `<input type="color">` opens whatever the
+   engine provides: GTK's chooser under WebKitGTK, a popup under WebView2, the colour panel on
+   macOS. gpui has none, so the swatch opens one in-app picker on every platform
+   (`src/color_picker.rs`): a saturation and brightness square, a hue strip and a `#rrggbb`
+   field, styled like the window's other pop-ups.
+3. **Selecting text.** The old window lets paths, the version line and results be selected and
    copied. gpui text isn't selectable without a custom element; not done.
-6. **Installing updates.** The check and the banner are implemented against the same manifest.
-   Downloading, verifying and swapping the binary is tauri-plugin-updater's, and has no
-   counterpart here (`cargo-packager-updater` is the likely replacement).
-7. **Resizing the frameless window from its edges.** Possible with gpui's `start_window_resize`;
+4. **Updates install only into an AppImage.** `src/updater.rs` does what tauri-plugin-updater
+   does for one:
+   - reads the same manifest, picking the installer-specific platform entry first;
+   - downloads the release and checks its minisign signature against the key in
+     `tauri.conf.json`, refusing a mismatch;
+   - replaces the running AppImage and relaunches it.
+
+   Tried end to end against the real 1.1.0 release into a throwaway file
+   (`examples/update_install.rs`). The .deb, Windows and macOS installs aren't implemented and
+   say so.
+5. **Resizing the frameless window from its edges.** Possible with gpui's `start_window_resize`;
    not done. Untested under a tiling compositor.
-8. **Number-field stepping.** UInputNumber's arrow-key stepping isn't reproduced on gpuikit's
+6. **Number-field stepping.** UInputNumber's arrow-key stepping isn't reproduced on gpuikit's
    input.
-9. **HEIC compatible-brands tags.** A hand-built tag input. Backspace-to-remove and comma-to-add
+7. **HEIC compatible-brands tags.** A hand-built tag input. Backspace-to-remove and comma-to-add
    are missing.
-10. **Screen readers.** Roles and names aren't wired on the hand-built controls. gpui has
+8. **Screen readers.** Roles and names aren't wired on the hand-built controls. gpui has
     AccessKit underneath; not done.
-11. **Untested here:**
+9. **Untested here:**
     - dragging files over the window (no pointer automation);
     - macOS and Windows;
     - the standard (Kvazaar) edition.
@@ -189,5 +204,12 @@ plus the AppImage runtime. The spike is one process.
 `assets/fonts` holds Fira Code (SIL OFL 1.1), baked from `@fontsource-variable/fira-code`.
 `assets/icons` holds the same Iconify icons the frontend bundles, under their collections'
 licences: Lucide, Material Symbols, MDI, Iconoir, VS Code Icons, Bootstrap Icons, Codicons,
-Elusive, Subway, IconaMoon, Google Material Icons. `skid--jxl-format.svg` and the logo are the
+Elusive, Subway, IconaMoon, Google Material Icons.
+
+## Found along the way
+
+The updater manifest's Linux AppImage entry is the standard edition
+(`Skidbladnir_1.1.0_amd64.AppImage`), and there is no GPL entry. An updater running in the GPL
+AppImage, whether tauri-plugin-updater or this one, replaces it with the standard (Kvazaar)
+edition. `skid--jxl-format.svg` and the logo are the
 app's own.

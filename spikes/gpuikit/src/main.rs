@@ -3,8 +3,11 @@
 
 mod app;
 mod assets;
+mod color_picker;
 mod controls;
 mod css_text;
+mod dialogs;
+mod fade;
 mod panels;
 mod shell;
 mod theme;

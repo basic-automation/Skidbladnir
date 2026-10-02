@@ -31,7 +31,17 @@ base64 = "0.23"
 libwebp-sys = "0.14"
 futures = "0.3"
 ureq = "3"
+# The updater's signature check, as tauri-plugin-updater makes it.
+minisign-verify = "0.2"
 
 [features]
 # The GPL edition, as the installed 1.0.0 is: HEIC through x265, with x265's controls.
 gpl = ["skidbladnir-encode/x265"]
+
+# "Choose images…" with an Images filter, which gpui's own dialog cannot take.
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.13", default-features = false, features = ["async-io", "file_chooser"] }
+url = "2"
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+rfd = "0.15"

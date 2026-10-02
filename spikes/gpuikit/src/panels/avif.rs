@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use gpui::{AnyElement, ClickEvent, Context, ElementId, InteractiveElement, IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, Window, div, px};
 use skidbladnir_encode::settings::{Cicp, CleanAperture, CodecOption, Fraction, Grid, MetadataSource, QuantizerRange, Tiling, YuvFormat};
 
+use crate::fade::FadeBg;
 use crate::{
 	app::Skid, controls::{help, icon}, panels::webp::{to_u8, to_u32}, theme::{FG, FIELD, RULE, Type, c, ca}
 };
@@ -278,7 +279,7 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 					.mb(px(8.))
 					.p(px(6.))
 					.rounded(px(6.))
-					.hover(|button| button.bg(c(FIELD)))
+					.fade_bg_clear(format!("avif-option-{index}-remove"), c(FIELD))
 					.cursor_pointer()
 					.on_click(cx.listener(move |t, _: &ClickEvent, _, cx| {
 						let options = &mut t.job().avif.codec_options;
@@ -301,7 +302,7 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 				.py(px(6.))
 				.rounded(px(9.))
 				.bg(c(FIELD))
-				.hover(|button| button.bg(ca(RULE, 0.75)))
+				.fade_bg("avif-option-add", c(FIELD), ca(RULE, 0.75))
 				.xs()
 				.medium()
 				.text_color(c(FG))
