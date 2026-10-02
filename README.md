@@ -148,20 +148,23 @@ Download the file for your computer from the
 | Ubuntu 22.04 or later, Debian 12 or later, Linux Mint 21 or later, and distributions based on them | `Skidbladnir_<version>_amd64.deb` |
 | Fedora, openSUSE and other RPM-based distributions with glibc 2.35 or later | `Skidbladnir_<version>_x86_64.rpm` |
 | Any other 64-bit Linux with glibc 2.35 or later | `Skidbladnir_<version>_amd64.AppImage` |
+| Linux on 64-bit ARM (a Raspberry Pi 4 or 5 on a 64-bit system, ARM laptops and servers), glibc 2.35 or later | `Skidbladnir_<version>_arm64.deb`, `Skidbladnir_<version>_aarch64.rpm` or `Skidbladnir_<version>_aarch64.AppImage`, as above |
 
 **Not sure which edition?** Download the standard edition: the files above, named
 `Skidbladnir_…` with an underscore. Choose the GPL edition, the same files named
 `Skidbladnir-GPL_…`, only if you write HEIC and want the x265 encoder: `heif-enc -L`
 lossless, 4:4:4 and 4:2:2 chroma, 10-bit, x265's preset and tune, its main tuning
-controls, and any other x265 parameter. Both are free. The licence matters only if you redistribute the
-app; [Editions](#editions) has the details.
+controls, and any other x265 parameter. Both are free. The licence matters only if you
+redistribute the app; [Editions](#editions) has the details. On ARM Linux the GPL
+edition's x265 runs without its assembly (it cannot be linked into the shared libheif
+there), so its HEIC encodes are slower; the files are the same.
 
 The release page lists other files too; they are not installers. The `.app.tar.gz` files
 are for the in-app updater on a Mac. `Skidbladnir-<version>-source.tar.gz` is the complete
 source with every submodule; GitHub's own "Source code" archives leave the submodules out.
 
-There are no builds for 32-bit systems, Linux on ARM or Windows on ARM. Windows on ARM
-can run x64 programs through emulation, but nobody has tried Skidbladnir there.
+There are no builds for 32-bit systems or Windows on ARM. Windows on ARM can run x64
+programs through emulation, but nobody has tried Skidbladnir there.
 [Status](#status) says which builds have been run, and how.
 
 ### Opening it the first time
@@ -447,9 +450,10 @@ Known gaps:
   the test suite runs on macOS, but nobody has yet opened the app on a real Mac. The
   standard edition's Windows installer is installed and exercised by CI on every change,
   and the Linux app (both editions) is launched and driven by CI on every change, though
-  not from its `.deb` or AppImage. The `.rpm` is installed by CI on the latest Fedora
-  only. The published 0.5.0 `.deb` and AppImage were run
-  through that release's smoke test by hand.
+  not from its `.deb` or AppImage. Each release's `.deb` is installed by CI on Ubuntu 22.04
+  and Debian 12, and its `.rpm` on the latest Fedora, on x86-64 and ARM64 alike, and
+  checked to find every library it needs; the ARM64 app itself has not been launched. The
+  published 0.5.0 `.deb` and AppImage were run through that release's smoke test by hand.
 - The app is not code-signed on any platform;
   [Opening it the first time](#opening-it-the-first-time) shows how to get past each
   system's warning.
