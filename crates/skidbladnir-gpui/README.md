@@ -1,34 +1,34 @@
-# gpui spike: the Tauri window, rebuilt to match
+# skidbladnir-gpui: the window, drawn with gpui
 
-Skidbladnir's whole window, rebuilt with [gpui](https://www.gpui.rs) (and
-[gpuikit](https://github.com/iamnbutler/gpuikit)) to match the installed Tauri build:
-**Skidbladnir-GPL 1.1.0** on Linux (since brought up to 1.2.0) (WebKitGTK), Hyprland, at 1.5× scale.
+Skidbladnir's window drawn with [gpui](https://www.gpui.rs) (and
+[gpuikit](https://github.com/iamnbutler/gpuikit)'s text fields). It began as a spike to
+answer whether a gpui window could replace the Nuxt webview without the user noticing, and
+became the default window in 1.3.0. It was rebuilt to match the installed Tauri build,
+**Skidbladnir-GPL 1.1.0** on Linux (WebKitGTK), Hyprland, at 1.5× scale, and since brought
+up to 1.2.0.
 
-The point was a fair comparison. A smaller mock-up would make any benchmark meaningless, so
-everything the old window draws is here:
+Everything the webview window draws is here:
 
 - the frame, rail, sidebar and header;
 - all four format panels, plus Crop, Resize and TIFF input;
-- the update banner, preview, progress and results;
-- the queue, settings, preset and select pop-ups;
-- focus outlines, keyboard behaviour and drag-and-drop.
+- the update banner, About view, preview, progress, output warnings and results;
+- the queue, settings, preset, select and colour pop-ups;
+- focus outlines, keyboard behaviour, screen-reader roles and drag-and-drop.
 
-The window's own storage and preview code (`src-tauri/src/{preferences,presets,preview}.rs`)
-is compiled in unchanged, so both apps read the same files and do the same work.
-
-It is its own Cargo workspace. The root workspace, CI and `cargo deny` never build it.
+The shell's own storage and preview code (`src-tauri/src/{preferences,presets,preview}.rs`)
+is compiled in unchanged, so both windows read and write the same files and do the same
+work.
 
 ## Running it
 
-```sh
-git submodule update --init third_party/aom third_party/libavif third_party/libwebp third_party/libjpeg-turbo third_party/libheif third_party/x265 third_party/libde265
-scripts/build-libheif.sh --edition gpl          # once; the reference build is the GPL edition
-cd spikes/gpuikit
-SKIDBLADNIR_LIBHEIF_DIR=$PWD/../../build/libheif-gpl cargo run --release --features gpl
-```
+The Tauri shell opens this window unless it is built without its `gpui` feature or started
+with `SKIDBLADNIR_UI=webview`; if the window cannot open, the shell starts the webview
+window instead. So it runs as the app does:
 
-`SKIDBLADNIR_LIBHEIF_DIR` must be absolute: the encode crate's build script resolves it from
-its own directory.
+```sh
+cd src-tauri && ../frontend/node_modules/.bin/tauri build --no-bundle   # see the main README
+../target/release/skidbladnir
+```
 
 Debug switches, for putting the window in a given state:
 
@@ -38,12 +38,13 @@ Debug switches, for putting the window in a given state:
 | `SKID_INPUTS` | Queues files, as a drop would |
 | `SKID_PREVIEW` | Runs a preview |
 | `SKID_CONVERT` | Runs a conversion |
-| `SKID_OPEN` | Opens a pop-up |
+| `SKID_OPEN` | Opens a pop-up (`settings`, `queue`, `color`, `preset-form`, a select's id) or the About view (`about`, `about:license`, `about:notices`, `about:copying`) |
 | `SKID_SCROLL` | Scrolls the window |
 | `SKID_CHOOSE` | Opens "Choose images…" |
 | `SKID_VERSION` | Pretends to be an older version, to try an update |
 | `SKID_PROBE` | Prints layout bounds |
 | `SKID_BENCH` | Prints timings |
+| `SKID_OPAQUE` | Draws the window opaque |
 
 ## How it was matched
 
@@ -179,7 +180,7 @@ lines of Vue that lean on Nuxt UI.
 
 ## Benchmarks
 
-Both apps were measured on the same machine, in the same tile (1274×691 at 1.5×), with
+Measured on the spike, before it became the default. Both apps were measured on the same machine, in the same tile (1274×691 at 1.5×), with
 update checks off and an isolated config directory (`tools/bench.py`):
 
 - the same preferences and presets;
@@ -189,7 +190,7 @@ update checks off and an isolated config directory (`tools/bench.py`):
 Medians of 7 rounds, each round starting fresh processes. The machine was quiet (load
 average under 3):
 
-| | Tauri 1.1.0 | gpui spike |
+| | Tauri 1.1.0 (webview) | gpui |
 | --- | --- | --- |
 | Launch to UI drawn | 976 ms | 678 ms |
 | Memory, idle (PSS, all processes) | 380 MB | 109 MB |

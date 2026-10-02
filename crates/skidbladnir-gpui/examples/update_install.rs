@@ -5,8 +5,7 @@
 //! Checks for an update newer than the given version, downloads it, verifies its signature
 //! with the app's key, installs it over `$APPIMAGE`, and confirms a one-byte change is refused.
 
-#[path = "../src/updater.rs"]
-mod updater;
+use skidbladnir_gpui::updater;
 
 fn main() {
 	let current = std::env::args().nth(1).unwrap_or_else(|| "1.0.0".to_owned());

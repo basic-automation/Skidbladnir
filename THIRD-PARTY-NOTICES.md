@@ -3148,7 +3148,7 @@ be appreciated.
 
 ## Fira Code 5.3.0 (the window's font)
 
-The window's typeface, bundled as web fonts from @fontsource-variable/fira-code. Licence: OFL-1.1.
+The window's typeface: bundled as web fonts from @fontsource-variable/fira-code in the webview window, and as two static cuts made from those (weights 450 and 600, the baseline moved 0.1em; crates/skidbladnir-gpui/tools/shift_baseline.py) in the gpui window. Licence: OFL-1.1.
 
 ```text
 Copyright 2014-2020 The Fira Code Project Authors (https://github.com/tonsky/FiraCode)

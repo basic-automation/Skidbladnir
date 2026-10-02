@@ -8,7 +8,7 @@
 //! - **Install:** download the artifact, verify its minisign signature against the public key
 //!   in `tauri.conf.json` and refuse it if that fails, then install it as the platform's
 //!   package does:
-//!   - AppImage: replace the file and relaunch;
+//!   - `AppImage`: replace the file and relaunch;
 //!   - .deb and .rpm: `dpkg -i` / `rpm -U` with administrator rights through `pkexec`;
 //!   - Windows: run the NSIS installer passively, which replaces the app and restarts it;
 //!   - macOS: unpack the `.app.tar.gz`, swap it for the running bundle (asking for
@@ -23,24 +23,15 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 /// Each edition's own manifest, so a GPL install only ever updates to a GPL build: the
 /// endpoint in `tauri.conf.json` for the standard edition, and the one `tauri.gpl.conf.json`
 /// overrides it with for the GPL edition. `release.yml` publishes both.
-const MANIFEST: &str = if skidbladnir_encode::settings::HEIC_X265 {
-	"https://raw.githubusercontent.com/basic-automation/Skidbladnir/updater/latest-gpl.json"
-} else {
-	"https://raw.githubusercontent.com/basic-automation/Skidbladnir/updater/latest.json"
-};
+const MANIFEST: &str = if skidbladnir_encode::settings::HEIC_X265 { "https://raw.githubusercontent.com/basic-automation/Skidbladnir/updater/latest-gpl.json" } else { "https://raw.githubusercontent.com/basic-automation/Skidbladnir/updater/latest.json" };
 
 /// `plugins.updater.pubkey` in `tauri.conf.json`: a base64-wrapped minisign public key.
 const PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUwOThEOTc3MDc2NEQ2MjEKUldRaDFtUUhkOW1ZNEtMWHE0UFNrc1FtME5lWmlKdUN3cE5ta2dKaE8wOWo0UEozUFFvNmpXYk4K";
 
 /// Which package this copy was installed from.
 ///
-/// tauri-bundler stamps the package type into the binary it packages, by rewriting this
-/// placeholder in place (and refuses to package a binary without it), which is how
-/// tauri-plugin-updater knows it. A copy that was not packaged keeps the placeholder.
-#[unsafe(no_mangle)]
-#[used]
-pub static mut __TAURI_BUNDLE_TYPE: &str = "__TAURI_BUNDLE_TYPE_VAR_UNK";
-
+/// tauri-bundler stamps the package type into the binary it packages, and the shell reads it
+/// (`tauri::utils::platform::bundle_type`) and passes it in [`crate::Options`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Install {
 	AppImage,
@@ -68,16 +59,8 @@ impl Install {
 /// How this copy was installed: the bundler's stamp, else what the filesystem says.
 #[must_use]
 pub fn install_kind() -> Option<Install> {
-	// SAFETY: read only, of a `&'static str` the bundler may have rewritten in the binary
-	// before it was ever loaded; nothing writes it at runtime.
-	let stamp = unsafe { std::ptr::read_volatile(&raw const __TAURI_BUNDLE_TYPE) };
-	match stamp {
-		"__TAURI_BUNDLE_TYPE_VAR_APP" => return Some(Install::AppImage),
-		"__TAURI_BUNDLE_TYPE_VAR_DEB" => return Some(Install::Deb),
-		"__TAURI_BUNDLE_TYPE_VAR_RPM" => return Some(Install::Rpm),
-		"__TAURI_BUNDLE_TYPE_VAR_NSS" => return Some(Install::Nsis),
-		"__TAURI_BUNDLE_TYPE_VAR_MSI" => return Some(Install::Msi),
-		_ => {}
+	if let Some(stamped) = crate::options().installed_as {
+		return Some(stamped);
 	}
 	if cfg!(target_os = "macos") {
 		return mac_bundle().map(|_| Install::MacApp);
@@ -101,7 +84,7 @@ pub fn install_kind() -> Option<Install> {
 	None
 }
 
-/// The running AppImage, when this is one: the AppImage runtime sets `APPIMAGE`.
+/// The running `AppImage`, when this is one: the `AppImage` runtime sets `APPIMAGE`.
 #[must_use]
 pub fn appimage() -> Option<PathBuf> {
 	std::env::var_os("APPIMAGE").map(PathBuf::from).filter(|path| path.is_file())
@@ -221,7 +204,7 @@ pub fn install(update: &Update, progress: &mut dyn FnMut(u64, Option<u64>)) -> R
 	}
 }
 
-/// Replace the AppImage at `target` with `data`, which has been verified. Written beside it
+/// Replace the `AppImage` at `target` with `data`, which has been verified. Written beside it
 /// and renamed over it, so a failure part-way leaves the old one in place.
 ///
 /// # Errors
@@ -313,12 +296,7 @@ mod mac {
 		let unpacked = work.join("new");
 		std::fs::create_dir_all(&unpacked).map_err(|error| format!("could not make a folder for the update: {error}"))?;
 		tar::Archive::new(flate2::read::GzDecoder::new(data)).unpack(&unpacked).map_err(|error| format!("could not unpack the update: {error}"))?;
-		let new_bundle = std::fs::read_dir(&unpacked)
-			.map_err(|error| error.to_string())?
-			.filter_map(Result::ok)
-			.map(|entry| entry.path())
-			.find(|path| path.extension().is_some_and(|extension| extension == "app"))
-			.ok_or("the update holds no app bundle")?;
+		let new_bundle = std::fs::read_dir(&unpacked).map_err(|error| error.to_string())?.filter_map(Result::ok).map(|entry| entry.path()).find(|path| path.extension().is_some_and(|extension| extension == "app")).ok_or("the update holds no app bundle")?;
 		let backup = work.join("previous.app");
 		if std::fs::rename(&bundle, &backup).is_ok() {
 			if let Err(error) = std::fs::rename(&new_bundle, &bundle) {

@@ -3,12 +3,14 @@
   "bundle": {
     "linux": {
       "deb": {
+        "depends": ["libxkbcommon0", "libxkbcommon-x11-0", "libxcb1", "libvulkan1", "libfontconfig1"],
         "files": {
           "/usr/lib/skidbladnir/libheif.so.1": "../build/libheif/lib/libheif.so.1",
           "/usr/share/metainfo/com.basicautomation.skidbladnir.metainfo.xml": "../resources/linux/com.basicautomation.skidbladnir.metainfo.xml"
         }
       },
       "rpm": {
+        "depends": ["libxkbcommon", "libxkbcommon-x11", "libxcb", "vulkan-loader", "fontconfig"],
         "files": {
           "/usr/lib/skidbladnir/libheif.so.1": "../build/libheif/lib/libheif.so.1",
           "/usr/share/metainfo/com.basicautomation.skidbladnir.metainfo.xml": "../resources/linux/com.basicautomation.skidbladnir.metainfo.xml"

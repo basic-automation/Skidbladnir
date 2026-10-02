@@ -8,9 +8,7 @@ use std::path::PathBuf;
 use gpui::{AnyElement, Context, IntoElement, ParentElement, Styled, Window, div, px};
 use skidbladnir_encode::settings::{JxlColorSpace, JxlSettings, JxlTarget, MetadataSource, Primaries, RenderingIntent, TransferFunction, Tristate, WhitePoint};
 
-use crate::{
-	app::Skid, panels::webp::to_u8
-};
+use crate::{app::Skid, panels::webp::to_u8};
 
 const TRISTATE: [(Tristate, &str, Option<&str>); 3] = [(Tristate::Default, "Encoder decides", None), (Tristate::Off, "Off", None), (Tristate::On, "On", None)];
 const TARGETS: [(&str, &str, Option<&str>); 3] = [("default", "cjxl default", None), ("distance", "Distance", None), ("quality", "Quality", None)];
@@ -75,21 +73,7 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 	);
 	let mut target_row = vec![target];
 	match s.target {
-		JxlTarget::Distance(distance) => target_row.push(this.slider(
-			"jxl-distance",
-			"Distance",
-			f64::from(distance),
-			0.,
-			25.,
-			0.1,
-			Some(3),
-			Some("-d · target visual distance in JND units; 0.0 = mathematically lossless, 1.0 = visually lossless"),
-			false,
-			None,
-			|t, v| t.job().jxl.target = JxlTarget::Distance(to_f32(v)),
-			window,
-			cx,
-		)),
+		JxlTarget::Distance(distance) => target_row.push(this.slider("jxl-distance", "Distance", f64::from(distance), 0., 25., 0.1, Some(3), Some("-d · target visual distance in JND units; 0.0 = mathematically lossless, 1.0 = visually lossless"), false, None, |t, v| t.job().jxl.target = JxlTarget::Distance(to_f32(v)), window, cx)),
 		JxlTarget::Quality(quality) => target_row.push(this.slider("jxl-quality", "Quality", f64::from(quality), 0., 100., 1., Some(3), Some("-q · 100 = mathematically lossless, 90 = visually lossless"), false, None, |t, v| t.job().jxl.target = JxlTarget::Quality(to_f32(v)), window, cx)),
 		JxlTarget::Default => {}
 	}
@@ -101,16 +85,7 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 	let lossless_jpeg = this.toggle("jxl-lossless-jpeg", "Transcode JPEG losslessly", Some("-j 1 · losslessly transcode JPEG data; off decodes it to pixels and reencodes. Not with a crop or resize."), s.lossless_jpeg, false, |t, v| t.job().jxl.lossless_jpeg = v, window, cx);
 	let reconstruction = this.toggle("jxl-jpeg-reconstruction", "Allow JPEG reconstruction", Some("--allow_jpeg_reconstruction · store what is needed to rebuild the JPEG bit for bit"), s.allow_jpeg_reconstruction, false, |t, v| t.job().jxl.allow_jpeg_reconstruction = v, window, cx);
 
-	let mut sections = vec![
-		div()
-			.pt(px(32.))
-			.child(this.panel(
-				"Quality",
-				None,
-				vec![Skid::grid(3, 16., target_row).into_any_element(), Skid::grid(3, 16., vec![effort, expert]).into_any_element(), Skid::grid(3, 16., vec![lossless_jpeg, reconstruction]).into_any_element()],
-			))
-			.into_any_element(),
-	];
+	let mut sections = vec![div().pt(px(32.)).child(this.panel("Quality", None, vec![Skid::grid(3, 16., target_row).into_any_element(), Skid::grid(3, 16., vec![effort, expert]).into_any_element(), Skid::grid(3, 16., vec![lossless_jpeg, reconstruction]).into_any_element()])).into_any_element()];
 
 	// Mode and progression.
 	let modular = this.choice("jxl-modular", "Modular mode", Some("-m · off = VarDCT, on = modular"), &TRISTATE, s.modular, false, false, false, |t, v| t.job().jxl.modular = v, window, cx);
@@ -128,33 +103,12 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 		list.extend(items(&[(0_i8, "0: disable"), (1, "1: extra 64×64 pass"), (2, "2: extra 512×512 and 64×64 passes")]));
 		list
 	};
-	let progressive_dc = this.select("jxl-progressive-dc", "Progressive DC", Some("--progressive_dc · number of progressive-DC frames"), &progressive_dc_items, s.progressive_dc, false, |t, v| t.job().jxl.progressive_dc = v, window, cx);
-	sections.push(
-		this.panel(
-			"Mode and progression",
-			None,
-			vec![
-				Skid::grid(3, 16., vec![modular, progressive, responsive]).into_any_element(),
-				Skid::grid(3, 16., vec![group_order, center_x, center_y]).into_any_element(),
-				Skid::grid(3, 16., vec![progressive_ac, qprogressive_ac, progressive_dc]).into_any_element(),
-			],
-		)
-		.into_any_element(),
-	);
+	let dc_frames = this.select("jxl-progressive-dc", "Progressive DC", Some("--progressive_dc · number of progressive-DC frames"), &progressive_dc_items, s.progressive_dc, false, |t, v| t.job().jxl.progressive_dc = v, window, cx);
+	sections.push(this.panel("Mode and progression", None, vec![Skid::grid(3, 16., vec![modular, progressive, responsive]).into_any_element(), Skid::grid(3, 16., vec![group_order, center_x, center_y]).into_any_element(), Skid::grid(3, 16., vec![progressive_ac, qprogressive_ac, dc_frames]).into_any_element()]).into_any_element());
 
 	// Colour and metadata.
 	let space_body = s.color_space.map(|space| colour_space(this, space, window, cx));
-	let color_space = this.optional(
-		"jxl-color-space",
-		"Colour space of untagged input",
-		Some("-x color_space · used only when the input says nothing about its colour"),
-		Some("-x color_space · not given"),
-		s.color_space.is_some(),
-		|t, on| t.job().jxl.color_space = on.then_some(SRGB_SPACE),
-		space_body,
-		window,
-		cx,
-	);
+	let colour_encoding = this.optional("jxl-color-space", "Colour space of untagged input", Some("-x color_space · used only when the input says nothing about its colour"), Some("-x color_space · not given"), s.color_space.is_some(), |t, on| t.job().jxl.color_space = on.then_some(SRGB_SPACE), space_body, window, cx);
 	let icc_body = s.icc_file.as_ref().map(|path| this.file("jxl-icc-file", "ICC profile", Some("-x icc_pathname · a binary file containing an ICC profile"), &path.display().to_string(), |t, v| t.job().jxl.icc_file = Some(PathBuf::from(v)), window, cx));
 	let icc = this.optional("jxl-icc", "ICC profile for untagged input", None, Some("-x icc_pathname · not given"), s.icc_file.is_some(), |t, on| t.job().jxl.icc_file = on.then(PathBuf::new), icc_body, window, cx);
 	let intensity = this.number("jxl-intensity-target", "Intensity target", Some("--intensity_target · 0 = choose a sensible value based on the color encoding"), f64::from(s.intensity_target), 0., f64::from(f32::MAX), 3, Some("nits"), false, |t, v| t.job().jxl.intensity_target = to_f32(v), cx);
@@ -168,19 +122,7 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 	let container = this.choice("jxl-container", "Container", Some("--container · 0 = only when needed, 1 = always"), &TRISTATE, s.container, false, false, false, |t, v| t.job().jxl.container = v, window, cx);
 	let compress_boxes = this.choice("jxl-compress-boxes", "Compress metadata boxes", Some("--compress_boxes · Brotli compression for metadata boxes"), &TRISTATE, s.compress_boxes, false, false, false, |t, v| t.job().jxl.compress_boxes = v, window, cx);
 	let brotli = this.slider("jxl-brotli-effort", "Brotli effort", f64::from(s.brotli_effort), 0., 11., 1., None, Some("--brotli_effort · higher values target higher density"), false, None, |t, v| t.job().jxl.brotli_effort = to_u8(v), window, cx);
-	sections.push(
-		this.panel(
-			"Colour and metadata",
-			None,
-			vec![
-				Skid::grid(3, 16., vec![color_space, icc, numbers_column]).into_any_element(),
-				Skid::grid(3, 16., vec![premultiply, keep_invisible]).into_any_element(),
-				Skid::grid(3, 16., vec![exif, xmp, jumbf]).into_any_element(),
-				Skid::grid(3, 16., vec![container, compress_boxes, brotli]).into_any_element(),
-			],
-		)
-		.into_any_element(),
-	);
+	sections.push(this.panel("Colour and metadata", None, vec![Skid::grid(3, 16., vec![colour_encoding, icc, numbers_column]).into_any_element(), Skid::grid(3, 16., vec![premultiply, keep_invisible]).into_any_element(), Skid::grid(3, 16., vec![exif, xmp, jumbf]).into_any_element(), Skid::grid(3, 16., vec![container, compress_boxes, brotli]).into_any_element()]).into_any_element());
 
 	// Filters and tools.
 	let f = s.clone();
@@ -208,13 +150,7 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 			let ec_resampling = this.select("jxl-ec-resampling", "Extra channel resampling", Some("--ec_resampling · for extra channels like alpha"), &resampling_items, f.ec_resampling, false, |t, v| t.job().jxl.ec_resampling = v, window, cx);
 			let upsampling = this.select("jxl-upsampling", "Upsampling", Some("--upsampling_mode · decoder upsampling; nearest neighbour for pixel art"), &items(&[(-1_i8, "Non-separable (default)"), (0, "Nearest neighbour"), (1, "1")]), f.upsampling_mode, false, |t, v| t.job().jxl.upsampling_mode = v, window, cx);
 			let downsampled = this.toggle("jxl-already-downsampled", "Already downsampled", Some("--already_downsampled · signal upsampling without downsampling first"), f.already_downsampled, false, |t, v| t.job().jxl.already_downsampled = v, window, cx);
-			vec![
-				Skid::grid(3, 16., vec![epf, gaborish, faster]).into_any_element(),
-				Skid::grid(3, 16., vec![photon, noise, dots]).into_any_element(),
-				Skid::grid(3, 16., vec![patches, cfl, perceptual]).into_any_element(),
-				Skid::grid(3, 16., vec![resampling, ec_resampling, upsampling]).into_any_element(),
-				Skid::grid(3, 16., vec![downsampled]).into_any_element(),
-			]
+			vec![Skid::grid(3, 16., vec![epf, gaborish, faster]).into_any_element(), Skid::grid(3, 16., vec![photon, noise, dots]).into_any_element(), Skid::grid(3, 16., vec![patches, cfl, perceptual]).into_any_element(), Skid::grid(3, 16., vec![resampling, ec_resampling, upsampling]).into_any_element(), Skid::grid(3, 16., vec![downsampled]).into_any_element()]
 		},
 		window,
 		cx,
@@ -247,11 +183,7 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 			let lossy_palette = this.toggle("jxl-lossy-palette", "Lossy palette", Some("--modular_lossy_palette · use delta palette in a lossy way"), m.modular_lossy_palette, false, |t, v| t.job().jxl.modular_lossy_palette = v, window, cx);
 			let pre_compact = this.number("jxl-pre-compact", "Global channel palette", Some("-X · global channel palette below this share of the range; -1 = encoder chooses"), f64::from(m.pre_compact), -1., 100., 3, Some("%"), false, |t, v| t.job().jxl.pre_compact = to_f32(v), cx);
 			let post_compact = this.number("jxl-post-compact", "Per-group channel palette", Some("-Y · local channel palette below this share of the range; -1 = encoder chooses"), f64::from(m.post_compact), -1., 100., 3, Some("%"), false, |t, v| t.job().jxl.post_compact = to_f32(v), cx);
-			vec![
-				Skid::grid(3, 16., vec![iterations, colorspace, group_size]).into_any_element(),
-				Skid::grid(3, 16., vec![predictor, prev_channels, palette]).into_any_element(),
-				Skid::grid(3, 16., vec![lossy_palette, pre_compact, post_compact]).into_any_element(),
-			]
+			vec![Skid::grid(3, 16., vec![iterations, colorspace, group_size]).into_any_element(), Skid::grid(3, 16., vec![predictor, prev_channels, palette]).into_any_element(), Skid::grid(3, 16., vec![lossy_palette, pre_compact, post_compact]).into_any_element()]
 		},
 		window,
 		cx,

@@ -8,23 +8,23 @@ use std::{
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use gpui::{
-	AnyElement, AppContext, Bounds, ClickEvent, Context, Entity, ExternalPaths, FocusHandle, Focusable, RenderImage, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement, PathPromptOptions, Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, StyledImage, Subscription, Window, canvas, div, img, point, prelude::FluentBuilder, px, size, svg
-};
+use gpui::{AnyElement, AppContext, Bounds, ClickEvent, Context, Entity, ExternalPaths, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement, PathPromptOptions, Pixels, Render, RenderImage, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, StyledImage, Subscription, Window, canvas, div, img, point, prelude::FluentBuilder, px, size, svg};
 use gpuikit::{elements::input::input, input::InputState};
-
-use crate::{css_text::css_text, fade::FadeBg};
 use skidbladnir_encode::{
 	EncodeJob, OutputFormat, settings::HEIC_X265, source::{self, Conversion, FoundImage, PathInspection}
 };
 
 use crate::{
-	controls::{Press, Ring, SliderDrag, icon}, shell::{self, preferences::PreferencesFallback, presets::Preset}, theme::{ACCENT, ACCENT_TEXT, BG, BRIGHT, BROWN, DIM, ERROR, FG, FIELD, ON_VIOLET, RULE, Type, VIOLET, WARNING, c, ca}
+	controls::{Press, Ring, SliderDrag, icon}, css_text::css_text, fade::FadeBg, shell::{self, preferences::PreferencesFallback, presets::Preset}, theme::{ACCENT, ACCENT_TEXT, BG, BRIGHT, BROWN, DIM, ERROR, FG, FIELD, ON_VIOLET, RULE, Type, VIOLET, WARNING, c, ca}
 };
 
 /// The version the window reports: the spike stands in for the build installed here,
 /// Skidbladnir-GPL 1.1.0.
-pub const APP_VERSION: &str = "1.2.0";
+/// The product version, as the shell gave it.
+#[must_use]
+pub fn app_version() -> &'static str {
+	crate::options().version
+}
 
 /// What is open over the window.
 #[derive(Clone, PartialEq, Eq)]
@@ -56,6 +56,10 @@ pub struct PreviewView {
 	pub aspect: f32,
 }
 
+/// What a menu item does, for Enter and Space on the highlighted item.
+pub type MenuAction = Rc<dyn Fn(&mut Skid, &mut Window, &mut Context<Skid>)>;
+
+#[expect(clippy::struct_excessive_bools, reason = "the window's state: each bool is one open, busy or chosen thing the old window also kept as a boolean")]
 pub struct Skid {
 	pub settings: Option<EncodeJob>,
 	pub backend_version: String,
@@ -100,11 +104,11 @@ pub struct Skid {
 	/// is opened from the keyboard, as Reka does.
 	pub menu_highlight: Option<usize>,
 	/// What each item of the open menu does, rebuilt as the menu renders, for Enter and Space.
-	pub menu_actions: Vec<Rc<dyn Fn(&mut Skid, &mut Window, &mut Context<Skid>)>>,
+	pub menu_actions: Vec<MenuAction>,
 	/// Set when Enter or Space chose a menu item: the key-up that follows would otherwise
 	/// click the still-focused trigger and open the menu again.
 	pub swallow_click: bool,
-	/// The HEIC brand tag selected from the keyboard, as Reka's TagsInput marks one.
+	/// The HEIC brand tag selected from the keyboard, as Reka's `TagsInput` marks one.
 	pub tag_selected: Option<usize>,
 	/// With `SKID_BENCH` set: what is being timed, and since when. Reported once the frame
 	/// that shows its result has been drawn.
@@ -159,70 +163,7 @@ impl Skid {
 		}));
 		let root_focus = cx.focus_handle();
 		window.focus(&root_focus, cx);
-		Self {
-			settings: Some(loaded.preferences.settings),
-			backend_version: crate::backend_version(),
-			startup_error: String::new(),
-			input_paths: Vec::new(),
-			output_directory: loaded.preferences.output_directory.map(|path| path.display().to_string()).unwrap_or_default(),
-			busy: false,
-			reports: Vec::new(),
-			failures: Vec::new(),
-			validation_error: String::new(),
-			drop_rejected: 0,
-			inspected: Vec::new(),
-			scanned: Vec::new(),
-			mirror_structure: true,
-			replace_existing: loaded.preferences.replace_existing,
-			about_open: false,
-			about_document: None,
-			include_subfolders: false,
-			scanned_root: None,
-			preferences_notice,
-			current_file: None,
-			current_percent: 0,
-			done_count: 0,
-			cancelling: false,
-			cancel: Arc::new(AtomicBool::new(false)),
-			presets: shell::presets::load_from(&directory),
-			preset_error: String::new(),
-			active_preset: String::new(),
-			preset_name,
-			preview: None,
-			preview_format: OutputFormat::Webp,
-			preview_path: None,
-			previewing: false,
-			preview_error: String::new(),
-			preview_stale: false,
-			sidebar_collapsed: false,
-			popup: None,
-			menu_highlight: None,
-			menu_actions: Vec::new(),
-			swallow_click: false,
-			tag_selected: None,
-			bench: None,
-			webp_preset: skidbladnir_encode::settings::Preset::Photo,
-			lossless_level: 6,
-			webp_preset_error: String::new(),
-			focus: HashMap::new(),
-			root_focus,
-			inputs: HashMap::new(),
-			editing: None,
-			disclosures: HashMap::new(),
-			slider_bounds: Rc::new(RefCell::new(HashMap::new())),
-			drag: None,
-			picker_hsv: None,
-			color_drag: None,
-			scroll: ScrollHandle::new(),
-			scrollbar_drag: None,
-			update: None,
-			installing: None,
-			update_dismissed: false,
-			update_error: String::new(),
-			subscriptions,
-		}
-		.checking_for_update(cx)
-		.debug_state(cx)
+		Self { settings: Some(loaded.preferences.settings), backend_version: crate::backend_version(), startup_error: String::new(), input_paths: Vec::new(), output_directory: loaded.preferences.output_directory.map_or_default(|path| path.display().to_string()), busy: false, reports: Vec::new(), failures: Vec::new(), validation_error: String::new(), drop_rejected: 0, inspected: Vec::new(), scanned: Vec::new(), mirror_structure: true, replace_existing: loaded.preferences.replace_existing, about_open: false, about_document: None, include_subfolders: false, scanned_root: None, preferences_notice, current_file: None, current_percent: 0, done_count: 0, cancelling: false, cancel: Arc::new(AtomicBool::new(false)), presets: shell::presets::load_from(&directory), preset_error: String::new(), active_preset: String::new(), preset_name, preview: None, preview_format: OutputFormat::Webp, preview_path: None, previewing: false, preview_error: String::new(), preview_stale: false, sidebar_collapsed: false, popup: None, menu_highlight: None, menu_actions: Vec::new(), swallow_click: false, tag_selected: None, bench: None, webp_preset: skidbladnir_encode::settings::Preset::Photo, lossless_level: 6, webp_preset_error: String::new(), focus: HashMap::new(), root_focus, inputs: HashMap::new(), editing: None, disclosures: HashMap::new(), slider_bounds: Rc::new(RefCell::new(HashMap::new())), drag: None, picker_hsv: None, color_drag: None, scroll: ScrollHandle::new(), scrollbar_drag: None, update: None, installing: None, update_dismissed: false, update_error: String::new(), subscriptions }.checking_for_update(cx).debug_state(cx)
 	}
 
 	/// Debugging aids for comparing the two windows state by state: `SKID_FORMAT` picks the
@@ -262,7 +203,7 @@ impl Skid {
 			.detach();
 		}
 		if std::env::var_os("SKID_CHOOSE").is_some() {
-			self.choose_inputs(cx);
+			Self::choose_inputs(cx);
 		}
 		if std::env::var_os("SKID_CYCLE").is_some() {
 			// Switch the format every two seconds, for watching what a switch does.
@@ -272,7 +213,9 @@ impl Skid {
 					if this.update(cx, |this, cx| {
 						this.job().format = format;
 						this.changed(cx);
-					}).is_err() {
+					})
+					.is_err()
+					{
 						break;
 					}
 				}
@@ -405,65 +348,60 @@ impl Skid {
 			(None, true) => format!("You have {}. Installing restarts Skidbladnir.", current_version()),
 		};
 		let installing = self.installing.is_some();
-		Some(
-			div()
+		Some(div()
+			.flex()
+			.w_full()
+			.items_center()
+			.gap(px(10.))
+			.p(px(16.))
+			.rounded(px(12.))
+			.bg(ca(ACCENT, 0.1))
+			.border_1()
+			.border_color(ca(ACCENT, 0.25))
+			.text_color(c(ACCENT))
+			.child(icon("lucide--download", 20., c(ACCENT)))
+			.child(div().min_w_0().flex_1().flex().flex_col().child(div().sm().medium().child(css_text(format!("Skidbladnir {version} is available")))).child(div().sm().opacity(0.9).mt(px(4.)).child(css_text(description))))
+			.child(div()
 				.flex()
-				.w_full()
+				.flex_none()
+				.flex_wrap()
 				.items_center()
-				.gap(px(10.))
-				.p(px(16.))
-				.rounded(px(12.))
-				.bg(ca(ACCENT, 0.1))
-				.border_1()
-				.border_color(ca(ACCENT, 0.25))
-				.text_color(c(ACCENT))
-				.child(icon("lucide--download", 20., c(ACCENT)))
-				.child(div().min_w_0().flex_1().flex().flex_col().child(div().sm().medium().child(css_text(format!("Skidbladnir {version} is available")))).child(div().sm().opacity(0.9).mt(px(4.)).child(css_text(description))))
-				.child(
-					div()
-						.flex()
-						.flex_none()
-						.flex_wrap()
-						.items_center()
-						.gap(px(6.))
-						.child(
-							div()
-								.id("update-install")
-								.flex()
-								.items_center()
-								.gap(px(4.))
-								.px(px(8.))
-								.py(px(4.))
-								.rounded(px(9.))
-								.bg(c(ACCENT))
-								.fade_bg("update-install", c(ACCENT), ca(ACCENT, 0.75))
-								.xs()
-								.medium()
-								.text_color(c(BG))
-								.when(installing, |button| button.opacity(0.75).child(icon("lucide--loader-circle", 16., c(BG))))
-								.child(if self.update_error.is_empty() { "Install and restart" } else { "Try again" })
-								.press(self, "update-install", if self.update_error.is_empty() { "Install and restart" } else { "Try again" }, Ring::Primary, 9., |this, _, cx|  {
-									if this.installing.is_none() {
-										this.install_update(cx);
-									}
-								}, window, cx),
+				.gap(px(6.))
+				.child(div().id("update-install").flex().items_center().gap(px(4.)).px(px(8.)).py(px(4.)).rounded(px(9.)).bg(c(ACCENT)).fade_bg("update-install", c(ACCENT), ca(ACCENT, 0.75)).xs().medium().text_color(c(BG)).when(installing, |button| button.opacity(0.75).child(icon("lucide--loader-circle", 16., c(BG)))).child(if self.update_error.is_empty() { "Install and restart" } else { "Try again" }).press(
+					self,
+					"update-install",
+					if self.update_error.is_empty() { "Install and restart" } else { "Try again" },
+					Ring::Primary,
+					9.,
+					|this, _, cx| {
+						if this.installing.is_none() {
+							this.install_update(cx);
+						}
+					},
+					window,
+					cx,
+				))
+				// No close while it installs, as `:close="!installing"`.
+				.when(!installing, |actions| {
+					actions.child(div()
+						.id("update-dismiss")
+						.rounded(px(9.))
+						.press(
+							self,
+							"update-dismiss",
+							"Close",
+							Ring::Neutral,
+							9.,
+							|this, _, cx| {
+								this.update_dismissed = true;
+								cx.notify();
+							},
+							window,
+							cx,
 						)
-						// No close while it installs, as `:close="!installing"`.
-						.when(!installing, |actions| {
-							actions.child(
-								div()
-									.id("update-dismiss")
-									.rounded(px(9.))
-									.press(self, "update-dismiss", "Close", Ring::Neutral, 9., |this, _, cx|  {
-										this.update_dismissed = true;
-										cx.notify();
-									}, window, cx)
-									.child(icon("lucide--x", 20., c(DIM))),
-							)
-						}),
-				)
-				.into_any_element(),
-		)
+						.child(icon("lucide--x", 20., c(DIM))))
+				}))
+			.into_any_element())
 	}
 
 	pub fn job(&mut self) -> &mut EncodeJob {
@@ -491,7 +429,7 @@ impl Skid {
 		self.input_paths = paths;
 	}
 
-	fn choose_inputs(&mut self, cx: &mut Context<Self>) {
+	fn choose_inputs(cx: &mut Context<Self>) {
 		if std::env::var_os("SKID_PROBE").is_some() {
 			eprintln!("choose images");
 		}
@@ -514,7 +452,7 @@ impl Skid {
 		.detach();
 	}
 
-	fn choose_folder(&mut self, cx: &mut Context<Self>) {
+	fn choose_folder(cx: &mut Context<Self>) {
 		let picked = cx.prompt_for_paths(PathPromptOptions { files: false, directories: true, multiple: false, prompt: None });
 		cx.spawn(async move |this, cx| {
 			let Ok(Ok(Some(paths))) = picked.await else { return };
@@ -559,7 +497,7 @@ impl Skid {
 		cx.notify();
 	}
 
-	fn choose_output(&mut self, cx: &mut Context<Self>) {
+	fn choose_output(cx: &mut Context<Self>) {
 		let picked = cx.prompt_for_paths(PathPromptOptions { files: false, directories: true, multiple: false, prompt: None });
 		cx.spawn(async move |this, cx| {
 			let Ok(Ok(Some(paths))) = picked.await else { return };
@@ -590,6 +528,7 @@ impl Skid {
 		self.settings.is_some() && !self.busy && !self.input_paths.is_empty() && !self.output_directory.is_empty()
 	}
 
+	#[expect(clippy::too_many_lines, reason = "the convert command's steps in order, as commands.rs runs them; split up, they would only pass the same dozen values around")]
 	fn convert(&mut self, cx: &mut Context<Self>) {
 		let Some(settings) = self.settings.clone() else { return };
 		self.bench = Some(("convert", std::time::Instant::now()));
@@ -712,7 +651,7 @@ impl Skid {
 		match shell::presets::save_to(&shell::config_directory(), &name, &settings) {
 			Ok(presets) => {
 				self.presets = presets;
-				self.active_preset = name.trim().to_owned();
+				name.trim().clone_into(&mut self.active_preset);
 				self.preset_name.update(cx, |state, cx| state.set_content("", cx));
 				self.popup = None;
 			}
@@ -745,7 +684,7 @@ impl Skid {
 					let original_texture = texture(&original)?;
 					let encoded_texture = texture(&decode(&preview.encoded)?)?;
 					if std::env::var_os("SKID_BENCH").is_some() {
-						eprintln!("bench preview_breakdown encode_ms {} decode_ms {}", encoded_at.as_millis(), (started.elapsed() - encoded_at).as_millis());
+						eprintln!("bench preview_breakdown encode_ms {} decode_ms {}", encoded_at.as_millis(), started.elapsed().checked_sub(encoded_at).unwrap().as_millis());
 					}
 					Ok::<_, String>(PreviewView { original: original_texture, encoded: encoded_texture, source_bytes: preview.source_bytes, encoded_bytes: preview.encoded_bytes, width: preview.width, height: preview.height, saving_percent: preview.saving_percent, frames: preview.frames, aspect })
 				})
@@ -774,7 +713,7 @@ impl Skid {
 		if self.input_paths.is_empty() {
 			return "Nothing queued".to_owned();
 		}
-		let folders: Vec<PathBuf> = self.input_paths.iter().map(|path| path.parent().map(Path::to_path_buf).unwrap_or_default()).collect();
+		let folders: Vec<PathBuf> = self.input_paths.iter().map(|path| path.parent().map_or_default(Path::to_path_buf)).collect();
 		let mut common = folders[0].clone();
 		for folder in &folders {
 			while !folder.starts_with(&common) {
@@ -804,45 +743,43 @@ impl Skid {
 				// The AVIF mark is multicoloured: gpui's `svg()` paints a single tint, so it is
 				// drawn as an image instead, as the webview draws it.
 				let glyph: AnyElement = if value == OutputFormat::Avif { img(format!("icons/{name}.svg")).size(px(24.)).into_any_element() } else { svg().path(format!("icons/{name}.svg")).size(px(24.)).text_color(c(FG)).into_any_element() };
-				items = items.child(
-					div()
-						.id(SharedString::from(format!("format-{label}")))
-						.role(gpui::Role::RadioButton)
-						.aria_label(label)
-						.aria_toggled(if checked { gpui::Toggled::True } else { gpui::Toggled::False })
-						.aria_position_in_set(index + 1)
-						.aria_size_of_set(4)
-						.relative()
-						.px(px(8.))
-						.py(px(4.))
-						.border_l_1()
-						.border_color(if checked || ring { c(ACCENT) } else { gpui::transparent_black() })
-						.when(!checked && !ring, |item| item.fade_bg_clear(format!("format-{label}"), ca(FIELD, 0.5)))
-						.cursor_pointer()
-						.track_focus(&focus)
-						.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-							this.job().format = value;
-							this.changed(cx);
-						}))
-						.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-						.on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-							const ORDER: [(OutputFormat, &str); 4] = [(OutputFormat::Webp, "WebP"), (OutputFormat::Avif, "AVIF"), (OutputFormat::Jxl, "JPEG XL"), (OutputFormat::Heic, "HEIC")];
-							let index = ORDER.iter().position(|(format, _)| *format == value).unwrap_or(0);
-							let target = match event.keystroke.key.as_str() {
-								"space" => index,
-								"down" | "right" => (index + 1) % 4,
-								"up" | "left" => (index + 3) % 4,
-								_ => return,
-							};
-							this.job().format = ORDER[target].0;
-							let handle = this.focus_handle_for(&format!("format-{}", ORDER[target].1), cx);
-							window.focus(&handle, cx);
-							this.changed(cx);
-							cx.stop_propagation();
-						}))
-						.child(glyph)
-						.when(ring, |item| item.child(crate::controls::ring(3., ca(ACCENT, 0.25), 0., 0.))),
-				);
+				items = items.child(div()
+					.id(SharedString::from(format!("format-{label}")))
+					.role(gpui::Role::RadioButton)
+					.aria_label(label)
+					.aria_toggled(if checked { gpui::Toggled::True } else { gpui::Toggled::False })
+					.aria_position_in_set(index + 1)
+					.aria_size_of_set(4)
+					.relative()
+					.px(px(8.))
+					.py(px(4.))
+					.border_l_1()
+					.border_color(if checked || ring { c(ACCENT) } else { gpui::transparent_black() })
+					.when(!checked && !ring, |item| item.fade_bg_clear(format!("format-{label}"), ca(FIELD, 0.5)))
+					.cursor_pointer()
+					.track_focus(&focus)
+					.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+						this.job().format = value;
+						this.changed(cx);
+					}))
+					.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+					.on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+						const ORDER: [(OutputFormat, &str); 4] = [(OutputFormat::Webp, "WebP"), (OutputFormat::Avif, "AVIF"), (OutputFormat::Jxl, "JPEG XL"), (OutputFormat::Heic, "HEIC")];
+						let index = ORDER.iter().position(|(format, _)| *format == value).unwrap_or(0);
+						let target = match event.keystroke.key.as_str() {
+							"space" => index,
+							"down" | "right" => (index + 1) % 4,
+							"up" | "left" => (index + 3) % 4,
+							_ => return,
+						};
+						this.job().format = ORDER[target].0;
+						let handle = this.focus_handle_for(&format!("format-{}", ORDER[target].1), cx);
+						window.focus(&handle, cx);
+						this.changed(cx);
+						cx.stop_propagation();
+					}))
+					.child(glyph)
+					.when(ring, |item| item.child(crate::controls::ring(3., ca(ACCENT, 0.25), 0., 0.))));
 			}
 		}
 		let settings_open = self.popup == Some(Popup::Settings);
@@ -854,34 +791,26 @@ impl Skid {
 			.py(px(4.))
 			.rounded(px(9.))
 			.fade_bg_clear("app-settings", c(FIELD))
-			.press(self, "app-settings", "App settings", Ring::Neutral, 9., |this, window, cx|  {
-				this.popup = if this.popup == Some(Popup::Settings) { None } else { Some(Popup::Settings) };
-				if this.popup.is_some() {
-					let first = this.focus_handle_for("popover-include", cx);
-					window.focus(&first, cx);
-				}
-				cx.notify();
-			}, window, cx)
+			.press(
+				self,
+				"app-settings",
+				"App settings",
+				Ring::Neutral,
+				9.,
+				|this, window, cx| {
+					this.popup = if this.popup == Some(Popup::Settings) { None } else { Some(Popup::Settings) };
+					if this.popup.is_some() {
+						let first = this.focus_handle_for("popover-include", cx);
+						window.focus(&first, cx);
+					}
+					cx.notify();
+				},
+				window,
+				cx,
+			)
 			.child(icon("iconamoon--settings-light", 24., c(FG)))
 			.when(settings_open, |gear| gear.child(self.settings_popover(window, cx)));
-		div()
-			.id("rail")
-			.role(gpui::Role::Navigation)
-			.aria_label("Main menu")
-			.relative()
-			.child(crate::controls::probe("nav"))
-			.flex()
-			.flex_none()
-			.flex_col()
-			.items_center()
-			.gap(px(8.))
-			.px(px(16.))
-			.pt(px(32.))
-			.pb(px(16.))
-			.on_mouse_down(MouseButton::Left, |event, window, _| drag_window(event, window))
-			.child(img("skidbladnir-logo.svg").w(px(55.)).h(px(64.)))
-			.child(div().id("rail-items").on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).flex().flex_1().flex_col().items_start().gap(px(16.)).px(px(8.)).pt(px(32.)).pb(px(16.)).child(items).child(div().flex_1()).child(gear))
-			.into_any_element()
+		div().id("rail").role(gpui::Role::Navigation).aria_label("Main menu").relative().child(crate::controls::probe("nav")).flex().flex_none().flex_col().items_center().gap(px(8.)).px(px(16.)).pt(px(32.)).pb(px(16.)).on_mouse_down(MouseButton::Left, |event, window, _| drag_window(event, window)).child(img("skidbladnir-logo.svg").w(px(55.)).h(px(64.))).child(div().id("rail-items").on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).flex().flex_1().flex_col().items_start().gap(px(16.)).px(px(8.)).pt(px(32.)).pb(px(16.)).child(items).child(div().flex_1()).child(gear)).into_any_element()
 	}
 
 	fn settings_popover(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
@@ -891,18 +820,22 @@ impl Skid {
 			self.toggle("popover-include", "Include subfolders", Some("Choosing a folder also takes every folder inside it. Off takes only the images directly in it."), include, false, |this, on| this.include_subfolders = on, window, cx),
 			self.toggle("popover-mirror", "Recreate folder structure", Some("When subfolders are included, mirror them in the destination. Off writes every file side by side."), mirror, !include, |this, on| this.mirror_structure = on, window, cx),
 			self.toggle("popover-replace", "Replace existing files", Some("A file already in the destination with the output's name is replaced. Off keeps it and skips that input."), self.replace_existing, false, |this, on| this.replace_existing = on, window, cx),
-			div()
-				.px(px(10.))
+			div().px(px(10.))
 				.flex()
-				.child(
-					crate::controls::button_soft("about-open", "About and licences", false)
-						.child(icon("lucide--info", 16., c(FG)))
-						.press(self, "about-open", "About and licences", Ring::Neutral, 9., |this, _, cx| {
-							this.about_open = true;
-							this.popup = None;
-							cx.notify();
-						}, window, cx),
-				)
+				.child(crate::controls::button_soft("about-open", "About and licences", false).child(icon("lucide--info", 16., c(FG))).press(
+					self,
+					"about-open",
+					"About and licences",
+					Ring::Neutral,
+					9.,
+					|this, _, cx| {
+						this.about_open = true;
+						this.popup = None;
+						cx.notify();
+					},
+					window,
+					cx,
+				))
 				.into_any_element(),
 		];
 		let version = self.backend_version.clone();
@@ -911,6 +844,7 @@ impl Skid {
 		crate::controls::place(gpui::Anchor::BottomLeft, point(gear.right() + px(8.), gear.bottom()), crate::controls::popup_panel("settings-popover", Some(px(288.)), body, cx).role(gpui::Role::Dialog).aria_label("App settings")).into_any_element()
 	}
 
+	#[expect(clippy::too_many_lines, reason = "one element tree, top to bottom as the sidebar draws")]
 	fn sidebar(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
 		let queue_open = self.popup == Some(Popup::QueueMenu);
 		let preset_open = self.popup == Some(Popup::PresetForm);
@@ -921,77 +855,77 @@ impl Skid {
 			let name = preset.name.clone();
 			let delete_name = preset.name.clone();
 			let group = SharedString::from(format!("preset-{index}"));
-			presets = presets.child(
-				div()
+			presets = presets.child(div()
+				.relative()
+				.group(group.clone())
+				.child(div()
+					.id(SharedString::from(format!("preset-apply-{index}")))
 					.relative()
-					.group(group.clone())
-					.child(
-						div()
-							.id(SharedString::from(format!("preset-apply-{index}")))
-							.relative()
-							.child(crate::controls::probe(&format!("button {}", preset.name)))
-							.w_full()
-							.truncate()
-							.border_l_1()
-							.px(px(10.))
-							.py(px(7.))
-							.pr(px(32.))
-							.xs()
-							.when(active, |item| item.border_color(c(BROWN)).semibold().text_color(c(ACCENT_TEXT)))
-							.when(!active, |item| item.rounded(px(12.)).border_color(gpui::transparent_black()).text_color(c(BRIGHT)).fade_bg_clear(format!("preset-apply-{index}"), ca(FIELD, 0.7)))
-							.press(self, "preset-apply", &preset.name, Ring::Plain(BRIGHT), 12., move |this, _, cx|  {
-								if let Some(preset) = this.presets.iter().find(|preset| preset.name == name) {
-									this.settings = Some(preset.settings.clone());
-									this.active_preset = name.clone();
-									this.changed(cx);
-								}
-							}, window, cx)
-							.child(preset.name.clone()),
+					.child(crate::controls::probe(&format!("button {}", preset.name)))
+					.w_full()
+					.truncate()
+					.border_l_1()
+					.px(px(10.))
+					.py(px(7.))
+					.pr(px(32.))
+					.xs()
+					.when(active, |item| item.border_color(c(BROWN)).semibold().text_color(c(ACCENT_TEXT)))
+					.when(!active, |item| item.rounded(px(12.)).border_color(gpui::transparent_black()).text_color(c(BRIGHT)).fade_bg_clear(format!("preset-apply-{index}"), ca(FIELD, 0.7)))
+					.press(
+						self,
+						&format!("preset-apply-{index}"),
+						&preset.name,
+						Ring::Plain(BRIGHT),
+						12.,
+						move |this, _, cx| {
+							if let Some(preset) = this.presets.iter().find(|preset| preset.name == name) {
+								this.settings = Some(preset.settings.clone());
+								this.active_preset.clone_from(&name);
+								this.changed(cx);
+							}
+						},
+						window,
+						cx,
 					)
-					.child(
-						div()
-							.id(SharedString::from(format!("preset-delete-{index}")))
-							.absolute()
-							.top(px(4.))
-							.right(px(4.))
-							.p(px(4.))
-							.rounded(px(9.))
-							.opacity(0.)
-							.group_hover(group, |button| button.opacity(1.))
-							.fade_bg_clear(format!("preset-delete-{index}"), c(FIELD))
-							.press(self, "preset-delete", &format!("Delete preset {}", preset.name), Ring::Neutral, 9., move |this, _, cx|  {
-								this.preset_error.clear();
-								match shell::presets::delete_from(&shell::config_directory(), &delete_name) {
-									Ok(presets) => {
-										this.presets = presets;
-										if this.active_preset == delete_name {
-											this.active_preset.clear();
-										}
+					.child(preset.name.clone()))
+				.child(div()
+					.id(SharedString::from(format!("preset-delete-{index}")))
+					.absolute()
+					.top(px(4.))
+					.right(px(4.))
+					.p(px(4.))
+					.rounded(px(9.))
+					.opacity(0.)
+					.group_hover(group, |button| button.opacity(1.))
+					.fade_bg_clear(format!("preset-delete-{index}"), c(FIELD))
+					.press(
+						self,
+						&format!("preset-delete-{index}"),
+						&format!("Delete preset {}", preset.name),
+						Ring::Neutral,
+						9.,
+						move |this, _, cx| {
+							this.preset_error.clear();
+							match shell::presets::delete_from(&shell::config_directory(), &delete_name) {
+								Ok(presets) => {
+									this.presets = presets;
+									if this.active_preset == delete_name {
+										this.active_preset.clear();
 									}
-									Err(error) => this.preset_error = error.to_string(),
 								}
-								cx.notify();
-							}, window, cx)
-							.child(icon("lucide--x", 14., c(FG))),
-					),
-			);
+								Err(error) => this.preset_error = error.to_string(),
+							}
+							cx.notify();
+						},
+						window,
+						cx,
+					)
+					.child(icon("lucide--x", 14., c(FG)))));
 		}
 		let name_empty = self.preset_name.read(cx).content().trim().is_empty();
 		let add = self.bounds_of("preset-add").unwrap_or_default();
-		let preset_form = preset_open.then(|| {
-			crate::controls::place(gpui::Anchor::TopLeft, point(add.right() + px(8.), add.top()), crate::controls::popup_panel("preset-form", None,
-				div()
-					.flex()
-					.w(px(256.))
-					.gap(px(8.))
-					.p(px(8.))
-					.child(input(&self.preset_name, cx).flex_1().h(px(28.)).px(px(10.)).py(px(6.)).rounded(px(9.)).bg(c(BG)).border_1().border_color(c(RULE)).xs().text_color(c(FG)))
-					.child(primary_button("preset-save", "Save", name_empty).press(self, "preset-save", "Save", Ring::Primary, 9., |this, _, cx|  this.save_preset(cx), window, cx)),
-				cx,
-			))
-		});
-		div()
-			.id("sidebar")
+		let preset_form = preset_open.then(|| crate::controls::place(gpui::Anchor::TopLeft, point(add.right() + px(8.), add.top()), crate::controls::popup_panel("preset-form", None, div().flex().w(px(256.)).gap(px(8.)).p(px(8.)).child(input(&self.preset_name, cx).flex_1().h(px(28.)).px(px(10.)).py(px(6.)).rounded(px(9.)).bg(c(BG)).border_1().border_color(c(RULE)).xs().text_color(c(FG))).child(primary_button("preset-save", "Save", name_empty).press(self, "preset-save", "Save", Ring::Primary, 9., |this, _, cx| this.save_preset(cx), window, cx)), cx)));
+		div().id("sidebar")
 			.role(gpui::Role::Complementary)
 			.aria_label("Queue and presets")
 			.flex()
@@ -1000,63 +934,68 @@ impl Skid {
 			.w(px(272.))
 			.gap(px(12.))
 			.p(px(16.))
-			.child(
-				div()
-					.id("collapse-row")
-					.flex()
-					.justify_end()
-					.on_mouse_down(MouseButton::Left, |event, window, _| drag_window(event, window))
-					.child(link_button("collapse", "Collapse", 90.).press(self, "collapse", "Collapse", Ring::Neutral, 9., |this, _, cx|  {
-						this.sidebar_collapsed = true;
+			.child(div().id("collapse-row").flex().justify_end().on_mouse_down(MouseButton::Left, |event, window, _| drag_window(event, window)).child(link_button("collapse", "Collapse", 90.).press(
+				self,
+				"collapse",
+				"Collapse",
+				Ring::Neutral,
+				9.,
+				|this, _, cx| {
+					this.sidebar_collapsed = true;
+					cx.notify();
+				},
+				window,
+				cx,
+			)))
+			.child(div()
+				.relative()
+				.child(sidebar_button("queue", "el--inbox-box", "Queue", &self.queue_folder(), (count > 0).then(|| count.to_string())).child(self.record("queue")).press(
+					self,
+					"queue",
+					"Queue",
+					Ring::Plain(FG),
+					12.,
+					|this, window, cx| {
+						this.popup = if this.popup == Some(Popup::QueueMenu) { None } else { Some(Popup::QueueMenu) };
+						this.menu_highlight = window.last_input_was_keyboard().then_some(0);
 						cx.notify();
-					}, window, cx)),
-			)
-			.child(
-				div()
-					.relative()
-					.child(
-						sidebar_button("queue", "el--inbox-box", "Queue", &self.queue_folder(), (count > 0).then(|| count.to_string())).child(self.record("queue")).press(self, "queue", "Queue", Ring::Plain(FG), 12., |this, window, cx|  {
-							this.popup = if this.popup == Some(Popup::QueueMenu) { None } else { Some(Popup::QueueMenu) };
-							this.menu_highlight = window.last_input_was_keyboard().then_some(0);
+					},
+					window,
+					cx,
+				))
+				.when(queue_open, |queue| queue.child(self.queue_menu(cx))))
+			.child(sidebar_button("destination", "ic--baseline-upcoming", "Destination", if self.output_directory.is_empty() { "Not chosen" } else { &self.output_directory }, None).press(self, "destination", "Destination", Ring::Plain(FG), 12., |_, _, cx| Self::choose_output(cx), window, cx))
+			.child(div().flex().items_center().justify_between().child(div().relative().child(crate::controls::probe("h2 Presets")).px11().semibold().text_color(c(BRIGHT)).child("Presets")).child(div()
+				.relative()
+				.child(div()
+					.id("preset-add")
+					.child(self.record("preset-add"))
+					.rounded(px(9.))
+					.fade_bg_clear("preset-add", c(FIELD))
+					.press(
+						self,
+						"preset-add",
+						"Save the current settings as a preset",
+						Ring::Neutral,
+						9.,
+						|this, window, cx| {
+							this.popup = if this.popup == Some(Popup::PresetForm) { None } else { Some(Popup::PresetForm) };
+							if this.popup.is_some() {
+								let handle = this.preset_name.read(cx).focus_handle(cx);
+								window.focus(&handle, cx);
+							}
 							cx.notify();
-						}, window, cx),
+						},
+						window,
+						cx,
 					)
-					.when(queue_open, |queue| queue.child(self.queue_menu(cx))),
-			)
-			.child(sidebar_button("destination", "ic--baseline-upcoming", "Destination", if self.output_directory.is_empty() { "Not chosen" } else { &self.output_directory }, None).press(self, "destination", "Destination", Ring::Plain(FG), 12., |this, _, cx|  this.choose_output(cx), window, cx))
-			.child(
-				div()
-					.flex()
-					.items_center()
-					.justify_between()
-					.child(div().relative().child(crate::controls::probe("h2 Presets")).px11().semibold().text_color(c(BRIGHT)).child("Presets"))
-					.child(
-						div()
-							.relative()
-							.child(
-								div()
-									.id("preset-add")
-									.child(self.record("preset-add"))
-									.rounded(px(9.))
-									.fade_bg_clear("preset-add", c(FIELD))
-									.press(self, "preset-add", "Save the current settings as a preset", Ring::Neutral, 9., |this, window, cx|  {
-										this.popup = if this.popup == Some(Popup::PresetForm) { None } else { Some(Popup::PresetForm) };
-										if this.popup.is_some() {
-											let handle = this.preset_name.read(cx).focus_handle(cx);
-											window.focus(&handle, cx);
-										}
-										cx.notify();
-									}, window, cx)
-									.child(icon("material-symbols--add", 16., c(FG))),
-							)
-							.children(preset_form),
-					),
-			)
+					.child(icon("material-symbols--add", 16., c(FG))))
+				.children(preset_form)))
 			.child(presets)
 			.when(self.presets.is_empty(), |aside| aside.child(div().px(px(10.)).xs().text_color(c(DIM)).child(css_text("No saved presets yet. Set the controls how you like them and press +."))))
 			.when(!self.preset_error.is_empty(), |aside| aside.child(div().px(px(10.)).xs().text_color(c(ERROR)).child(self.preset_error.clone())))
 			.child(div().flex_1())
-			.child(div().px10().text_color(c(BRIGHT)).child(format!("v{APP_VERSION}{}", if HEIC_X265 { " · GPL edition" } else { "" })))
+			.child(div().px10().text_color(c(BRIGHT)).child(format!("v{}{}", app_version(), if HEIC_X265 { " · GPL edition" } else { "" })))
 			.into_any_element()
 	}
 
@@ -1069,19 +1008,18 @@ impl Skid {
 		self.menu_actions = vec![
 			Rc::new(|this: &mut Skid, _: &mut Window, cx: &mut Context<Skid>| {
 				this.popup = None;
-				this.choose_inputs(cx);
+				Self::choose_inputs(cx);
 			}),
 			Rc::new(|this: &mut Skid, _: &mut Window, cx: &mut Context<Skid>| {
 				this.popup = None;
-				this.choose_folder(cx);
+				Self::choose_folder(cx);
 			}),
 			Rc::new(move |this: &mut Skid, _: &mut Window, cx: &mut Context<Skid>| this.set_include_subfolders(!include, cx)),
 		];
 		let item = |id: &str, index: usize, icon_name: Option<&str>| {
 			let lit = highlight == Some(index);
 			let shown = crate::fade::fade(format!("menu-{id}"), lit);
-			div()
-				.id(SharedString::from(id.to_owned()))
+			div().id(SharedString::from(id.to_owned()))
 				.role(if index == 2 { gpui::Role::MenuItemCheckBox } else { gpui::Role::MenuItem })
 				.when(index == 2, |item| item.aria_toggled(if include { gpui::Toggled::True } else { gpui::Toggled::False }))
 				.aria_selected(lit)
@@ -1108,57 +1046,53 @@ impl Skid {
 		let menu = div()
 			.flex()
 			.flex_col()
-			.child(
-				div()
-					.flex()
-					.flex_col()
-					.p(px(4.))
-					.child(item("menu-images", 0, Some("lucide--images")).aria_label("Choose images…").child(div().relative().child("Choose images…")).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-						this.popup = None;
-						this.choose_inputs(cx);
-					})))
-					.child(item("menu-folder", 1, Some("lucide--folder-search")).aria_label("Choose a folder…").child(div().relative().child("Choose a folder…")).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-						this.popup = None;
-						this.choose_folder(cx);
-					}))),
-			)
+			.child(div()
+				.flex()
+				.flex_col()
+				.p(px(4.))
+				.child(item("menu-images", 0, Some("lucide--images")).aria_label("Choose images…").child(div().relative().child("Choose images…")).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+					this.popup = None;
+					Self::choose_inputs(cx);
+				})))
+				.child(item("menu-folder", 1, Some("lucide--folder-search")).aria_label("Choose a folder…").child(div().relative().child("Choose a folder…")).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+					this.popup = None;
+					Self::choose_folder(cx);
+				}))))
 			.child(div().h(px(1.)).bg(c(RULE)))
-			.child(
-				div().flex().flex_col().p(px(4.)).child(
-					item("menu-subfolders", 2, None)
-						// Kept open, so the box can be ticked and then a folder chosen.
-						.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.set_include_subfolders(!include, cx)))
-						.aria_label("Include subfolders").child(div().relative().flex_1().child("Include subfolders"))
-						.when(include, |row| row.child(icon("lucide--check", 20., c(FG)))),
-				),
-			);
+			.child(div().flex().flex_col().p(px(4.)).child(item("menu-subfolders", 2, None)
+				// Kept open, so the box can be ticked and then a folder chosen.
+				.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.set_include_subfolders(!include, cx)))
+				.aria_label("Include subfolders")
+				.child(div().relative().flex_1().child("Include subfolders"))
+				.when(include, |row| row.child(icon("lucide--check", 20., c(FG))))));
 		crate::controls::place(gpui::Anchor::TopLeft, point(trigger.left(), trigger.bottom() + px(8.)), crate::controls::popup_panel("queue-menu", None, menu, cx).role(gpui::Role::Menu).aria_label("Queue")).into_any_element()
 	}
 
 	fn title_bar(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
 		let window_button = |id: &str, icon_name: &str, wide: bool| div().id(SharedString::from(id.to_owned())).flex_none().pt(px(16.)).pb(px(16.)).pl(px(16.)).pr(px(if wide { 32. } else { 16. })).fade_bg_clear(id.to_owned(), c(FIELD)).child(icon(icon_name, 16., c(FG)));
-		div()
-			.id("title-bar")
+		div().id("title-bar")
 			.flex()
 			.flex_none()
 			.items_center()
 			.gap(px(16.))
 			.on_mouse_down(MouseButton::Left, |event, window, _| drag_window(event, window))
 			.when(self.sidebar_collapsed, |bar| {
-				bar.child(link_button("expand", "Expand", -90.).press(self, "expand", "Expand", Ring::Neutral, 9., |this, _, cx|  {
-					this.sidebar_collapsed = false;
-					cx.notify();
-				}, window, cx))
+				bar.child(link_button("expand", "Expand", -90.).press(
+					self,
+					"expand",
+					"Expand",
+					Ring::Neutral,
+					9.,
+					|this, _, cx| {
+						this.sidebar_collapsed = false;
+						cx.notify();
+					},
+					window,
+					cx,
+				))
 			})
 			.child(div().h(px(20.)).flex_1())
-			.child(
-				div()
-					.flex()
-					.items_center()
-					.child(window_button("minimise", "material-symbols--minimize", false).press(self, "minimise", "Minimise", Ring::Neutral, 0., |_, window, _| window.minimize_window(), window, cx))
-					.child(window_button("maximise", "mdi--maximize", false).press(self, "maximise", "Maximise", Ring::Neutral, 0., |_, window, _| window.zoom_window(), window, cx))
-					.child(window_button("close", "material-symbols--close", true).press(self, "close", "Close", Ring::Neutral, 0., |_, _, cx| cx.quit(), window, cx)),
-			)
+			.child(div().flex().items_center().child(window_button("minimise", "material-symbols--minimize", false).press(self, "minimise", "Minimise", Ring::Neutral, 0., |_, window, _| window.minimize_window(), window, cx)).child(window_button("maximise", "mdi--maximize", false).press(self, "maximise", "Maximise", Ring::Neutral, 0., |_, window, _| window.zoom_window(), window, cx)).child(window_button("close", "material-symbols--close", true).press(self, "close", "Close", Ring::Neutral, 0., |_, _, cx| cx.quit(), window, cx)))
 			.into_any_element()
 	}
 
@@ -1172,48 +1106,35 @@ impl Skid {
 		};
 		let enabled = self.can_convert();
 		let action = if self.busy {
-			div()
-				.id("cancel")
-				.flex()
-				.flex_none()
-				.items_center()
-				.gap(px(8.))
-				.px(px(12.))
-				.py(px(8.))
-				.rounded(px(9.))
-				.bg(ca(ERROR, 0.1))
-				.sm()
-				.medium()
-				.text_color(c(ERROR))
-				.when(self.cancelling, |button| button.child(icon("lucide--loader-circle", 20., c(ERROR))))
-				.child(if self.cancelling { "Stopping…" } else { "Cancel" })
-				.press(self, "cancel", if self.cancelling { "Stopping…" } else { "Cancel" }, Ring::Error, 9., |this, _, cx|  {
+			div().id("cancel").flex().flex_none().items_center().gap(px(8.)).px(px(12.)).py(px(8.)).rounded(px(9.)).bg(ca(ERROR, 0.1)).sm().medium().text_color(c(ERROR)).when(self.cancelling, |button| button.child(icon("lucide--loader-circle", 20., c(ERROR)))).child(if self.cancelling { "Stopping…" } else { "Cancel" }).press(
+				self,
+				"cancel",
+				if self.cancelling { "Stopping…" } else { "Cancel" },
+				Ring::Error,
+				9.,
+				|this, _, cx| {
 					this.cancelling = true;
 					this.cancel.store(true, Ordering::Relaxed);
 					cx.notify();
-				}, window, cx)
+				},
+				window,
+				cx,
+			)
 		} else {
-			div()
-				.id("convert")
-				.flex()
-				.flex_none()
-				.items_center()
-				.gap(px(8.))
-				.px(px(16.))
-				.py(px(10.))
-				.rounded(px(6.))
-				.bg(if enabled { c(VIOLET) } else { ca(VIOLET, 0.6) })
-				.when(enabled, |button| button.fade_bg("convert", c(VIOLET), ca(VIOLET, 0.9)))
-				.sm()
-				.semibold()
-				.text_color(c(ON_VIOLET))
-				.child(icon("codicon--debug-start", 16., c(ON_VIOLET)))
-				.child(format!("Convert {}", if self.input_paths.is_empty() { String::new() } else { self.file_count() }).trim_end().to_owned())
-				.press(self, "convert", "Convert", Ring::Primary, 6., move |this, _, cx|  {
+			div().id("convert").flex().flex_none().items_center().gap(px(8.)).px(px(16.)).py(px(10.)).rounded(px(6.)).bg(if enabled { c(VIOLET) } else { ca(VIOLET, 0.6) }).when(enabled, |button| button.fade_bg("convert", c(VIOLET), ca(VIOLET, 0.9))).sm().semibold().text_color(c(ON_VIOLET)).child(icon("codicon--debug-start", 16., c(ON_VIOLET))).child(format!("Convert {}", if self.input_paths.is_empty() { String::new() } else { self.file_count() }).trim_end().to_owned()).press(
+				self,
+				"convert",
+				"Convert",
+				Ring::Primary,
+				6.,
+				move |this, _, cx| {
 					if enabled {
 						this.convert(cx);
 					}
-				}, window, cx)
+				},
+				window,
+				cx,
+			)
 		};
 		div().flex().items_center().justify_end().gap(px(12.)).pr(px(10.)).child(div().relative().child(crate::controls::probe("p header")).min_w_0().truncate().xs().text_color(c(DIM)).child(text)).child(action.relative().child(crate::controls::probe("button Convert"))).into_any_element()
 	}
@@ -1282,16 +1203,7 @@ impl Skid {
 		let mut notes = div().flex().flex_col().gap(px(4.)).px(px(10.)).xs();
 		if self.scanned_root.is_some() {
 			let count = self.scanned.len();
-			let text = format!(
-				"Found {count} image{} in that folder{}{}",
-				if count == 1 { "" } else { "s" },
-				if self.include_subfolders { ", including subfolders. Symlinks are skipped." } else { ". Subfolders are left out." },
-				if self.include_subfolders {
-					if self.mirror_structure { " The folder structure is recreated in the destination." } else { " Every file is written side by side in the destination." }
-				} else {
-					""
-				}
-			);
+			let text = format!("Found {count} image{} in that folder{}{}", if count == 1 { "" } else { "s" }, if self.include_subfolders { ", including subfolders. Symlinks are skipped." } else { ". Subfolders are left out." }, if self.include_subfolders { if self.mirror_structure { " The folder structure is recreated in the destination." } else { " Every file is written side by side in the destination." } } else { "" });
 			let include = self.include_subfolders;
 			let toggle = self.toggle("notes-include", "Include subfolders", None, include, false, |this, on| this.include_subfolders = on, window, cx);
 			notes = notes.child(div().flex().flex_wrap().items_start().gap_x(px(24.)).child(div().min_w_0().flex_1().py(px(7.)).text_color(c(DIM)).child(css_text(text))).child(div().flex_none().child(toggle)));
@@ -1306,11 +1218,7 @@ impl Skid {
 		}
 		if animated > 0 {
 			let (one, it) = if animated == 1 { ("One queued file is an animation".to_owned(), ("it", "It")) } else { (format!("{animated} queued files are animations"), ("them", "They")) };
-			let tail = if is_webp {
-				format!("{} will be re-encoded as animated WebP with every frame and its timing kept. Every setting applies to each frame.", it.1)
-			} else {
-				format!("This format holds still images only here, so {} will be skipped with an error rather than cut down to one frame. Choose WebP to convert {} with every frame.", if animated == 1 { "it" } else { "they" }, it.0)
-			};
+			let tail = if is_webp { format!("{} will be re-encoded as animated WebP with every frame and its timing kept. Every setting applies to each frame.", it.1) } else { format!("This format holds still images only here, so {} will be skipped with an error rather than cut down to one frame. Choose WebP to convert {} with every frame.", if animated == 1 { "it" } else { "they" }, it.0) };
 			notes = notes.child(div().text_color(c(WARNING)).child(css_text(format!("{one} (animated WebP or GIF). {tail}"))));
 		}
 		if self.drop_rejected > 0 {
@@ -1327,19 +1235,7 @@ impl Skid {
 			other => format!("The {} encoder reports no progress while it works, so the bar moves only when a file starts and when it finishes. Cancel cannot stop a file mid-encode, but that file is then discarded rather than written.", format_name(other)),
 		};
 		let name = self.current_file.as_ref().map_or_else(|| "Starting…".to_owned(), |path| basename(path));
-		self.panel(
-			"Converting",
-			None,
-			vec![
-				div()
-					.px(px(10.))
-					.child(div().flex().items_baseline().justify_between().gap(px(12.)).xs().child(div().truncate().text_color(c(BRIGHT)).child(name)).child(div().semibold().text_color(c(ACCENT_TEXT)).child(format!("{} / {}", self.done_count, self.input_paths.len()))))
-					.child(div().id("progress").role(gpui::Role::ProgressIndicator).aria_label("Conversion progress").aria_numeric_value(f64::from(u32::try_from(self.current_percent.min(100)).unwrap_or(0))).mt(px(8.)).h(px(8.)).w_full().rounded_full().bg(c(DIM)).overflow_hidden().child(div().h_full().rounded_full().bg(c(ACCENT)).w(gpui::relative(f32::from(u16::try_from(self.current_percent.min(100)).unwrap_or(0)) / 100.))))
-					.child(div().mt(px(8.)).xs().text_color(c(DIM)).child(note))
-					.into_any_element(),
-			],
-		)
-		.into_any_element()
+		self.panel("Converting", None, vec![div().px(px(10.)).child(div().flex().items_baseline().justify_between().gap(px(12.)).xs().child(div().truncate().text_color(c(BRIGHT)).child(name)).child(div().semibold().text_color(c(ACCENT_TEXT)).child(format!("{} / {}", self.done_count, self.input_paths.len())))).child(div().id("progress").role(gpui::Role::ProgressIndicator).aria_label("Conversion progress").aria_numeric_value(f64::from(self.current_percent.min(100))).mt(px(8.)).h(px(8.)).w_full().rounded_full().bg(c(DIM)).overflow_hidden().child(div().h_full().rounded_full().bg(c(ACCENT)).w(gpui::relative(f32::from(u16::try_from(self.current_percent.min(100)).unwrap_or(0)) / 100.)))).child(div().mt(px(8.)).xs().text_color(c(DIM)).child(note)).into_any_element()]).into_any_element()
 	}
 
 	fn results(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
@@ -1348,11 +1244,20 @@ impl Skid {
 			.p(px(4.))
 			.rounded(px(9.))
 			.fade_bg_clear("dismiss-results", c(FIELD))
-			.press(self, "dismiss-results", "Dismiss the results", Ring::Neutral, 9., |this, _, cx|  {
-				this.reports.clear();
-				this.failures.clear();
-				cx.notify();
-			}, window, cx)
+			.press(
+				self,
+				"dismiss-results",
+				"Dismiss the results",
+				Ring::Neutral,
+				9.,
+				|this, _, cx| {
+					this.reports.clear();
+					this.failures.clear();
+					cx.notify();
+				},
+				window,
+				cx,
+			)
 			.child(icon("material-symbols--close", 16., c(FG)))
 			.into_any_element();
 		let mut children = Vec::new();
@@ -1368,13 +1273,7 @@ impl Skid {
 					None => div().child("—").into_any_element(),
 					Some(saving) => div().semibold().text_color(c(if saving >= 0.0 { ACCENT_TEXT } else { WARNING })).child(format!("{}{:.1}%", if saving >= 0.0 { "−" } else { "+" }, saving.abs())).into_any_element(),
 				};
-				table = table.child(row([
-					div().text_color(c(BRIGHT)).child(basename(&report.output_path)).into_any_element(),
-					div().child(format_bytes(report.conversion.source_bytes)).into_any_element(),
-					div().child(format_bytes(report.conversion.output_bytes)).into_any_element(),
-					change,
-					div().child(format!("{}×{}", report.conversion.width, report.conversion.height)).into_any_element(),
-				]));
+				table = table.child(row([div().text_color(c(BRIGHT)).child(basename(&report.output_path)).into_any_element(), div().child(format_bytes(report.conversion.source_bytes)).into_any_element(), div().child(format_bytes(report.conversion.output_bytes)).into_any_element(), change, div().child(format!("{}×{}", report.conversion.width, report.conversion.height)).into_any_element()]));
 			}
 			children.push(table.into_any_element());
 		}
@@ -1395,63 +1294,17 @@ impl Skid {
 		}
 		let label = if self.preview.is_some() { "Preview again" } else { "Preview" };
 		let previewing = self.previewing;
-		row = row
-			.child(
-				div()
-					.id("preview-run")
-					.flex()
-					.flex_none()
-					.items_center()
-					.gap(px(6.))
-					.px(px(12.))
-					.py(px(7.))
-					.rounded(px(6.))
-					.bg(c(ACCENT))
-					.fade_bg("preview-run", c(ACCENT), ca(ACCENT, 0.85))
-					.xs()
-					.semibold()
-					.text_color(c(FG))
-					.when(previewing, |button| button.child(icon("lucide--loader-circle", 16., c(FG))))
-					.child(label)
-					.press(self, "preview-run", label, Ring::Primary, 6., |this, _, cx|  this.run_preview(cx), window, cx),
-			)
-			.child(div().min_w_0().flex_1().xs().text_color(c(DIM)).child(css_text(format!("Encodes {} in memory with the current settings. Nothing is written to disk.", if many { "the chosen file" } else { "the file" }))));
+		row = row.child(div().id("preview-run").flex().flex_none().items_center().gap(px(6.)).px(px(12.)).py(px(7.)).rounded(px(6.)).bg(c(ACCENT)).fade_bg("preview-run", c(ACCENT), ca(ACCENT, 0.85)).xs().semibold().text_color(c(FG)).when(previewing, |button| button.child(icon("lucide--loader-circle", 16., c(FG)))).child(label).press(self, "preview-run", label, Ring::Primary, 6., |this, _, cx| this.run_preview(cx), window, cx)).child(div().min_w_0().flex_1().xs().text_color(c(DIM)).child(css_text(format!("Encodes {} in memory with the current settings. Nothing is written to disk.", if many { "the chosen file" } else { "the file" }))));
 		let mut children = vec![row.into_any_element()];
 		if !self.preview_error.is_empty() {
 			children.push(div().px(px(10.)).xs().text_color(c(ERROR)).child(self.preview_error.clone()).into_any_element());
 		}
 		if let Some(preview) = &self.preview {
-			let figure = |image: Arc<RenderImage>, name: String, caption: AnyElement| {
-				div()
-					.flex()
-					.flex_1()
-					.min_w_0()
-					.flex_col()
-					.gap(px(6.))
-					.px(px(10.))
-					.py(px(7.))
-					.child(div().id(SharedString::from(name.clone())).role(gpui::Role::Image).aria_label(name).w_full().max_h(px(480.)).aspect_ratio(preview.aspect).rounded(px(12.)).overflow_hidden().relative().child(checkerboard()).child(img(image).absolute().inset_0().size_full().object_fit(ObjectFit::Contain)))
-					.child(caption)
-			};
+			let figure = |image: Arc<RenderImage>, name: String, caption: AnyElement| div().flex().flex_1().min_w_0().flex_col().gap(px(6.)).px(px(10.)).py(px(7.)).child(div().id(SharedString::from(name.clone())).role(gpui::Role::Image).aria_label(name).w_full().max_h(px(480.)).aspect_ratio(preview.aspect).rounded(px(12.)).overflow_hidden().relative().child(checkerboard()).child(img(image).absolute().inset_0().size_full().object_fit(ObjectFit::Contain))).child(caption);
 			let format = format_name(self.preview_format);
 			let saving = preview.saving_percent.map(|saving| div().semibold().text_color(c(if saving >= 0.0 { ACCENT_TEXT } else { WARNING })).child(format!("{}{:.1}%", if saving >= 0.0 { "−" } else { "+" }, saving.abs())));
-			let encoded_caption = div()
-				.flex()
-				.flex_wrap()
-				.xs()
-				.text_color(c(DIM))
-				.child(format!("{} · {} · {}×{}", format.to_uppercase(), format_bytes(preview.encoded_bytes), preview.width, preview.height))
-				.when(preview.frames > 1, |caption| caption.child(format!(" · {} frames", preview.frames)))
-				.when_some(saving, |caption, saving| caption.child("\u{a0}·\u{a0}").child(saving));
-			children.push(
-				div()
-					.flex()
-					.flex_col()
-					.gap(px(8.))
-					.when(self.preview_stale, |body| body.child(div().px(px(10.)).xs().text_color(c(WARNING)).child("The settings or the file have changed since this preview. Preview again to see them.")))
-					.child(div().flex().gap(px(12.)).child(figure(Arc::clone(&preview.original), "The original image".to_owned(), div().xs().text_color(c(DIM)).child(format!("Original · {}", format_bytes(preview.source_bytes))).into_any_element())).child(figure(Arc::clone(&preview.encoded), format!("The image encoded as {format}"), encoded_caption.into_any_element())))
-					.into_any_element(),
-			);
+			let encoded_caption = div().flex().flex_wrap().xs().text_color(c(DIM)).child(format!("{} · {} · {}×{}", format.to_uppercase(), format_bytes(preview.encoded_bytes), preview.width, preview.height)).when(preview.frames > 1, |caption| caption.child(format!(" · {} frames", preview.frames))).when_some(saving, |caption, saving| caption.child("\u{a0}·\u{a0}").child(saving));
+			children.push(div().flex().flex_col().gap(px(8.)).when(self.preview_stale, |body| body.child(div().px(px(10.)).xs().text_color(c(WARNING)).child("The settings or the file have changed since this preview. Preview again to see them."))).child(div().flex().gap(px(12.)).child(figure(Arc::clone(&preview.original), "The original image".to_owned(), div().xs().text_color(c(DIM)).child(format!("Original · {}", format_bytes(preview.source_bytes))).into_any_element())).child(figure(Arc::clone(&preview.encoded), format!("The image encoded as {format}"), encoded_caption.into_any_element()))).into_any_element());
 		}
 		self.panel("Preview", None, children).into_any_element()
 	}
@@ -1460,8 +1313,7 @@ impl Skid {
 	/// Drawn at paint time, from this frame's scroll state rather than the last one's.
 	fn scrollbar(&self, cx: &mut Context<Self>) -> AnyElement {
 		let handle = self.scroll.clone();
-		div()
-			.id("scrollbar")
+		div().id("scrollbar")
 			.relative()
 			.w(px(8.))
 			.flex_none()
@@ -1479,16 +1331,17 @@ impl Skid {
 					cx.notify();
 				}),
 			)
-			.child(
-				canvas(|_, _, _| (), move |bounds, (), window, _| {
+			.child(canvas(
+				|_, _, _| (),
+				move |bounds, (), window, _| {
 					if let Some((top, length)) = thumb(&handle) {
 						let pill = Bounds::new(point(bounds.left() + px(1.), bounds.top() + top + px(1.)), size(px(6.), length - px(2.)));
 						window.paint_quad(gpui::fill(pill, c(RULE)).corner_radii(px(3.)));
 					}
-				})
-				.absolute()
-				.size_full(),
+				},
 			)
+			.absolute()
+			.size_full())
 			.into_any_element()
 	}
 
@@ -1505,6 +1358,7 @@ impl Skid {
 }
 
 impl Render for Skid {
+	#[expect(clippy::too_many_lines, reason = "the window's root: its sections in order, and the window-wide pointer and key handling")]
 	fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
 		crate::controls::print_probes();
 		if crate::fade::take_moving() {
@@ -1565,8 +1419,7 @@ impl Render for Skid {
 		}
 		let scrollbar = self.scrollbar(cx);
 
-		div()
-			.id("window")
+		div().id("window")
 			.track_focus(&self.root_focus)
 			.size_full()
 			.font_family(crate::theme::FONT)
@@ -1608,7 +1461,9 @@ impl Render for Skid {
 							Some(Popup::Settings) => Some("press-app-settings".to_owned()),
 							Some(Popup::QueueMenu) => Some("press-queue".to_owned()),
 							Some(Popup::PresetForm) => Some("press-preset-add".to_owned()),
-							Some(Popup::Select(id) | Popup::Color(id)) => Some(format!("press-{id}")),
+							// A select's trigger is focused under its pop-up's own id; a swatch is a button.
+							Some(Popup::Select(id)) => Some(id.to_string()),
+							Some(Popup::Color(id)) => Some(format!("press-{id}")),
 							None => None,
 						};
 						this.menu_highlight = None;
@@ -1655,46 +1510,10 @@ impl Render for Skid {
 			.child(
 				// The window's own frame: the window is frameless and transparent, so this
 				// rounded surface is the whole visible window.
-				div()
-					.relative()
-					.child(crate::controls::probe("frame"))
-					.flex()
-					.size_full()
-					.overflow_hidden()
-					.rounded(px(frame_radius()))
-					.bg(c(BG))
-					.child(rail)
-					.children(sidebar)
-					.child(
-						div()
-							.id("main")
-							.role(gpui::Role::Main)
-							.relative()
-							.child(div().id("page-heading").role(gpui::Role::Heading).aria_level(1).aria_label("Skidbladnir").absolute().size_0())
-							.child(crate::controls::probe("main"))
-							.flex()
-							.min_w_0()
-							.flex_1()
-							.flex_col()
-							.gap(px(16.))
-							.pb(px(6.))
-							.pl(px(if self.sidebar_collapsed { 8. } else { 24. }))
-							.child(title_bar)
-							.child(div().flex().min_h_0().flex_1().child(div().id("scroll").flex_1().min_w_0().overflow_y_scroll().track_scroll(&self.scroll).pr(px(16.)).pb(px(24.)).child(div().w_full().flex().flex_col().gap(px(16.)).children(sections))).child(scrollbar)),
-					)
-					.child(
-						// The drop target's outline, while files are dragged over the window.
-						div()
-							.absolute()
-							.top(px(16.))
-							.left(px(16.))
-							.right(px(16.))
-							.bottom(px(16.))
-							.rounded(px(28.))
-							.invisible()
-							.drag_over::<ExternalPaths>(|overlay, _, _, _| overlay.visible().flex().items_center().justify_center().bg(ca(BG, 0.9)).border_2().border_dashed().border_color(c(ACCENT)).sm().semibold().text_color(c(ACCENT_TEXT)))
-							.child("Drop images to convert"),
-					),
+				div().relative().child(crate::controls::probe("frame")).flex().size_full().overflow_hidden().rounded(px(frame_radius())).bg(c(BG)).child(rail).children(sidebar).child(div().id("main").role(gpui::Role::Main).relative().child(div().id("page-heading").role(gpui::Role::Heading).aria_level(1).aria_label("Skidbladnir").absolute().size_0()).child(crate::controls::probe("main")).flex().min_w_0().flex_1().flex_col().gap(px(16.)).pb(px(6.)).pl(px(if self.sidebar_collapsed { 8. } else { 24. })).child(title_bar).child(div().flex().min_h_0().flex_1().child(div().id("scroll").flex_1().min_w_0().overflow_y_scroll().track_scroll(&self.scroll).pr(px(16.)).pb(px(24.)).child(div().w_full().flex().flex_col().gap(px(16.)).children(sections))).child(scrollbar))).child(
+					// The drop target's outline, while files are dragged over the window.
+					div().absolute().top(px(16.)).left(px(16.)).right(px(16.)).bottom(px(16.)).rounded(px(28.)).invisible().drag_over::<ExternalPaths>(|overlay, _, _, _| overlay.visible().flex().items_center().justify_center().bg(ca(BG, 0.9)).border_2().border_dashed().border_color(c(ACCENT)).sm().semibold().text_color(c(ACCENT_TEXT))).child("Drop images to convert"),
+				),
 			)
 			.children(resize_edges(window))
 	}
@@ -1703,7 +1522,7 @@ impl Render for Skid {
 /// The version this copy reports to the updater. `SKID_VERSION` overrides it, for trying an
 /// update without an older build to hand.
 fn current_version() -> String {
-	std::env::var("SKID_VERSION").unwrap_or_else(|_| APP_VERSION.to_owned())
+	std::env::var("SKID_VERSION").unwrap_or_else(|_| app_version().to_owned())
 }
 
 /// The thumb's top and length in the scroll viewport, when there is anything to scroll.
@@ -1737,15 +1556,10 @@ fn resize_edges(window: &Window) -> Vec<AnyElement> {
 	}
 	let (top, left, right, bottom) = (!tiling.top, !tiling.left, !tiling.right, !tiling.bottom);
 	let edge = |edge: ResizeEdge, cursor: CursorStyle| {
-		div()
-			.id(SharedString::from(format!("resize-{edge:?}")))
-			.absolute()
-			.occlude()
-			.cursor(cursor)
-			.on_mouse_down(MouseButton::Left, move |_, window, cx| {
-				cx.stop_propagation();
-				window.start_window_resize(edge);
-			})
+		div().id(SharedString::from(format!("resize-{edge:?}"))).absolute().occlude().cursor(cursor).on_mouse_down(MouseButton::Left, move |_, window, cx| {
+			cx.stop_propagation();
+			window.start_window_resize(edge);
+		})
 	};
 	let grip = px(GRIP);
 	let mut edges = Vec::new();
@@ -1776,82 +1590,21 @@ fn drag_window(event: &MouseDownEvent, window: &mut Window) {
 
 /// The "Collapse" and "Expand" links: `UButton variant="link"` with a turned chevron.
 fn link_button(id: &str, label: &str, degrees: f32) -> gpui::Stateful<gpui::Div> {
-	div()
-		.id(SharedString::from(id.to_owned()))
-		.flex()
-		.flex_none()
-		.items_center()
-		.gap(px(6.))
-		.px(px(4.))
-		.py(px(6.))
-		.rounded(px(9.))
-		.xs()
-		.semibold()
-		.text_color(c(FG))
-		.child(label.to_owned())
-		.child(icon("subway--down-2", 16., c(FG)).with_transformation(gpui::Transformation::rotate(gpui::radians(degrees.to_radians()))))
+	div().id(SharedString::from(id.to_owned())).flex().flex_none().items_center().gap(px(6.)).px(px(4.)).py(px(6.)).rounded(px(9.)).xs().semibold().text_color(c(FG)).child(label.to_owned()).child(icon("subway--down-2", 16., c(FG)).with_transformation(gpui::Transformation::rotate(gpui::radians(degrees.to_radians()))))
 }
 
 /// The Queue and Destination buttons: a title line and a subtitle.
 fn sidebar_button(id: &str, icon_name: &str, title: &str, subtitle: &str, badge: Option<String>) -> gpui::Stateful<gpui::Div> {
-	div()
-		.id(SharedString::from(id.to_owned()))
-		.relative()
-		.child(crate::controls::probe(&format!("button {id}")))
-		.flex()
-		.w_full()
-		.flex_col()
-		.gap(px(4.))
-		.rounded(px(12.))
-		.px(px(10.))
-		.py(px(7.))
-		.fade_bg_clear(id.to_owned(), ca(FIELD, 0.7))
-		.child(
-			div()
-				.flex()
-				.w_full()
-				.items_center()
-				.gap(px(8.))
-				.child(icon(icon_name, 16., c(FG)))
-				.child(div().relative().child(crate::controls::probe(&format!("span {title}"))).min_w_0().flex_1().xs().text_color(c(BRIGHT)).child(title.to_owned()))
-				.when_some(badge, |line, badge| line.child(div().rounded_full().bg(c(ACCENT)).px(px(6.)).py(px(1.)).text_size(px(11.)).line_height(px(16.)).semibold().text_color(c(FG)).child(badge))),
-		)
-		.child(div().relative().child(crate::controls::probe(&format!("span {subtitle}"))).w_full().truncate().xs().text_color(c(DIM)).child(subtitle.to_owned()))
+	div().id(SharedString::from(id.to_owned())).relative().child(crate::controls::probe(&format!("button {id}"))).flex().w_full().flex_col().gap(px(4.)).rounded(px(12.)).px(px(10.)).py(px(7.)).fade_bg_clear(id.to_owned(), ca(FIELD, 0.7)).child(div().flex().w_full().items_center().gap(px(8.)).child(icon(icon_name, 16., c(FG))).child(div().relative().child(crate::controls::probe(&format!("span {title}"))).min_w_0().flex_1().xs().text_color(c(BRIGHT)).child(title.to_owned())).when_some(badge, |line, badge| line.child(div().rounded_full().bg(c(ACCENT)).px(px(6.)).py(px(1.)).text_size(px(11.)).line_height(px(16.)).semibold().text_color(c(FG)).child(badge)))).child(div().relative().child(crate::controls::probe(&format!("span {subtitle}"))).w_full().truncate().xs().text_color(c(DIM)).child(subtitle.to_owned()))
 }
 
 fn primary_button(id: &str, label: &str, disabled: bool) -> gpui::Stateful<gpui::Div> {
-	div()
-		.id(SharedString::from(id.to_owned()))
-		.flex()
-		.flex_none()
-		.items_center()
-		.px(px(10.))
-		.py(px(6.))
-		.rounded(px(9.))
-		.bg(c(ACCENT))
-		.when(disabled, |button| button.opacity(0.75))
-		.when(!disabled, |button| button.fade_bg(id.to_owned(), c(ACCENT), ca(ACCENT, 0.75)))
-		.xs()
-		.medium()
-		.text_color(c(BG))
-		.child(label.to_owned())
+	div().id(SharedString::from(id.to_owned())).flex().flex_none().items_center().px(px(10.)).py(px(6.)).rounded(px(9.)).bg(c(ACCENT)).when(disabled, |button| button.opacity(0.75)).when(!disabled, |button| button.fade_bg(id.to_owned(), c(ACCENT), ca(ACCENT, 0.75))).xs().medium().text_color(c(BG)).child(label.to_owned())
 }
 
 /// Nuxt UI's soft `UAlert`.
 fn alert(text: &str, colour: u32, title: Option<&str>) -> AnyElement {
-	div()
-		.id(SharedString::from(format!("alert-{text}")))
-		.role(if colour == ERROR { gpui::Role::Alert } else { gpui::Role::Status })
-		.flex()
-		.flex_col()
-		.gap(px(4.))
-		.p(px(16.))
-		.rounded(px(12.))
-		.bg(ca(colour, 0.1))
-		.text_color(c(colour))
-		.when_some(title, |alert, title| alert.child(div().sm().medium().child(css_text(title.to_owned()))))
-		.child(div().sm().opacity(0.9).child(css_text(text.to_owned())))
-		.into_any_element()
+	div().id(SharedString::from(format!("alert-{text}"))).role(if colour == ERROR { gpui::Role::Alert } else { gpui::Role::Status }).flex().flex_col().gap(px(4.)).p(px(16.)).rounded(px(12.)).bg(ca(colour, 0.1)).text_color(c(colour)).when_some(title, |alert, title| alert.child(div().sm().medium().child(css_text(title.to_owned())))).child(div().sm().opacity(0.9).child(css_text(text.to_owned()))).into_any_element()
 }
 
 /// The `checkerboard` utility: 8px squares of the rule colour on the field colour.
@@ -1861,15 +1614,20 @@ fn checkerboard() -> impl IntoElement {
 		|bounds, (), window, _| {
 			window.paint_quad(gpui::fill(bounds, c(FIELD)));
 			let square = px(8.);
-			let columns = (bounds.size.width / square).ceil() as i32;
-			let rows = (bounds.size.height / square).ceil() as i32;
-			for row in 0..rows {
-				for column in 0..columns {
-					if (row + column) % 2 == 0 {
-						let origin = point(bounds.left() + square * column as f32, bounds.top() + square * row as f32);
-						window.paint_quad(gpui::fill(Bounds::new(origin, size(square, square)).intersect(&bounds), c(RULE)));
+			let mut top = bounds.top();
+			let mut odd_row = false;
+			while top < bounds.bottom() {
+				let mut left = bounds.left();
+				let mut odd_column = false;
+				while left < bounds.right() {
+					if odd_row == odd_column {
+						window.paint_quad(gpui::fill(Bounds::new(point(left, top), size(square, square)).intersect(&bounds), c(RULE)));
 					}
+					left += square;
+					odd_column = !odd_column;
 				}
+				top += square;
+				odd_row = !odd_row;
 			}
 		},
 	)
@@ -1878,7 +1636,7 @@ fn checkerboard() -> impl IntoElement {
 }
 
 /// A WebP decoded to the GPU's BGRA, every frame of an animation with its delay. A still
-/// image is decoded by libwebp, as WebKitGTK decodes it; an animation by image-rs.
+/// image is decoded by libwebp, as `WebKitGTK` decodes it; an animation by image-rs.
 fn texture(webp: &[u8]) -> Result<Arc<RenderImage>, String> {
 	use image::AnimationDecoder as _;
 	if let Ok(still) = source::decode(Path::new("preview.webp"), webp.to_vec()) {

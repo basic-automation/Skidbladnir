@@ -46,12 +46,12 @@ pub const SEMIBOLD: FontWeight = FontWeight(600.0);
 /// Tailwind's type steps, with the line heights the old window computes.
 pub trait Type: Styled + Sized {
 	/// `text-xs`: 12px. Tailwind's line height for it is `calc(1 / 0.75)`, 15.99996px,
-	/// which WebKitGTK truncates to a 15px line box. The window on Linux is WebKitGTK, so
+	/// which `WebKitGTK` truncates to a 15px line box. The window on Linux is `WebKitGTK`, so
 	/// that is the line box to match, not the 16px a Chromium engine lays out.
 	fn xs(self) -> Self {
 		self.text_size(px(12.)).line_height(px(15.))
 	}
-	/// `text-sm`: 14px, on `calc(1.25 / 0.875)`, which WebKitGTK lays out as 19px.
+	/// `text-sm`: 14px, on `calc(1.25 / 0.875)`, which `WebKitGTK` lays out as 19px.
 	fn sm(self) -> Self {
 		self.text_size(px(14.)).line_height(px(19.))
 	}

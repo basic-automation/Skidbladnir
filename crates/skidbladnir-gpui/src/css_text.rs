@@ -15,9 +15,7 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use gpui::{
-	App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId, IntoElement, LayoutId, Pixels, SharedString, Size, Style, TextAlign, TextStyle, Window, point, px, size
-};
+use gpui::{App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId, IntoElement, LayoutId, Pixels, SharedString, Size, Style, TextAlign, TextStyle, Window, point, px, size};
 
 pub struct CssText {
 	text: SharedString,
@@ -90,6 +88,9 @@ fn lines(text: &str, width: Option<Pixels>, style: &TextStyle, window: &mut Wind
 	lines
 }
 
+/// A width measured at, and the size the text took there.
+type Measured = (Option<Pixels>, Size<Pixels>);
+
 pub struct Layout {
 	line_height: Pixels,
 	/// The inherited style, taken while it is in scope: gpui measures later, outside it.
@@ -97,8 +98,8 @@ pub struct Layout {
 }
 
 impl Element for CssText {
-	type RequestLayoutState = Layout;
 	type PrepaintState = ();
+	type RequestLayoutState = Layout;
 
 	fn id(&self) -> Option<ElementId> {
 		None
@@ -113,7 +114,8 @@ impl Element for CssText {
 		let line_height = style.line_height_in_pixels(window.rem_size());
 		let text = self.text.clone();
 		let measure_style = style.clone();
-		let measured: Rc<RefCell<Option<(Option<Pixels>, Size<Pixels>)>>> = Rc::default();
+		// The last width measured at, and the size it gave.
+		let measured: Rc<RefCell<Option<Measured>>> = Rc::default();
 		let layout_id = window.request_measured_layout(Style::default(), move |known, available, window, _| {
 			let width = known.width.or(match available.width {
 				gpui::AvailableSpace::Definite(width) => Some(width),

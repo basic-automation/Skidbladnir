@@ -32,10 +32,10 @@ fn ease(t: f32) -> f32 {
 	let bezier = |a: f32, b: f32, s: f32| 3. * (1. - s) * (1. - s) * s * a + 3. * (1. - s) * s * s * b + s * s * s;
 	let (mut low, mut high) = (0_f32, 1_f32);
 	for _ in 0..24 {
-		let mid = (low + high) / 2.;
+		let mid = f32::midpoint(low, high);
 		if bezier(0.4, 0.2, mid) < t { low = mid } else { high = mid }
 	}
-	bezier(0., 1., (low + high) / 2.)
+	bezier(0., 1., f32::midpoint(low, high))
 }
 
 fn value(fade: &Fade) -> f32 {
@@ -49,7 +49,7 @@ pub fn fade(key: impl Into<SharedString>, active: bool) -> f32 {
 	let key = key.into();
 	FADES.with(|fades| {
 		let mut fades = fades.borrow_mut();
-		let fade = fades.entry(key).or_insert(Fade { active, from: if active { 1. } else { 0. }, since: Instant::now() - DURATION });
+		let fade = fades.entry(key).or_insert(Fade { active, from: if active { 1. } else { 0. }, since: Instant::now().checked_sub(DURATION).unwrap() });
 		if fade.active != active {
 			fade.from = value(fade);
 			fade.active = active;

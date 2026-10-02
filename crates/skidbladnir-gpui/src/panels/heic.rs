@@ -2,50 +2,21 @@
 //! still image, with the edition's encoder (Kvazaar, or x265 in the GPL edition) and
 //! heif-enc's own help text.
 
-use gpui::{prelude::FluentBuilder, KeyDownEvent, AnyElement, AppContext, Context, ElementId, InteractiveElement, IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, Window, div, px};
+use gpui::{AnyElement, AppContext, Context, ElementId, InteractiveElement, IntoElement, KeyDownEvent, ParentElement, SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px};
 use gpuikit::input::InputStateEvent;
-use skidbladnir_encode::settings::{
-	ChromaDownsampling, ColorProfile, HEIC_X265, HeicAqMode, HeicBitDepth, HeicChroma, HeicPreset, HeicTune, OmafProjection, Orientation
-};
+use skidbladnir_encode::settings::{ChromaDownsampling, ColorProfile, HEIC_X265, HeicAqMode, HeicBitDepth, HeicChroma, HeicPreset, HeicTune, OmafProjection, Orientation};
 
 use crate::{
-	controls::{Press, Ring},
-	app::Skid, controls::{field, field_label, help, icon}, panels::webp::{to_u8, to_u32}, theme::{DIM, FG, FIELD, RULE, Type, c}
+	app::Skid, controls::{Press, Ring, field, field_label, help, icon}, panels::webp::{to_u8, to_u32}, theme::{DIM, FG, FIELD, RULE, Type, c}
 };
 
 const X265_CHROMA: [(HeicChroma, &str, Option<&str>); 3] = [(HeicChroma::Yuv420, "4:2:0", None), (HeicChroma::Yuv422, "4:2:2", None), (HeicChroma::Yuv444, "4:4:4", None)];
 const X265_DEPTH: [(HeicBitDepth, &str, Option<&str>); 2] = [(HeicBitDepth::Eight, "8-bit", None), (HeicBitDepth::Ten, "10-bit", None)];
-const X265_PRESETS: [(HeicPreset, &str); 10] = [
-	(HeicPreset::Ultrafast, "Ultrafast"),
-	(HeicPreset::Superfast, "Superfast"),
-	(HeicPreset::Veryfast, "Very fast"),
-	(HeicPreset::Faster, "Faster"),
-	(HeicPreset::Fast, "Fast"),
-	(HeicPreset::Medium, "Medium"),
-	(HeicPreset::Slow, "Slow (libheif's default)"),
-	(HeicPreset::Slower, "Slower"),
-	(HeicPreset::Veryslow, "Very slow"),
-	(HeicPreset::Placebo, "Placebo"),
-];
+const X265_PRESETS: [(HeicPreset, &str); 10] = [(HeicPreset::Ultrafast, "Ultrafast"), (HeicPreset::Superfast, "Superfast"), (HeicPreset::Veryfast, "Very fast"), (HeicPreset::Faster, "Faster"), (HeicPreset::Fast, "Fast"), (HeicPreset::Medium, "Medium"), (HeicPreset::Slow, "Slow (libheif's default)"), (HeicPreset::Slower, "Slower"), (HeicPreset::Veryslow, "Very slow"), (HeicPreset::Placebo, "Placebo")];
 const X265_TUNES: [(HeicTune, &str, Option<&str>); 4] = [(HeicTune::Ssim, "SSIM", None), (HeicTune::Psnr, "PSNR", None), (HeicTune::Grain, "Grain", None), (HeicTune::Fastdecode, "Fast decode", None)];
-const X265_AQ: [(HeicAqMode, &str); 5] = [
-	(HeicAqMode::Off, "Off"),
-	(HeicAqMode::Variance, "Variance"),
-	(HeicAqMode::AutoVariance, "Auto-variance"),
-	(HeicAqMode::AutoVarianceDark, "Auto-variance, dark bias"),
-	(HeicAqMode::AutoVarianceEdge, "Auto-variance, edges"),
-];
+const X265_AQ: [(HeicAqMode, &str); 5] = [(HeicAqMode::Off, "Off"), (HeicAqMode::Variance, "Variance"), (HeicAqMode::AutoVariance, "Auto-variance"), (HeicAqMode::AutoVarianceDark, "Auto-variance, dark bias"), (HeicAqMode::AutoVarianceEdge, "Auto-variance, edges")];
 const CHROMA: [(Option<ChromaDownsampling>, &str, Option<&str>); 4] = [(None, "Encoder decides", None), (Some(ChromaDownsampling::NearestNeighbor), "Nearest neighbour", None), (Some(ChromaDownsampling::Average), "Average", None), (Some(ChromaDownsampling::SharpYuv), "Sharp YUV", None)];
-const ORIENTATIONS: [(Orientation, &str); 8] = [
-	(Orientation::Normal, "As stored"),
-	(Orientation::FlipHorizontally, "Flip horizontally (--flip-h)"),
-	(Orientation::Rotate180, "Rotate 180° (--rotate-cw 180)"),
-	(Orientation::FlipVertically, "Flip vertically (--flip-v)"),
-	(Orientation::Rotate90CwThenFlipHorizontally, "Rotate 90° clockwise, flip horizontally"),
-	(Orientation::Rotate90Cw, "Rotate 90° clockwise (--rotate-cw 90)"),
-	(Orientation::Rotate90CwThenFlipVertically, "Rotate 90° clockwise, flip vertically"),
-	(Orientation::Rotate270Cw, "Rotate 270° clockwise (--rotate-cw 270)"),
-];
+const ORIENTATIONS: [(Orientation, &str); 8] = [(Orientation::Normal, "As stored"), (Orientation::FlipHorizontally, "Flip horizontally (--flip-h)"), (Orientation::Rotate180, "Rotate 180° (--rotate-cw 180)"), (Orientation::FlipVertically, "Flip vertically (--flip-v)"), (Orientation::Rotate90CwThenFlipHorizontally, "Rotate 90° clockwise, flip horizontally"), (Orientation::Rotate90Cw, "Rotate 90° clockwise (--rotate-cw 90)"), (Orientation::Rotate90CwThenFlipVertically, "Rotate 90° clockwise, flip vertically"), (Orientation::Rotate270Cw, "Rotate 270° clockwise (--rotate-cw 270)")];
 const PROJECTIONS: [(OmafProjection, &str, Option<&str>); 2] = [(OmafProjection::Equirectangular, "Equirectangular", None), (OmafProjection::CubeMap, "Cube map", None)];
 
 /// `--color-profile`'s preset, without the custom code points.
@@ -71,26 +42,8 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 	let x265 = HEIC_X265;
 
 	// Quality.
-	let quality = this.slider(
-		"heic-quality",
-		"Quality",
-		f64::from(s.quality),
-		0.,
-		100.,
-		1.,
-		None,
-		Some(if x265 { "-q · set output quality (0-100) for lossy compression; x265's CRF is (100 − quality) ÷ 2" } else { "-q · set output quality (0-100) for lossy compression" }),
-		x265 && s.lossless,
-		None,
-		|t, v| t.job().heic.quality = to_u8(v),
-		window,
-		cx,
-	);
-	let lossless = if x265 {
-		this.toggle("heic-lossless", "Lossless", Some("-L · generate lossless output: RGB at 4:4:4, every pixel kept (-q and the chroma, depth and rate controls do not apply)"), s.lossless, false, |t, v| t.job().heic.lossless = v, window, cx)
-	} else {
-		this.toggle("heic-lossless", "Lossless coding", Some("-p lossless=true · Kvazaar codes the 4:2:0 image without loss"), s.lossless, false, |t, v| t.job().heic.lossless = v, window, cx)
-	};
+	let quality = this.slider("heic-quality", "Quality", f64::from(s.quality), 0., 100., 1., None, Some(if x265 { "-q · set output quality (0-100) for lossy compression; x265's CRF is (100 − quality) ÷ 2" } else { "-q · set output quality (0-100) for lossy compression" }), x265 && s.lossless, None, |t, v| t.job().heic.quality = to_u8(v), window, cx);
+	let lossless = if x265 { this.toggle("heic-lossless", "Lossless", Some("-L · generate lossless output: RGB at 4:4:4, every pixel kept (-q and the chroma, depth and rate controls do not apply)"), s.lossless, false, |t, v| t.job().heic.lossless = v, window, cx) } else { this.toggle("heic-lossless", "Lossless coding", Some("-p lossless=true · Kvazaar codes the 4:2:0 image without loss"), s.lossless, false, |t, v| t.job().heic.lossless = v, window, cx) };
 	let downsampling = this.choice("heic-chroma-downsampling", "Chroma downsampling", Some("-C · force chroma downsampling algorithm; left out, libheif picks, which is not the same as average"), &CHROMA, s.chroma_downsampling, false, false, false, |t, v| t.job().heic.chroma_downsampling = v, window, cx);
 	let mut quality_rows = vec![Skid::grid(3, 16., vec![quality, lossless, downsampling]).into_any_element()];
 	if x265 && !s.lossless {
@@ -98,11 +51,7 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 		let depth = this.choice("heic-bit-depth", "Bit depth", Some("-b · 10-bit is HEVC Main 10, as phones write HDR photos; smooth gradients band less, even from an 8-bit image"), &X265_DEPTH, s.bit_depth, false, false, false, |t, v| t.job().heic.bit_depth = v, window, cx);
 		quality_rows.push(Skid::grid(3, 16., vec![chroma, depth]).into_any_element());
 	}
-	let encoder_note = if x265 {
-		"HEVC in HEIF, the format iPhones use, encoded by x265.".to_owned()
-	} else {
-		"HEVC in HEIF, the format iPhones use, encoded by Kvazaar, which writes 8-bit 4:2:0 colour. The GPL edition encodes with x265 instead, which adds -L lossless, 4:4:4, 10-bit and x265's own controls.".to_owned()
-	};
+	let encoder_note = if x265 { "HEVC in HEIF, the format iPhones use, encoded by x265.".to_owned() } else { "HEVC in HEIF, the format iPhones use, encoded by Kvazaar, which writes 8-bit 4:2:0 colour. The GPL edition encodes with x265 instead, which adds -L lossless, 4:4:4, 10-bit and x265's own controls.".to_owned() };
 	quality_rows.push(help(encoder_note).px(px(10.)).into_any_element());
 	let mut sections = vec![div().pt(px(32.)).child(this.panel("Quality", None, quality_rows)).into_any_element()];
 
@@ -136,19 +85,34 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 				for (index, parameter) in parameters.iter().enumerate() {
 					let key = this.text_field(&format!("heic-x265-{index}-key"), &format!("Parameter {} key", index + 1), None, "rd", &parameter.key, move |t, v| set_parameter(t, index, |parameter| parameter.key = v), cx);
 					let value = this.text_field(&format!("heic-x265-{index}-value"), &format!("Parameter {} value", index + 1), None, "4", &parameter.value, move |t, v| set_parameter(t, index, |parameter| parameter.value = v), cx);
-					let remove = crate::controls::icon_button(this, &format!("heic-x265-{index}-remove"), "lucide--x", &format!("Remove parameter {}", index + 1), move |t, _, cx| {
-						let parameters = &mut t.job().heic.x265_parameters;
-						if index < parameters.len() {
-							parameters.remove(index);
-						}
-						t.changed(cx);
-					}, window, cx);
+					let remove = crate::controls::icon_button(
+						this,
+						&format!("heic-x265-{index}-remove"),
+						"lucide--x",
+						&format!("Remove parameter {}", index + 1),
+						move |t, _, cx| {
+							let parameters = &mut t.job().heic.x265_parameters;
+							if index < parameters.len() {
+								parameters.remove(index);
+							}
+							t.changed(cx);
+						},
+						window,
+						cx,
+					);
 					children.push(div().flex().items_end().gap(px(8.)).child(div().flex_1().min_w_0().flex().flex_col().child(key)).child(div().flex_1().min_w_0().flex().flex_col().child(value)).child(div().mb(px(8.)).child(remove)).into_any_element());
 				}
-				let add = crate::controls::add_button(this, "heic-x265-add", "Add a parameter", |t, _, cx| {
-					t.job().heic.x265_parameters.push(skidbladnir_encode::settings::CodecOption { key: String::new(), value: String::new() });
-					t.changed(cx);
-				}, window, cx);
+				let add = crate::controls::add_button(
+					this,
+					"heic-x265-add",
+					"Add a parameter",
+					|t, _, cx| {
+						t.job().heic.x265_parameters.push(skidbladnir_encode::settings::CodecOption { key: String::new(), value: String::new() });
+						t.changed(cx);
+					},
+					window,
+					cx,
+				);
 				children.push(div().flex().px(px(10.)).child(add).into_any_element());
 				children
 			},
@@ -216,8 +180,40 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 	};
 	let two_colr = this.toggle("heic-two-colr-boxes", "Two colour boxes", Some("--enable-two-colr-boxes · write both an ICC and an nclx color profile if both are present"), s.two_colr_boxes, false, |t, v| t.job().heic.two_colr_boxes = v, window, cx);
 	let clli_body = s.clli.map(|[max_cll, max_pall]| {
-		let cll = this.number("heic-clli-max-cll", "MaxCLL", Some("--clli MaxCLL,MaxPALL"), f64::from(max_cll), 0., 65535., 0, Some("cd/m²"), false, |t, v| if let Some(clli) = t.job().heic.clli.as_mut() { clli[0] = to_u16(v) }, cx);
-		let pall = this.number("heic-clli-max-pall", "MaxPALL", None, f64::from(max_pall), 0., 65535., 0, Some("cd/m²"), false, |t, v| if let Some(clli) = t.job().heic.clli.as_mut() { clli[1] = to_u16(v) }, cx);
+		let cll = this.number(
+			"heic-clli-max-cll",
+			"MaxCLL",
+			Some("--clli MaxCLL,MaxPALL"),
+			f64::from(max_cll),
+			0.,
+			65535.,
+			0,
+			Some("cd/m²"),
+			false,
+			|t, v| {
+				if let Some(clli) = t.job().heic.clli.as_mut() {
+					clli[0] = to_u16(v)
+				}
+			},
+			cx,
+		);
+		let pall = this.number(
+			"heic-clli-max-pall",
+			"MaxPALL",
+			None,
+			f64::from(max_pall),
+			0.,
+			65535.,
+			0,
+			Some("cd/m²"),
+			false,
+			|t, v| {
+				if let Some(clli) = t.job().heic.clli.as_mut() {
+					clli[1] = to_u16(v)
+				}
+			},
+			cx,
+		);
 		div().flex().flex_col().child(cll).child(pall).into_any_element()
 	});
 	let clli = this.optional("heic-clli", "Content light level", None, Some("--clli · not given"), s.clli.is_some(), |t, on| t.job().heic.clli = on.then_some([1000, 400]), clli_body, window, cx);
@@ -237,8 +233,40 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 		move |this, window, cx| {
 			let orientation = this.select("heic-orientation", "Rotation and mirroring", Some("--rotate-cw / --flip-h / --flip-v · signalled in the file, after a JPEG's own Exif orientation"), &owned(&ORIENTATIONS), s.orientation, false, |t, v| t.job().heic.orientation = v, window, cx);
 			let pasp_body = s.pasp.map(|[h, v]| {
-				let horizontal = this.number("heic-pasp-h", "Horizontal spacing", Some("--pasp h,v"), f64::from(h), 0., f64::from(u32::MAX), 0, None, false, |t, v| if let Some(pasp) = t.job().heic.pasp.as_mut() { pasp[0] = to_u32(v) }, cx);
-				let vertical = this.number("heic-pasp-v", "Vertical spacing", None, f64::from(v), 0., f64::from(u32::MAX), 0, None, false, |t, v| if let Some(pasp) = t.job().heic.pasp.as_mut() { pasp[1] = to_u32(v) }, cx);
+				let horizontal = this.number(
+					"heic-pasp-h",
+					"Horizontal spacing",
+					Some("--pasp h,v"),
+					f64::from(h),
+					0.,
+					f64::from(u32::MAX),
+					0,
+					None,
+					false,
+					|t, v| {
+						if let Some(pasp) = t.job().heic.pasp.as_mut() {
+							pasp[0] = to_u32(v)
+						}
+					},
+					cx,
+				);
+				let vertical = this.number(
+					"heic-pasp-v",
+					"Vertical spacing",
+					None,
+					f64::from(v),
+					0.,
+					f64::from(u32::MAX),
+					0,
+					None,
+					false,
+					|t, v| {
+						if let Some(pasp) = t.job().heic.pasp.as_mut() {
+							pasp[1] = to_u32(v)
+						}
+					},
+					cx,
+				);
 				div().flex().flex_col().child(horizontal).child(vertical).into_any_element()
 			});
 			let pasp = this.optional("heic-pasp", "Pixel aspect ratio", None, Some("--pasp · not given"), s.pasp.is_some(), |t, on| t.job().heic.pasp = on.then_some([1, 1]), pasp_body, window, cx);
@@ -271,6 +299,7 @@ fn edit_custom(this: &mut Skid, edit: impl FnOnce(&mut u16, &mut u16, &mut u16, 
 /// The compatible brands: a `UInputTags` (`max-length 4`, `variant soft`, `size sm`, on
 /// `bg-paleday-rule`) in the window's field frame. Enter adds the typed brand; each tag's
 /// cross removes it.
+#[expect(clippy::too_many_lines, reason = "one tag input: the tags, the field and their keys")]
 fn brands_field(this: &mut Skid, brands: &[String], window: &Window, cx: &mut Context<Skid>) -> AnyElement {
 	let key: SharedString = "text-heic-compatible-brands".into();
 	let state = if let Some(state) = this.inputs.get(&key) {
@@ -304,85 +333,53 @@ fn brands_field(this: &mut Skid, brands: &[String], window: &Window, cx: &mut Co
 	let selected_tag = this.tag_selected.filter(|index| *index < brands.len());
 	let count = brands.len();
 	let key_state = state.clone();
-	let mut tags = div()
-		.id("heic-brands")
-		.role(gpui::Role::List)
-		.aria_label("Compatible brands")
-		.flex()
-		.flex_wrap()
-		.items_center()
-		.gap(px(6.))
-		.min_h(px(28.))
-		.px(px(10.))
-		.py(px(6.))
-		.rounded(px(9.))
-		.bg(c(RULE))
-		.capture_key_down(cx.listener(move |t, event: &KeyDownEvent, _, cx| {
-			let empty = key_state.read(cx).content().is_empty();
-			let selected = t.tag_selected.filter(|index| *index < count);
-			match event.keystroke.key.as_str() {
-				"," => {
-					add_brand(t, &key_state, cx);
-				}
-				"backspace" | "delete" if selected.is_some() => {
-					if let Some(index) = selected {
-						t.job().heic.compatible_brands.remove(index);
-						t.tag_selected = None;
-						t.changed(cx);
-					}
-				}
-				"backspace" | "left" if empty && selected.is_none() && count > 0 => t.tag_selected = Some(count - 1),
-				"left" if selected.is_some() => t.tag_selected = selected.map(|index| index.saturating_sub(1)),
-				"right" if selected.is_some() => t.tag_selected = selected.and_then(|index| (index + 1 < count).then_some(index + 1)),
-				_ => {
+	let mut tags = div().id("heic-brands").role(gpui::Role::List).aria_label("Compatible brands").flex().flex_wrap().items_center().gap(px(6.)).min_h(px(28.)).px(px(10.)).py(px(6.)).rounded(px(9.)).bg(c(RULE)).capture_key_down(cx.listener(move |t, event: &KeyDownEvent, _, cx| {
+		let empty = key_state.read(cx).content().is_empty();
+		let selected = t.tag_selected.filter(|index| *index < count);
+		match event.keystroke.key.as_str() {
+			"," => {
+				add_brand(t, &key_state, cx);
+			}
+			"backspace" | "delete" if selected.is_some() => {
+				if let Some(index) = selected {
+					t.job().heic.compatible_brands.remove(index);
 					t.tag_selected = None;
-					return;
+					t.changed(cx);
 				}
 			}
-			cx.stop_propagation();
-			cx.notify();
-		}));
+			"backspace" | "left" if empty && selected.is_none() && count > 0 => t.tag_selected = Some(count - 1),
+			"left" if selected.is_some() => t.tag_selected = selected.map(|index| index.saturating_sub(1)),
+			"right" if selected.is_some() => t.tag_selected = selected.and_then(|index| (index + 1 < count).then_some(index + 1)),
+			_ => {
+				t.tag_selected = None;
+				return;
+			}
+		}
+		cx.stop_propagation();
+		cx.notify();
+	}));
 	for (index, brand) in brands.iter().enumerate() {
-		let remove = div()
-			.id(ElementId::Name(format!("heic-brand-remove-{index}").into()))
-			.rounded(px(2.))
-			.child(icon("lucide--x", 12., c(DIM)))
-			.press(this, &format!("heic-brand-remove-{index}"), &format!("Remove {brand}"), Ring::Neutral, 2., move |t, _, cx| {
+		let remove = div().id(ElementId::Name(format!("heic-brand-remove-{index}").into())).rounded(px(2.)).child(icon("lucide--x", 12., c(DIM))).press(
+			this,
+			&format!("heic-brand-remove-{index}"),
+			&format!("Remove {brand}"),
+			Ring::Neutral,
+			2.,
+			move |t, _, cx| {
 				let brands = &mut t.job().heic.compatible_brands;
 				if index < brands.len() {
 					brands.remove(index);
 				}
 				t.changed(cx);
-			}, window, cx);
-		tags = tags.child(
-			div()
-				.id(ElementId::Name(format!("heic-brand-{index}").into()))
-				.role(gpui::Role::ListItem)
-				.aria_label(brand.clone())
-				.aria_selected(selected_tag == Some(index))
-				.relative()
-				.flex()
-				.items_center()
-				.gap(px(2.))
-				.px(px(6.))
-				.py(px(2.))
-				.rounded(px(4.))
-				.bg(c(FIELD))
-				.xs()
-				.medium()
-				.text_color(c(FG))
-				.child(brand.clone())
-				.child(remove)
-				.when(selected_tag == Some(index), |tag| tag.child(Ring::Primary.element(4.))),
+			},
+			window,
+			cx,
 		);
+		tags = tags.child(div().id(ElementId::Name(format!("heic-brand-{index}").into())).role(gpui::Role::ListItem).aria_label(brand.clone()).aria_selected(selected_tag == Some(index)).relative().flex().items_center().gap(px(2.)).px(px(6.)).py(px(2.)).rounded(px(4.)).bg(c(FIELD)).xs().medium().text_color(c(FG)).child(brand.clone()).child(remove).when(selected_tag == Some(index), |tag| tag.child(Ring::Primary.element(4.))));
 	}
 	let tags = tags.child(crate::controls::named_input(&state, "heic-brands-field", "Add a compatible brand", Some("e.g. mif2"), cx).flex_1().min_w(px(48.)).h(px(16.)).bg(gpui::transparent_black()).xs().text_color(c(FG)));
 
-	field()
-		.child(field_label("Compatible brands"))
-		.child(tags)
-		.child(help("--add-compatible-brand · add a compatible brand to the output file (4 characters each)"))
-		.into_any_element()
+	field().child(field_label("Compatible brands")).child(tags).child(help("--add-compatible-brand · add a compatible brand to the output file (4 characters each)")).into_any_element()
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -401,7 +398,7 @@ fn set_parameter(this: &mut Skid, index: usize, edit: impl FnOnce(&mut skidbladn
 	}
 }
 
-/// Add the typed brand, as Reka's TagsInput does: not a blank or repeated one.
+/// Add the typed brand, as Reka's `TagsInput` does: not a blank or repeated one.
 fn add_brand(this: &mut Skid, state: &gpui::Entity<gpuikit::input::InputState>, cx: &mut Context<Skid>) {
 	let brand = state.read(cx).content().trim().trim_end_matches(',').to_owned();
 	if !brand.is_empty() && !this.job().heic.compatible_brands.contains(&brand) {

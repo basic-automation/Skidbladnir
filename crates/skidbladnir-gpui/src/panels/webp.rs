@@ -88,42 +88,81 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 
 	let presets: Vec<(Preset, String)> = [(Preset::Default, "default"), (Preset::Photo, "photo"), (Preset::Picture, "picture"), (Preset::Drawing, "drawing"), (Preset::Icon, "icon"), (Preset::Text, "text")].into_iter().map(|(value, label)| (value, label.to_owned())).collect();
 	let preset_picker = this.select_box("webp-preset", "libwebp preset", &presets, this.webp_preset, false, |t, v| t.webp_preset = v, window, cx);
-	let levels: Vec<(u8, String)> = (0..=9).map(|level| (level, format!("-z {level}{}", if level == 0 { " (fastest)" } else if level == 9 { " (slowest)" } else { "" }))).collect();
+	let levels: Vec<(u8, String)> = (0..=9)
+		.map(|level| {
+			(
+				level,
+				format!(
+					"-z {level}{}",
+					if level == 0 {
+						" (fastest)"
+					} else if level == 9 {
+						" (slowest)"
+					} else {
+						""
+					}
+				),
+			)
+		})
+		.collect();
 	let level_picker = this.select_box("webp-level", "Lossless level", &levels, this.lossless_level, false, |t, v| t.lossless_level = v, window, cx);
 	let preset_field = field()
 		.child(field_label("libwebp preset"))
-		.child(
-			div().flex().items_center().gap(px(8.)).child(preset_picker.flex_1().min_w_0()).child(button_soft("webp-preset-apply", "Apply", false).press(this, "webp-preset-apply", "Apply", Ring::Neutral, 9., |t, _, cx| {
+		.child(div().flex().items_center().gap(px(8.)).child(preset_picker.flex_1().min_w_0()).child(button_soft("webp-preset-apply", "Apply", false).press(
+			this,
+			"webp-preset-apply",
+			"Apply",
+			Ring::Neutral,
+			9.,
+			|t, _, cx| {
 				t.webp_preset_error.clear();
 				let preset = t.webp_preset;
 				t.job().webp.apply_preset(preset);
 				t.changed(cx);
-			}, window, cx)),
-		)
+			},
+			window,
+			cx,
+		)))
 		.child(help("-preset · resets every encoder control to the preset, keeping the quality"))
 		.into_any_element();
 	let level_field = field()
 		.child(field_label("Lossless level"))
-		.child(
-			div().flex().items_center().gap(px(8.)).child(level_picker.flex_1().min_w_0()).child(button_soft("webp-level-apply", "Apply", false).press(this, "webp-level-apply", "Apply", Ring::Neutral, 9., |t, _, cx| {
+		.child(div().flex().items_center().gap(px(8.)).child(level_picker.flex_1().min_w_0()).child(button_soft("webp-level-apply", "Apply", false).press(
+			this,
+			"webp-level-apply",
+			"Apply",
+			Ring::Neutral,
+			9.,
+			|t, _, cx| {
 				t.webp_preset_error.clear();
 				let level = t.lossless_level;
 				if let Err(error) = t.job().webp.apply_lossless_preset(level) {
 					t.webp_preset_error = error.to_string();
 				}
 				t.changed(cx);
-			}, window, cx)),
-		)
+			},
+			window,
+			cx,
+		)))
 		.child(help("-z · lossless, with the method and effort of the level"))
 		.into_any_element();
 
 	let defaults_field = field()
 		.child(field_label("cwebp's defaults"))
-		.child(div().flex().items_center().gap(px(8.)).child(button_soft("webp-cwebp-defaults", "Start from cwebp's defaults", false).press(this, "webp-cwebp-defaults", "Start from cwebp's defaults", Ring::Neutral, 9., |t, _, cx| {
-			t.webp_preset_error.clear();
-			t.job().webp.reset_to_cwebp_defaults();
-			t.changed(cx);
-		}, window, cx)))
+		.child(div().flex().items_center().gap(px(8.)).child(button_soft("webp-cwebp-defaults", "Start from cwebp's defaults", false).press(
+			this,
+			"webp-cwebp-defaults",
+			"Start from cwebp's defaults",
+			Ring::Neutral,
+			9.,
+			|t, _, cx| {
+				t.webp_preset_error.clear();
+				t.job().webp.reset_to_cwebp_defaults();
+				t.changed(cx);
+			},
+			window,
+			cx,
+		)))
 		.child(help("no options · every control as a plain cwebp sets it, so the file matches cwebp with no flags"))
 		.into_any_element();
 	let mut compression = vec![Skid::grid(3, 16., vec![lossless, quality, method]).into_any_element(), Skid::grid(3, 16., target_row).into_any_element(), Skid::grid(3, 16., vec![preset_field, level_field, defaults_field]).into_any_element()];
@@ -167,12 +206,7 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 			let pre = this.slider("webp-pre", "Pre-processing", f64::from(s.preprocessing), 0., 7., 1., None, Some("-pre · pre-processing filter: 1 smooths segments, 2 dithers"), false, None, |t, v| t.job().webp.preprocessing = to_u8(v), window, cx);
 			let sharp_yuv = this.toggle("webp-sharp-yuv", "Sharp YUV", Some("-sharp_yuv · use sharper (and slower) RGB->YUV conversion"), s.sharp_yuv, false, |t, v| t.job().webp.sharp_yuv = v, window, cx);
 			let jpeg_like = this.toggle("webp-jpeg-like", "JPEG-like", Some("-jpeg_like · roughly match expected JPEG size"), s.jpeg_like, false, |t, v| t.job().webp.jpeg_like = v, window, cx);
-			vec![
-				Skid::grid(4, 12., vec![sns, segments, passes, partition]).into_any_element(),
-				Skid::grid(4, 12., vec![filter_type, autofilter, strength, sharpness]).into_any_element(),
-				Skid::grid(4, 12., vec![qmin, qmax, pre]).into_any_element(),
-				Skid::grid(4, 12., vec![sharp_yuv, jpeg_like]).into_any_element(),
-			]
+			vec![Skid::grid(4, 12., vec![sns, segments, passes, partition]).into_any_element(), Skid::grid(4, 12., vec![filter_type, autofilter, strength, sharpness]).into_any_element(), Skid::grid(4, 12., vec![qmin, qmax, pre]).into_any_element(), Skid::grid(4, 12., vec![sharp_yuv, jpeg_like]).into_any_element()]
 		},
 		window,
 		cx,

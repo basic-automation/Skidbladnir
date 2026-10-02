@@ -90,17 +90,7 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 		let matrix = this.number("avif-cicp-m", "Matrix coefficients", Some("M, e.g. 6 BT.601, 1 BT.709, 0 identity"), f64::from(value.matrix), 0., 255., 0, None, false, |t, v| set_cicp(t, |cicp| cicp.matrix = to_u16(v)), cx);
 		column(vec![primaries, transfer, matrix])
 	});
-	let cicp = this.optional(
-		"avif-cicp",
-		"Colour signalling (CICP)",
-		Some("--cicp P/T/M · set CICP values (nclx colr box); 2 leaves one unspecified"),
-		Some("--cicp · not given: from the input"),
-		s.cicp.is_some(),
-		|t, on| t.job().avif.cicp = on.then_some(Cicp { primaries: 1, transfer: 13, matrix: 6 }),
-		cicp_body,
-		window,
-		cx,
-	);
+	let cicp = this.optional("avif-cicp", "Colour signalling (CICP)", Some("--cicp P/T/M · set CICP values (nclx colr box); 2 leaves one unspecified"), Some("--cicp · not given: from the input"), s.cicp.is_some(), |t, on| t.job().avif.cicp = on.then_some(Cicp { primaries: 1, transfer: 13, matrix: 6 }), cicp_body, window, cx);
 	let clli_body = s.clli.map(|value| {
 		let max_cll = this.number("avif-clli-cll", "MaxCLL", Some("--clli · maximum content light level"), f64::from(value[0]), 0., 65535., 0, Some("cd/m²"), false, |t, v| set_clli(t, 0, v), cx);
 		let max_pall = this.number("avif-clli-pall", "MaxPALL", Some("--clli · maximum picture-average light level"), f64::from(value[1]), 0., 65535., 0, Some("cd/m²"), false, |t, v| set_clli(t, 1, v), cx);
@@ -246,12 +236,7 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 					// `grid-cols-3 gap-4` with the values in a `col-span-2` cell: the first cell
 					// takes one third of the space the gaps leave, the second two thirds plus the
 					// gap it spans.
-					div()
-						.flex()
-						.gap(px(16.))
-						.child(div().flex_1().min_w_0().flex().flex_col().child(aperture))
-						.child(div().flex_grow(2.).flex_shrink(1.).flex_basis(px(16.)).min_w_0().flex().flex_col().child(Skid::grid(4, 8., fields)))
-						.into_any_element()
+					div().flex().gap(px(16.)).child(div().flex_1().min_w_0().flex().flex_col().child(aperture)).child(div().flex_grow(2.).flex_shrink(1.).flex_basis(px(16.)).min_w_0().flex().flex_col().child(Skid::grid(4, 8., fields))).into_any_element()
 				}
 			};
 			vec![note, Skid::grid(3, 16., vec![irot, imir, pasp]).into_any_element(), aperture_row]
@@ -271,19 +256,34 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 			for (index, option) in options.iter().enumerate() {
 				let key = this.text_field(&format!("avif-option-{index}-key"), &format!("Option {} key", index + 1), None, "tune", &option.key, move |t, v| set_option(t, index, |option| option.key = v), cx);
 				let value = this.text_field(&format!("avif-option-{index}-value"), &format!("Option {} value", index + 1), None, "ssim", &option.value, move |t, v| set_option(t, index, |option| option.value = v), cx);
-				let remove = crate::controls::icon_button(this, &format!("avif-option-{index}-remove"), "lucide--x", &format!("Remove option {}", index + 1), move |t, _, cx| {
-					let options = &mut t.job().avif.codec_options;
-					if index < options.len() {
-						options.remove(index);
-					}
-					t.changed(cx);
-				}, window, cx);
+				let remove = crate::controls::icon_button(
+					this,
+					&format!("avif-option-{index}-remove"),
+					"lucide--x",
+					&format!("Remove option {}", index + 1),
+					move |t, _, cx| {
+						let options = &mut t.job().avif.codec_options;
+						if index < options.len() {
+							options.remove(index);
+						}
+						t.changed(cx);
+					},
+					window,
+					cx,
+				);
 				children.push(div().flex().items_end().gap(px(8.)).child(div().flex_1().min_w_0().flex().flex_col().child(key)).child(div().flex_1().min_w_0().flex().flex_col().child(value)).child(remove).into_any_element());
 			}
-			let add = crate::controls::add_button(this, "avif-option-add", "Add an option", |t, _, cx| {
-				t.job().avif.codec_options.push(CodecOption { key: String::new(), value: String::new() });
-				t.changed(cx);
-			}, window, cx);
+			let add = crate::controls::add_button(
+				this,
+				"avif-option-add",
+				"Add an option",
+				|t, _, cx| {
+					t.job().avif.codec_options.push(CodecOption { key: String::new(), value: String::new() });
+					t.changed(cx);
+				},
+				window,
+				cx,
+			);
 			children.push(div().flex().px(px(10.)).child(add).into_any_element());
 			children
 		},
@@ -340,7 +340,7 @@ fn metadata(this: &mut Skid, id: &str, label: &str, help_text: &str, value: &Met
 	div().flex().flex_col().min_w_0().child(choice).children(file).into_any_element()
 }
 
-/// The value controls of a ControlOptional's slot, one under another.
+/// The value controls of a `ControlOptional`'s slot, one under another.
 fn column(children: Vec<AnyElement>) -> AnyElement {
 	div().flex().flex_col().children(children).into_any_element()
 }

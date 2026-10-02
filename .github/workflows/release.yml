@@ -73,11 +73,12 @@ jobs:
         # patchelf is what bundles the AppImage. It is unavailable on the dev host, which
         # is owner-gated there — but it is a plain apt package here, so the AppImage is
         # produced in CI even though it cannot be produced locally. Every package here
-        # exists under the same name on Ubuntu 22.04 (jammy).
+        # exists under the same name on Ubuntu 22.04 (jammy). The xkbcommon, xcb, Wayland,
+        # fontconfig and FreeType headers are the gpui window's.
         if: startsWith(matrix.platform, 'linux')
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev
+          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libwayland-dev libfontconfig-dev libfreetype-dev
 
       - uses: actions/setup-node@v7
         with:

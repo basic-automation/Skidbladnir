@@ -12,32 +12,7 @@ macro_rules! embedded {
 	};
 }
 
-const FILES: &[(&str, &[u8])] = embedded![
-	"skidbladnir-logo.svg",
-	"fonts/FiraCode-450.ttf",
-	"fonts/FiraCode-600.ttf",
-	"icons/bi--filetype-heic.svg",
-	"icons/codicon--debug-start.svg",
-	"icons/el--inbox-box.svg",
-	"icons/ic--baseline-upcoming.svg",
-	"icons/iconamoon--settings-light.svg",
-	"icons/iconoir--webp-format.svg",
-	"icons/lucide--check.svg",
-	"icons/lucide--download.svg",
-	"icons/lucide--chevron-down.svg",
-	"icons/lucide--folder-search.svg",
-	"icons/lucide--images.svg",
-	"icons/lucide--info.svg",
-	"icons/lucide--loader-circle.svg",
-	"icons/lucide--x.svg",
-	"icons/material-symbols--add.svg",
-	"icons/material-symbols--close.svg",
-	"icons/material-symbols--minimize.svg",
-	"icons/mdi--maximize.svg",
-	"icons/skid--jxl-format.svg",
-	"icons/subway--down-2.svg",
-	"icons/vscode-icons--file-type-avif.svg",
-];
+const FILES: &[(&str, &[u8])] = embedded!["skidbladnir-logo.svg", "fonts/FiraCode-450.ttf", "fonts/FiraCode-600.ttf", "icons/bi--filetype-heic.svg", "icons/codicon--debug-start.svg", "icons/el--inbox-box.svg", "icons/ic--baseline-upcoming.svg", "icons/iconamoon--settings-light.svg", "icons/iconoir--webp-format.svg", "icons/lucide--check.svg", "icons/lucide--download.svg", "icons/lucide--chevron-down.svg", "icons/lucide--folder-search.svg", "icons/lucide--images.svg", "icons/lucide--info.svg", "icons/lucide--loader-circle.svg", "icons/lucide--x.svg", "icons/material-symbols--add.svg", "icons/material-symbols--close.svg", "icons/material-symbols--minimize.svg", "icons/mdi--maximize.svg", "icons/skid--jxl-format.svg", "icons/subway--down-2.svg", "icons/vscode-icons--file-type-avif.svg",];
 
 pub struct Assets;
 
