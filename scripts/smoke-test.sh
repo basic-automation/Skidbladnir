@@ -360,10 +360,11 @@ d, w, h = sys.argv[1], 20, 12
 open(d + '/netpbm-p6.ppm', 'wb').write(b'P6\n%d %d\n255\n' % (w, h) + bytes((x * 12 + c * 40) % 256 for y in range(h) for x in range(w) for c in range(3)))
 open(d + '/netpbm-pam.pam', 'wb').write(b'P7\nWIDTH %d\nHEIGHT %d\nDEPTH 4\nMAXVAL 65535\nTUPLTYPE RGB_ALPHA\nENDHDR\n' % (w, h) + b''.join(struct.pack('>HHHH', x * 3000, y * 5000, 30000, 65535 - x * 1000) for y in range(h) for x in range(w)))
 open(d + '/netpbm-pfm.pfm', 'wb').write(b'PF\n%d %d\n-1.0\n' % (w, h) + b''.join(struct.pack('<fff', x / w, y / h, 0.5) for y in range(h) for x in range(w)))
+open(d + '/netpbm-svg.svg', 'wb').write(b'<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d"><rect width="10" height="12" fill="#c33"/><circle cx="15" cy="6" r="5" fill="#33c" fill-opacity="0.5"/></svg>' % (w, h))
 open(d + '/netpbm-pgx.pgx', 'wb').write(b'PG ML + 12 %d %d\n' % (w, h) + b''.join(struct.pack('>H', (x * 200 + y * 100) % 4096) for y in range(h) for x in range(w)))
 PNM
 mkdir -p "$scratch/from-netpbm"
-for kind in p6:ppm:PNM pam:pam:PNM pfm:pfm:PFM pgx:pgx:PGX; do
+for kind in p6:ppm:PNM pam:pam:PNM pfm:pfm:PFM pgx:pgx:PGX svg:svg:SVG; do
 	IFS=: read -r name extension format <<< "$kind"
 	check "reads $format input (.$extension)" \
 		"const I=window.__TAURI_INTERNALS__;

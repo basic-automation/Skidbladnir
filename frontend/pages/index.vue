@@ -150,7 +150,7 @@ onUnmounted(() => {
 
 async function chooseInputs() {
 	const { open } = await import('@tauri-apps/plugin-dialog')
-	const picked = await open({ multiple: true, filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'jpe', 'jif', 'jfif', 'jfi', 'tif', 'tiff', 'webp', 'avif', 'jxl', 'heic', 'heif', 'gif', 'pnm', 'pgm', 'ppm', 'pam', 'pfm', 'pgx', 'y4m'] }] })
+	const picked = await open({ multiple: true, filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'jpe', 'jif', 'jfif', 'jfi', 'tif', 'tiff', 'webp', 'avif', 'jxl', 'heic', 'heif', 'gif', 'pnm', 'pgm', 'ppm', 'pam', 'pfm', 'pgx', 'y4m', 'svg'] }] })
 	scanned.value = []
 	scannedRoot.value = ''
 	if (Array.isArray(picked)) inputPaths.value = picked
@@ -700,7 +700,7 @@ function basename(path: string): string {
 						</p>
 						<p v-if="dropRejected > 0" class="text-paleday-warning">
 							{{ dropRejected }} dropped {{ dropRejected === 1 ? 'file was' : 'files were' }} not a
-							PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC, GIF, PNM, PFM, PGX or Y4M and {{ dropRejected === 1 ? 'was' : 'were' }} skipped.
+							PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC, GIF, PNM, PFM, PGX, Y4M or SVG and {{ dropRejected === 1 ? 'was' : 'were' }} skipped.
 						</p>
 					</div>
 

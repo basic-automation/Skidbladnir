@@ -23,6 +23,7 @@ libwebp-sys = { workspace = true }
 avif-decode = { workspace = true }
 jxl-oxide = { workspace = true }
 png = { workspace = true }
+resvg = { workspace = true }
 tiff = { workspace = true }
 flate2 = { workspace = true }
 serde = { workspace = true }

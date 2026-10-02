@@ -52,6 +52,8 @@ with the exceptions listed under [What "every option" means](#what-every-option-
 - **Y4M** video frames (the first frame): any chroma format, 8 to 16 bits, with or without
   alpha
 - **PGX**, the JPEG 2000 test format (gray, 1 to 16 bits)
+- **SVG**, drawn at its own size with its transparency kept; text in the system's fonts,
+  and only images embedded in the file (one it links to is never opened)
 - Each file's format is recognised from its contents, not its extension. An AVIF's crop,
   rotation and mirror are applied, so a sideways-stored portrait converts upright, and
   tiled (grid) AVIFs, as some cameras write large captures, are decoded whole.
@@ -280,8 +282,9 @@ same source as the library the app links (`scripts/build-reference-tools.sh`). P
   inputs or `-T` tiled input, and `cjxl` from an animated GIF or APNG. They are queued in
   [ROADMAP.md](ROADMAP.md), Phase 8.
 - **The input formats Skidbladnir reads**: PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC,
-  GIF, PNM/PAM, PFM, PGX and Y4M. Some of the tools also read EXR or raw pixels, which
-  Skidbladnir does not yet. `cjxl` reads only 8- and 16-bit PGX at the right brightness
+  GIF, PNM/PAM, PFM, PGX, Y4M and SVG. Some of the tools also read EXR or raw pixels,
+  which Skidbladnir does not yet. None of them reads SVG, so an SVG has no reference to
+  match: it is drawn by `resvg`. `cjxl` reads only 8- and 16-bit PGX at the right brightness
   (a 12-bit file comes out at a sixteenth of it), so those two depths are matched byte
   for byte and the others are read as meant. A Y4M is read by `avifenc`'s own reader and encoded to AVIF as
   its planes are, and an 8-bit 4:2:0 one goes to HEIC as `heif-enc` reads it. `heif-enc`

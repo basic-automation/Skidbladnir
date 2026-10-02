@@ -29,6 +29,7 @@ mod png_gamma;
 pub mod pnm;
 pub mod settings;
 pub mod source;
+pub mod svg;
 
 pub use cwebp::cwebp_args;
 pub use encoder::{EncodeError, RgbaImage, encode_rgba, encode_rgba_with_progress, encode_source_with_progress, rescale_rgba};

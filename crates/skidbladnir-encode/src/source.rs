@@ -57,6 +57,8 @@ pub enum SourceFormat {
 	/// PGX, one gray channel from the JPEG 2000 conformance suite, read the way `cjxl`
 	/// reads it ([`crate::pnm::pgx`]).
 	Pgx,
+	/// SVG, rasterised at its own size by `resvg` ([`crate::svg`]).
+	Svg,
 	/// Y4M (`YUV4MPEG2`), its first frame, read by `avifenc`'s own reader
 	/// ([`crate::avif::decode_y4m`]).
 	Y4m,
@@ -81,6 +83,7 @@ impl SourceFormat {
 			[b'P', b'5'..=b'7', b' ' | b'\t' | b'\r' | b'\n', ..] => Some(Self::Pnm),
 			[b'P', b'F' | b'f', b' ' | b'\t' | b'\r' | b'\n', ..] => Some(Self::Pfm),
 			[b'P', b'G', b' ', ..] => Some(Self::Pgx),
+			_ if crate::svg::sniff(bytes) => Some(Self::Svg),
 			[b'Y', b'U', b'V', b'4', b'M', b'P', b'E', b'G', b'2', b' ', ..] => Some(Self::Y4m),
 			_ => None,
 		}
@@ -101,6 +104,7 @@ impl SourceFormat {
 			Self::Pnm => "PNM",
 			Self::Pfm => "PFM",
 			Self::Pgx => "PGX",
+			Self::Svg => "SVG",
 			Self::Y4m => "Y4M",
 		}
 	}
@@ -342,6 +346,10 @@ pub fn decode(path: &Path, bytes: Vec<u8>) -> Result<SourceImage, SourceError> {
 			let pixels = gray.iter().flat_map(|&v| [v, v, v, 255]).collect();
 			let deep = deep.map(|deep| deep.iter().flat_map(|&v| [v, v, v, u16::MAX]).collect());
 			Decoded { width: image.width, height: image.height, pixels, deep, gray: true, has_alpha: false }
+		}
+		SourceFormat::Svg => {
+			let raster = crate::svg::rasterise(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?;
+			Decoded::rgba((raster.width, raster.height, raster.pixels))
 		}
 		SourceFormat::Y4m => {
 			let (width, height, pixels, deep, has_alpha) = crate::avif::decode_y4m(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?;
@@ -662,9 +670,10 @@ fn read_prefix(path: &Path) -> Option<Vec<u8>> {
 		return None;
 	}
 	let mut file = fs::File::open(path).ok()?;
-	// 64 bytes: enough for every fixed signature, and for an ISO-BMFF `ftyp` box's
-	// compatible-brand list, which is where an AVIF may declare itself.
-	let mut prefix = vec![0_u8; 64];
+	// Enough for every fixed signature, for an ISO-BMFF `ftyp` box's compatible-brand list
+	// (where an AVIF may declare itself), and for the XML declaration and comments an SVG
+	// can start with before its `<svg>`.
+	let mut prefix = vec![0_u8; 1024];
 	let read = file.read(&mut prefix).ok()?;
 	prefix.truncate(read);
 	Some(prefix)
@@ -1174,6 +1183,27 @@ mod tests {
 		assert_eq!(output_collisions(&plan(&[("/in/a.png", "/out/a.webp"), ("/in/b.png", "/out/b.webp")])), Vec::new());
 		let case = output_collisions(&plan(&[("/in/Photo.png", "/out/Photo.webp"), ("/in/photo.jpg", "/out/photo.webp")]));
 		assert_eq!(case.len(), usize::from(cfg!(any(windows, target_os = "macos"))), "names differing only in case collide where the filesystem ignores case");
+	}
+
+	/// An SVG converts to every output format at its own size, its transparency kept.
+	#[test]
+	fn converts_an_svg_to_every_format() {
+		let scratch = Scratch::new("svg");
+		let input = scratch.join("drawing.svg");
+		fs::write(
+			&input,
+			br##"<?xml version="1.0" encoding="UTF-8"?>
+<!-- a comment long enough to push the svg element past the first sixty-four bytes of the file -->
+<svg xmlns="http://www.w3.org/2000/svg" width="30" height="20"><rect width="15" height="20" fill="#2a6"/></svg>"##,
+		)
+		.expect("write");
+		let image = load(&input).expect("an SVG loads");
+		assert_eq!((image.format, image.width, image.height, image.has_alpha), (SourceFormat::Svg, 30, 20, true));
+		for format in [OutputFormat::Webp, OutputFormat::Avif, OutputFormat::Jxl, OutputFormat::Heic] {
+			let output = scratch.join(&format!("drawing.{}", format.extension()));
+			let conversion = encode_file(&EncodeJob { format, ..EncodeJob::default() }, &input, &output).unwrap_or_else(|error| panic!("{format:?}: {error}"));
+			assert_eq!((conversion.width, conversion.height), (30, 20), "{format:?}");
+		}
 	}
 
 	/// A failed encode must not damage a file that is already there.

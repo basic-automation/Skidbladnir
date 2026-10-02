@@ -25,6 +25,8 @@ repository = "https://github.com/basic-automation/Skidbladnir"
 # none of the advanced controls, which is why libwebp-sys does the encoding. Default
 # features are off so the binary carries the four formats the app accepts and no more.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tiff"] }
+# SVG input. Raster images inside an SVG are drawn only from embedded data (src/svg.rs).
+resvg = { version = "0.48", default-features = false, features = ["text", "system-fonts", "memmap-fonts", "raster-images"] }
 base64 = "0.23"
 # The AVIF decoder: the user's AVIF input, and our own AVIF output for the preview, so
 # the comparison shows on every platform rather than only where the web engine happens

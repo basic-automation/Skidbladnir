@@ -23,7 +23,7 @@
       <li>WebP with every cwebp option, and animated WebP from animated WebP or GIF</li>
       <li>AVIF with every avifenc option (libaom), JPEG XL with every cjxl option</li>
       <li>HEIC, the format iPhones use, with heif-enc's options</li>
-      <li>Reads PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC, GIF, PNM, PFM, PGX and Y4M</li>
+      <li>Reads PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC, GIF, PNM, PFM, PGX, Y4M and SVG</li>
       <li>Keeps colour profiles and metadata the way each tool does</li>
       <li>Previews the result beside the original before anything is written</li>
       <li>Converts whole folders, with progress per file and a Cancel that leaves no half-written image</li>

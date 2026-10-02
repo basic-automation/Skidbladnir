@@ -1408,7 +1408,17 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
 
 **Formats:**
 
-- [ ] **SVG input and output** (owner request, 2026-09-28). *Input* means rasterising:
+- [x] **SVG input** (2026-10-01): `src/svg.rs` rasterises with `resvg` 0.48 (Apache-2.0 OR
+      MIT) at the file's own size, transparency kept, straight colour, text in the
+      system's fonts. Only `data:` images embedded in the file are drawn: no path or URL an
+      SVG names is opened (`never_reads_another_file`, which fails with `resvg`'s default
+      resolver). Capped at 100 megapixels. Sniffed by content (the sniff window grew from 64
+      bytes to 1 KiB for SVG's XML declaration and comments). Tested to every format; no
+      reference tool reads SVG.
+- [ ] SVG input, next: draw it at the resize's size rather than resizing the raster, so a
+      small SVG enlarged stays sharp; and `.svgz`.
+- [ ] **SVG output** (owner request, 2026-09-28) — needs the owner's answer to the question
+      below first. The original notes, input included: *Input* means rasterising:
       `resvg` is the obvious renderer (pure Rust, no C toolchain); it needs a size — the
       SVG's own, or the resize — and a background for the areas SVG leaves transparent.
       *Output* is the open design question, because a raster has no vectors to write:
