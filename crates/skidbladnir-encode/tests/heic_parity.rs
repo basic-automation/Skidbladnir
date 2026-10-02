@@ -78,6 +78,11 @@ impl Run {
 	}
 }
 
+/// Tells apart the scratch directories of tests running at once: a counter, not the
+/// clock, which on macOS ticks in microseconds, so two tests could read the same time and
+/// share a directory that the first to finish deletes.
+static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 fn prepare() -> Option<Run> {
 	// The claim is the standard edition's: Kvazaar, as `heif-enc -e kvazaar`. The GPL
 	// edition encodes with x265 instead, which this reference is not.
@@ -95,8 +100,8 @@ fn prepare() -> Option<Run> {
 			return None;
 		}
 	};
-	let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-	let dir = env::temp_dir().join(format!("skidbladnir-heic-parity-{}-{nanos}", std::process::id()));
+	let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+	let dir = env::temp_dir().join(format!("skidbladnir-heic-parity-{}-{serial}", std::process::id()));
 	fs::create_dir_all(&dir).expect("create the scratch directory");
 	Some(Run { heif_enc, lib, dir, mismatches: Vec::new(), total: 0 })
 }

@@ -269,13 +269,14 @@ jobs:
           echo "SKIDBLADNIR_REQUIRE_PARITY=1" >> "$GITHUB_ENV"
 
       - name: byte parity with cwebp, img2webp, gif2webp, avifenc, cjxl and heif-enc
-        # Released builds are what the claim is about, so the comparison is too.
+        # Released builds are what the claim is about, so the comparison is too, and
+        # --no-fail-fast, so one failing gate cannot hide whether the others hold.
         # cmyk_jpeg rides along because it checks that cwebp still REFUSES a CMYK JPEG, the
         # one input Skidbladnir converts to WebP and cwebp does not. animation is animated
         # WebP against img2webp, gif is GIF input against gif2webp (and a still GIF against
         # cjxl), metadata is `-metadata` against cwebp, and pnm is PNM/PAM against cwebp and
         # cjxl and PFM against cjxl.
-        run: cargo test --release --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_parity --test jxl_parity --test heic_parity --test animation --test gif --test metadata --test pnm -- --nocapture
+        run: cargo test --release --no-fail-fast --package skidbladnir-encode --test parity --test cmyk_jpeg --test avif_parity --test jxl_parity --test heic_parity --test animation --test gif --test metadata --test pnm -- --nocapture
 
   # Drives the real window over WebDriver. Separate from the compile matrix because it
   # needs a display, a WebKit driver and a full release build, and because a flaky display
