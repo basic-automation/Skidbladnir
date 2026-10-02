@@ -49,6 +49,8 @@ with the exceptions listed under [What "every option" means](#what-every-option-
 - WebP and **GIF**, still or animated
 - **PNM**: binary PGM, PPM and PAM (8 or 16 bits, with or without alpha), and **PFM**
   floating-point images
+- **Y4M** video frames (the first frame): any chroma format, 8 to 16 bits, with or without
+  alpha
 - Each file's format is recognised from its contents, not its extension. An AVIF's crop,
   rotation and mirror are applied, so a sideways-stored portrait converts upright, and
   tiled (grid) AVIFs, as some cameras write large captures, are decoded whole.
@@ -57,14 +59,14 @@ with the exceptions listed under [What "every option" means](#what-every-option-
 
 | Format | Reference tool | Encoder in the app | Byte-for-byte parity, tested |
 |---|---|---|---|
-| WebP | `cwebp` 1.6.0 | libwebp 1.6.0 | 2,949 cases: every option, through PNG (every colour type, gamma), JPEG, TIFF (including premultiplied alpha, and straight alpha read as `cwebp` reads it on request), WebP and PNM files, and `-metadata` |
-| Animated WebP | `img2webp`, `gif2webp` and `webpmux` 1.6.0 | libwebp 1.6.0 | 97 cases: animated WebP and GIF input, every Skidbladnir setting those tools can express, and metadata (`gif2webp -metadata`, `webpmux -set`). Their `-mixed`, `-min_size`, `-kmin`/`-kmax`, `-loop`, `-loop_compatibility` and per-frame options are not offered yet |
-| AVIF | `avifenc` 1.4.2 | libavif 1.4.2 + libaom 3.15.1 | 191 cases: every option, PNG inputs, JPEG input |
+| WebP | `cwebp` 1.6.0 | libwebp 1.6.0 | 2,953 cases: every option, its no-option defaults, through PNG (every colour type, gamma), JPEG, TIFF (including premultiplied alpha, and straight alpha read as `cwebp` reads it on request), WebP and PNM files, and `-metadata` |
+| Animated WebP | `img2webp`, `gif2webp` and `webpmux` 1.6.0 | libwebp 1.6.0 | 191 cases: animated WebP and GIF input, every Skidbladnir setting those tools can express, their `-mixed`, `-min_size`, `-kmin`/`-kmax`, `-loop` and `-loop_compatibility`, and metadata (`gif2webp -metadata`, `webpmux -set`). `img2webp`'s per-frame options are not offered yet |
+| AVIF | `avifenc` 1.4.2 | libavif 1.4.2 + libaom 3.15.1 | 231 cases: every option, PNG inputs, JPEG and Y4M input |
 | JPEG XL | `cjxl` 0.12.0 | libjxl 0.12.0 | 254 cases: every option, PNG, PNM, PFM and still-GIF inputs, JPEG recompression and decoding |
-| HEIC | `heif-enc -e kvazaar` 1.23.5 | libheif 1.23.5 + Kvazaar 2.3.2 | 174 cases: every option, PNG, JPEG, TIFF (RGB, straight alpha, and premultiplied alpha read as `heif-enc` reads it on request), WebP and HEIC inputs |
+| HEIC | `heif-enc -e kvazaar` 1.23.5 | libheif 1.23.5 + Kvazaar 2.3.2 | 182 cases: every option, PNG, JPEG, TIFF (RGB, straight alpha, and premultiplied alpha read as `heif-enc` reads it on request), WebP, HEIC and 8-bit 4:2:0 Y4M inputs |
 
-That is 3,665 cases in all. CI runs every one of them on Linux x86-64, for every pull
-request and every push to `master`.
+That is 3,811 cases in all. CI runs every one of them on Linux x86-64 and on macOS with
+Apple silicon, for every pull request and every push to `master`.
 
 The [GPL edition](#editions) writes HEIC with x265 instead, adding `heif-enc`'s `-L`
 lossless, 4:4:4 and 4:2:2 chroma, 10-bit output and a fixed set of x265's tuning controls;
@@ -100,7 +102,9 @@ its HEIC is checked by decoding, not byte for byte against a reference.
 - Preview the result beside the original, in any format, before anything is written to
   disk. AVIF and JPEG XL previews are decoded in Rust, so they show on every platform.
 - Animated WebP or GIF in, animated WebP out: every frame, its timing and its loop count
-  kept, every WebP setting applied to each frame, and a preview of the animation first.
+  kept (or a loop count of your own), every WebP setting applied to each frame, the
+  animation encoder's keyframe spacing, mixed lossy/lossless and minimum-size options,
+  and a preview of the animation first.
   A GIF converts as `gif2webp` converts it, across disposal methods, transparency, timing
   and loop counts, keeping its ICC profile and XMP when you ask, as
   `gif2webp -metadata` does.
@@ -117,10 +121,13 @@ its HEIC is checked by decoding, not byte for byte against a reference.
   whole window works from the keyboard, and every control is labelled for a screen
   reader.
 - Your source image is never overwritten, and every write goes through a temporary file,
-  so a failed conversion cannot damage a file that was already there. A file already in
-  the destination with the output's name (for example `photo.webp` when converting
-  `photo.png`, or when `photo.png` and `photo.jpg` are converted together) is replaced, as
-  `cwebp -o` would replace it.
+  so a failed conversion cannot damage a file that was already there. Before a run, the
+  window warns when two queued files would be written to the same name (`photo.png` and
+  `photo.jpg` both become `photo.webp`) and when outputs are already in the destination.
+  Those are replaced, as `cwebp -o` would replace them, unless you turn off **Replace
+  existing files** in the app settings, which keeps them and skips those inputs.
+- **About and licences**, in the app settings, shows the version, the edition and its
+  licence, and the licence texts and third-party notices the app carries.
 
 ## Install
 
@@ -134,6 +141,7 @@ Download the file for your computer from the
 | Mac with Apple silicon (M1 or later), experimental | `Skidbladnir_<version>_aarch64.dmg` |
 | Mac with an Intel processor, experimental | `Skidbladnir_<version>_x64.dmg` |
 | Ubuntu 22.04 or later, Debian 12 or later, Linux Mint 21 or later, and distributions based on them | `Skidbladnir_<version>_amd64.deb` |
+| Fedora, openSUSE and other RPM-based distributions with glibc 2.35 or later | `Skidbladnir_<version>_x86_64.rpm` |
 | Any other 64-bit Linux with glibc 2.35 or later | `Skidbladnir_<version>_amd64.AppImage` |
 
 **Not sure which edition?** Download the standard edition: the files above, named
@@ -213,7 +221,8 @@ again.
 Once installed, Skidbladnir checks for a newer release each time it starts and offers it
 in a banner; nothing is downloaded until you click **Install and restart**, and every
 update is verified against the project's signing key before it is installed. A `.deb`
-install updates with a `.deb` (and asks for your password to do it); an AppImage, the
+install updates with a `.deb` and an `.rpm` install with an `.rpm` (each asks for your
+password to do it); an AppImage, the
 Windows installer and the macOS app update themselves in place. Each edition updates only
 to the same edition; to switch, install the other one over it. Releases before 0.8.0
 have no updater, so moving off them is a manual download, once.
@@ -261,16 +270,20 @@ samplings, CMYK, metadata), and requires identical bytes. CI builds each referen
 same source as the library the app links (`scripts/build-reference-tools.sh`). Precisely:
 
 - **Still images**, and animated WebP out of an animated WebP or a GIF, as `img2webp` and
-  `gif2webp` write it at their default keyframe, mixing and size settings and with the
-  source's loop count. Their `-mixed`, `-min_size`, `-kmin`/`-kmax`, `-loop`,
-  `-loop_compatibility` and per-frame options are not offered yet. Neither are other
-  options about more than one image: animated AVIF, HEIC or JPEG XL, image sequences,
+  `gif2webp` write it, including their keyframe (`-kmin`/`-kmax`), `-mixed`, `-min_size`,
+  `-loop` and `-loop_compatibility` options. `img2webp`'s per-frame options (a different
+  quality or duration for each frame) are not offered yet. Neither are other options
+  about more than one image: animated AVIF, HEIC or JPEG XL, image sequences,
   `avifenc --layered` and grids assembled from several files, `heif-enc` with several
   inputs or `-T` tiled input, and `cjxl` from an animated GIF or APNG. They are queued in
   [ROADMAP.md](ROADMAP.md), Phase 8.
 - **The input formats Skidbladnir reads**: PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC,
-  GIF, PNM/PAM and PFM. Some of the tools also read PGX, Y4M, EXR or raw pixels, which
-  Skidbladnir does not yet. PNM is read the way `cwebp` reads it for WebP and the way
+  GIF, PNM/PAM, PFM and Y4M. Some of the tools also read PGX, EXR or raw pixels, which
+  Skidbladnir does not yet. A Y4M is read by `avifenc`'s own reader and encoded to AVIF as
+  its planes are, and an 8-bit 4:2:0 one goes to HEIC as `heif-enc` reads it. `heif-enc`
+  reads every other Y4M as if it were 8-bit 4:2:0 too, garbling it, so those are
+  converted to RGB (BT.601) for HEIC instead, as they are for WebP and JPEG XL, which no
+  reference tool reads Y4M for. PNM is read the way `cwebp` reads it for WebP and the way
   `cjxl` reads it for JPEG XL (at its own bit depth); PFM is read as `cjxl` reads it, and
   only `cjxl` reads PFM, so PFM to another format has no reference to match. JPEG is read
   through libjpeg-turbo 3.2.0, the way each tool reads it — including `avifenc`'s and
@@ -286,9 +299,10 @@ same source as the library the app links (`scripts/build-reference-tools.sh`). P
   `avifenc` are both built without libyuv. A packaged `avifenc` (Homebrew, most Linux
   distributions) usually links libyuv, which converts RGB to YUV differently, so it
   writes other bytes even at libavif 1.4.2.
-- **Tested on Linux x86-64.** CI runs the parity tests there. The Windows and macOS builds
-  link the same sources, but no reference tool runs on those platforms, so identical
-  bytes there are expected, not tested.
+- **Tested on Linux x86-64 and macOS on Apple silicon.** CI builds the reference tools and
+  runs the parity tests on both, so the encoders' x86 and ARM code paths are each held to
+  the tools. The Windows build and the Intel Mac build link the same sources, but no
+  reference tool runs on those, so identical bytes there are expected, not tested.
 - **AVIF with libaom**, `avifenc`'s default codec: `-c rav1e` and `-c svt` are not built
   in. JPEG gain-map conversion needs `avifenc` built with libxml2, which it is not by
   default, and is not offered.
@@ -300,9 +314,9 @@ same source as the library the app links (`scripts/build-reference-tools.sh`). P
   output is checked by decoding it, not byte for byte.
 - **WebP's starting settings.** Until you change them, the WebP controls start from
   Skidbladnir's own long-standing defaults (`-af -alpha_filter best -pass 6 -mt`), not
-  from what `cwebp` does with no flags. To start where `cwebp` starts, choose `default`
-  under **libwebp preset** and click **Apply** (it keeps your quality), then set the flags
-  you use.
+  from what `cwebp` does with no flags. To start where `cwebp` starts, click **Start from
+  cwebp's defaults** in the WebP panel (tested against `cwebp` given no options at all),
+  then set the flags you use.
 - Options that change how a tool runs but not the file — verbosity, timing, benchmarks,
   printing statistics — have no control, and neither do `cwebp`'s dump and map outputs.
 
@@ -412,7 +426,8 @@ Known gaps:
   the test suite runs on macOS, but nobody has yet opened the app on a real Mac. The
   standard edition's Windows installer is installed and exercised by CI on every change,
   and the Linux app (both editions) is launched and driven by CI on every change, though
-  not from its `.deb` or AppImage. The published 0.5.0 `.deb` and AppImage were run
+  not from its `.deb` or AppImage. The `.rpm` is installed by CI on the latest Fedora
+  only. The published 0.5.0 `.deb` and AppImage were run
   through that release's smoke test by hand.
 - The app is not code-signed on any platform;
   [Opening it the first time](#opening-it-the-first-time) shows how to get past each

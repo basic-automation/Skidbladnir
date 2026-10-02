@@ -515,7 +515,9 @@ prettier subset.
       segments, a missing `VP8X` alpha flag, no RIFF padding, `ICCP` after the image and
       last-EXIF-wins each fail it.
 - [ ] **The comparison view — the best image comparison there is** (owner request,
-      2026-09-28; the model is Upscayl's before/after slider with zoom, taken further). The
+      2026-09-28; the model is Upscayl's before/after slider with zoom, taken further).
+      *Waits on its design (slice 13: designed in Figma before it is built); the Figma
+      connector needed re-authorising on 2026-10-01, so no slice was started.* The
       preview today is two static images side by side at fit-to-width, which cannot show
       the artefacts the advanced controls exist to trade off. Slices, each landable alone:
       1. **A real viewer.** One full-size viewport instead of two thumbnails; 100% means
@@ -621,13 +623,22 @@ prettier subset.
       made with `webpmux -set`, five choices x lossless/lossy: 10 of 10 byte-identical.
       Mutation: dropping Exif fails 4. `webpmux` joins the reference tools
       (`scripts/build-reference-tools.sh`, CI's parity job).
-- [ ] Warn before two inputs in one run would write the same output (`photo.png` and
+- [x] Warn before two inputs in one run would write the same output (`photo.png` and
       `photo.jpg` both become `photo.webp`), and offer a "Replace existing files" toggle,
-      on by default. Today the later file silently replaces the earlier one.
-- [ ] A "Start from `cwebp`'s defaults" button in the WebP panel
-      (`WebpSettings::libwebp_defaults()`), so matching a plain `cwebp` needs no preset step.
-- [ ] An About and licence view in the window: version, edition, and the bundled
-      `LICENSE`, notices and (GPL edition) `COPYING`, by fixed resource name.
+      on by default (2026-10-01). `plan_outputs` names each queued input's output with the
+      conversion commands' own naming (flat or mirrored; case-insensitive on Windows and
+      macOS) and the window lists shared names and files already in the destination. Off,
+      `encode_file_with_options` refuses an existing output before encoding and claims the
+      name with a `create_new` placeholder before the atomic rename, so nothing appearing
+      meanwhile is replaced either. Remembered in the preferences (absent = on).
+- [x] A "Start from `cwebp`'s defaults" button in the WebP panel (2026-10-01).
+      **Gate:** `cwebps_defaults_are_a_bare_cwebp` runs `cwebp` with no flag at all and
+      requires the reset to match it from four starting settings; mutation (resetting to the
+      app's defaults) fails it.
+- [x] An About and licence view in the window (2026-10-01): version, edition, licence, and
+      the bundled `LICENSE`, notices and (GPL edition) `COPYING`, read by an enum, never a
+      path (`src-tauri/src/legal.rs`, whose test holds the names to both editions'
+      `bundle.resources`). Smoke-tested and axe-audited in the running window.
 - [x] `cargo tauri build` green on **Linux** for `.deb` — **this was not actually blocked
       on `patchelf`.** Only the AppImage target needs it; `cargo tauri build --bundles deb`
       produces a valid 3.8 MB `Skidbladnir_<version>_amd64.deb` on the dev host today,
@@ -729,13 +740,22 @@ prettier subset.
       package and submodule, and an owner-written manifest under Flathub's AI policy.
 - [ ] A Homebrew cask (after notarization; the official tap also wants 225 stars), Snap
       (the owner registers the name), and the Microsoft Store (a signed, offline installer).
-- [ ] AppStream metainfo with PNG screenshots, shipped in the `.deb` and the AppImage
-      (`bundle.linux.{deb,appimage}.files`).
+- [x] AppStream metainfo with PNG screenshots, shipped in the `.deb`, the `.rpm` and the
+      AppImage (2026-10-01): `resources/linux/*.metainfo.xml`, one per edition (their
+      licences differ), `appstreamcli validate --pedantic` clean, matched to the desktop
+      entry and icon by `appstreamcli compose` over the built `.deb`.
+      `src-tauri/tests/metainfo.rs` fails a build whose newest `<release>` is not its
+      version, so **every version bump adds a `<release>` to both files**. The AppImage's copy
+      is built only in CI.
 - [ ] (owner decision) A supported way for packagers to turn the update check off: an
       `updater` cargo feature that keeps the two commands registered, and `FLATPAK_ID`
       detection. The smoke tests' environment switch is a test hook, not a documented one.
-- [ ] More platforms: an `rpm` bundle target, a Linux ARM64 leg (`ubuntu-22.04-arm`), and a
-      universal `.dmg`.
+- [x] An `.rpm` per edition (2026-10-01): bundled libheif and metainfo, renamed to
+      `Skidbladnir_<v>_x86_64.rpm` so the editions do not collide, glibc-floor checked
+      (`glibc-floor.py` reads rpm payloads itself), offered by the updater
+      (`linux-x86_64-rpm`), and installed with dnf on `fedora:latest` by `release.yml`'s
+      `rpm-install` job.
+- [ ] More platforms: a Linux ARM64 leg (`ubuntu-22.04-arm`) and a universal `.dmg`.
 
 ## Phase 6 — Retire Electron
 
@@ -989,7 +1009,9 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       `transparent` window, and the private API is what keeps an app out of the Mac App
       Store. Remove the feature from the workspace `tauri` dependency once a macOS build
       confirms the window still draws transparent — which, since no macOS build has been
-      launched, waits on the macOS first-launch item.
+      launched, waits on the macOS first-launch item. Tauri `3.0.0-alpha.4` removes the
+      feature and `macOSPrivateApi` outright, so it has to go before any move to 3.
+      <https://github.com/tauri-apps/tauri/releases>
       <https://github.com/tauri-apps/tauri/releases/tag/tauri-v2.12.1>
 - [x] Confirm the encoder is current. **No libwebp upgrade is pending:** 1.6.0
       (9 July 2025) is still the newest release, and it is exactly what `libwebp-sys`
@@ -1256,6 +1278,10 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       turn the pin into a parity case then.
       <https://github.com/libjxl/libjxl/issues/4902> ·
       <https://github.com/libjxl/libjxl/issues/4905>
+      Checked 2026-10-01: #4902 is still open, and PR #4948 ("modular: wrap residual
+      subtraction for lossless fp32 predictors", open since 20 August 2026) says it fixes
+      it, with a regression test. libjxl 0.12.0 is still the newest tag; watch for a
+      release carrying #4948. <https://github.com/libjxl/libjxl/pull/4948>
 - [x] **A still GIF into JPEG XL, as `cjxl` reads it** (2026-10-01). `cjxl` reads GIF with
       its own reader (`lib/extras/dec/gif.cc`): three colour channels, alpha only when a
       pixel is transparent, perceptual sRGB — and it counts GIF a lossy input, so with no
@@ -1309,18 +1335,47 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       how ImageMagick reads it — comes out of `heif-enc -e kvazaar -q 100` and `heif-dec`
       as (100, 50, 25) at alpha 128. Decide whether HEIC keeps true colours (as now) or
       follows `heif-enc`, then pin it with a test either way.
+- [x] **Y4M input into AVIF, held to `avifenc`** (2026-10-01): `avifenc`'s own reader
+      (`apps/shared/y4m.c`) is compiled into the shim, reading from memory through a
+      `tmpfile`, so a Y4M's planes are encoded as they are, with `avifenc`'s Y4M rules (`-y`
+      and `-r` ignored, `-d` must match, no `-d D,E`). The first frame only. For every other
+      output, and for the preview, it is converted to RGB with libavif's defaults for an
+      unsignalled image (BT.601, the file's range); no reference tool makes that conversion
+      for WebP or JPEG XL. **Gate:** `matches_avifenc_across_y4m_inputs` — 4:2:0, 4:2:2,
+      4:4:4, 4:4:4 with alpha, mono, 10- and 12-bit, full range, odd size x four settings,
+      plus lossless and `-d 10`, and both refusals: 40 of 40. Mutation: the RGB route fails
+      40 of 40.
+- [x] **Y4M into HEIC, held to `heif-enc`** (2026-10-01). `heif-enc`'s reader
+      (`heifio/decoder_y4m.cc`) takes every Y4M as 8-bit 4:2:0 planes whatever its `C` tag,
+      and refuses a frame line with parameters. Where that reading is the file's (8-bit
+      4:2:0, or no tag) the planes go to the shim as they are, through the lossy-WebP
+      planes layout; any other Y4M, which `heif-enc` misreads or refuses, takes the RGB
+      conversion instead — correct colours, as with the TIFF cases, and no reference.
+      **Gate:** `matches_heif_enc_across_y4m_inputs` 8 of 8 (no tag, `C420jpeg`,
+      `C420mpeg2`, 61x45 `C420` x two qualities); the RGB route fails 8 of 8.
 - [ ] More input formats the tools read: animated GIF and APNG into `cjxl` (with the
-      multi-image work below), Y4M (`avifenc`, `heif-enc`), PGX and EXR (`cjxl`), and raw
-      pixels (`heif-enc --raw`, `cwebp -s`).
-- [ ] Animated WebP's own options as controls: `-mixed`, `-min_size`, `-kmin`/`-kmax`,
-      `img2webp -loop`, `gif2webp -loop_compatibility` and `img2webp`'s per-frame options,
-      held to the tools in `tests/animation.rs` and `tests/gif.rs`. The README lists them as
-      not offered until then.
+      multi-image work below), PGX and EXR (`cjxl`), and raw pixels (`heif-enc --raw`,
+      `cwebp -s`).
+- [x] Animated WebP's own options as controls (2026-10-01): `-mixed`, `-min_size`,
+      `-kmin`/`-kmax`, `img2webp -loop` and `gif2webp -loop_compatibility`
+      (`WebpAnimation`). Found on the way: under `-mixed` the encoder still reads the
+      config's own `lossless`, which `gif2webp` sets lossy and `img2webp` leaves lossless.
+      **Gates:** `matches_reference_img2webp` 42 cases (was 18),
+      `matches_reference_gif2webp_with_animation_options` 70 of 70; every option
+      mutation-tested.
+- [ ] `img2webp`'s per-frame options (a different `-d`, `-lossy`/`-lossless`, `-q`, `-m`
+      or `-exact` for each frame): they need per-frame settings in the window, which
+      re-encoding one source does not have yet.
 - [ ] GPL edition: `heif-enc`'s `-p x265:<param>` beyond the fixed set of x265 controls
       (preset, tune, TU depth, AQ, psy-rd/psy-rdoq, deblock, SAO).
-- [ ] Parity on macOS again. CI ran the parity tests on macOS through v0.13.0; make the
-      `parity` job a matrix over Linux and macOS, so the README's "tested on Linux x86-64"
-      can widen.
+- [x] Parity on macOS again (2026-10-01): the `parity` job is a matrix over
+      `ubuntu-latest` and `macos-latest` (Apple silicon), with `--no-fail-fast`. Its first
+      macOS run found a test bug, not an encoder one: the AVIF, HEIC and JPEG XL gates named
+      scratch directories after the clock, which ticks in microseconds on macOS, so
+      parallel tests shared and deleted one directory; a counter replaced it. Every gate
+      then passed on macOS in CI run 36956355147.
+- [ ] Parity on Windows: the reference tools would have to build there (`makefile.unix`
+      does not; CMake might).
 
 **Multi-image features the tools have, deferred by the owner (2026-09-28):**
 
@@ -1390,11 +1445,21 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       the Nuxt frontend's npm tree, the Electron app's npm tree and github-actions, with
       the Tauri and Nuxt crates/packages grouped so they update together instead of
       opening mutually-conflicting PRs. Its PRs are gated by CI, which now exists.
-- [ ] Notices for everything else the installers carry: the Rust crates (`cargo-about`),
-      the frontend bundle (Fira Code's OFL; the CC BY 4.0 subway, iconamoon and codicon
-      icons need attribution or swapping for Lucide), libpng's licence (`png_gamma.rs`
-      reproduces its arithmetic), and the Ubuntu libraries inside the AppImage. Check them
-      in CI beside `third-party-notices.py --check`.
+- [x] Notices for the window's font (Fira Code, OFL-1.1) and its eleven Iconify icon
+      collections (CC BY 4.0 attribution for Codicons, IconaMoon and Subway; the MIT, ISC,
+      Apache-2.0 and OFL texts for the rest), and libpng's licence (`png_gamma.rs`), in both
+      editions' notices (2026-10-01). Texts the packages lack are in
+      `LICENSES/third-party/` with their sources; the generator refuses to run if
+      `frontend/package.json`'s icon collections differ from the ones it describes.
+- [ ] Notices for the rest of what the installers carry: the Rust crates (`cargo-about`),
+      the JavaScript libraries in the frontend bundle (Vue, Nuxt, Nuxt UI, Reka UI and
+      their dependencies, mostly MIT), and the Ubuntu libraries inside the AppImage. Check
+      them in CI beside `third-party-notices.py --check`.
+- [ ] Two Dependabot alerts with no clean fix (2026-10-01): `glib` 0.18 (unsound
+      `VariantStrIter`, fixed in 0.20) comes with Tauri 2's GTK 3 bindings, and `esbuild`
+      0.27 (a Windows dev-server file read, fixed in 0.28.1) is pinned `^0.27` by
+      `fontless` under `@nuxt/fonts`. Neither is in what ships; take each fix when its
+      parent allows it.
 - [ ] README: a dated "How it compares" table (Squoosh, XnConvert, Converseen/ImageMagick,
       the raw CLIs; "not stated" for the others' parity), a short demo clip, and an
       acknowledgements and non-affiliation section.
