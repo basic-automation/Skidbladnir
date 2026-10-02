@@ -288,8 +288,8 @@ mod mac {
 
 	/// Unpack the `.app.tar.gz` beside nothing it could clash with, move the running bundle
 	/// to a backup, put the new one in its place, and drop the backup. If the bundle's folder
-	/// is not writable (/Applications for a standard user), the moves are made by an
-	/// AppleScript with administrator privileges, as tauri-plugin-updater does.
+	/// is not writable (/Applications for a standard user), the moves are made by
+	/// `osascript` with administrator privileges, as tauri-plugin-updater does.
 	pub fn replace_bundle(data: &[u8]) -> Result<PathBuf, String> {
 		let bundle = super::mac_bundle().ok_or("the app bundle this copy runs from could not be found")?;
 		let work = std::env::temp_dir().join(format!("skidbladnir-update-{}", std::process::id()));
