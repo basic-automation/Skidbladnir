@@ -42,6 +42,10 @@ interface FoundImage { path: string, relative: string }
 // output mirrors the source tree or lands flat.
 const scanned = ref<FoundImage[]>([])
 const mirrorStructure = ref(true)
+// Whether a conversion may replace a file already at its output path; remembered between
+// launches. Off, such a file is kept and that input is reported as skipped.
+const replaceExisting = ref(true)
+const aboutOpen = ref(false)
 // Whether choosing a folder also takes the folders inside it. Off by default: a folder
 // often holds earlier output in a subfolder, and sweeping that up is rarely what was meant.
 const includeSubfolders = ref(false)
@@ -50,7 +54,7 @@ const scannedRoot = ref('')
 const animatedInputs = computed(() => inspected.value.filter(entry => entry.animated))
 
 /** Preferences as the Rust side stores them, plus why it fell back if it did. */
-interface Preferences { settings: EncodeJob, outputDirectory: string | null }
+interface Preferences { settings: EncodeJob, outputDirectory: string | null, replaceExisting: boolean }
 interface LoadedPreferences { preferences: Preferences, fellBack: string | null }
 
 const preferencesNotice = ref('')
@@ -95,6 +99,7 @@ onMounted(async () => {
 		const loaded = await invokeCommand<LoadedPreferences>('load_preferences')
 		settings.value = loaded.preferences.settings
 		outputDirectory.value = loaded.preferences.outputDirectory ?? ''
+		replaceExisting.value = loaded.preferences.replaceExisting ?? true
 		// 'noFile' is a first launch, which is not worth telling anyone about.
 		presets.value = await invokeCommand<{ name: string, settings: EncodeJob }[]>('list_presets')
 		if (loaded.fellBack && loaded.fellBack !== 'noFile') {
@@ -145,7 +150,7 @@ onUnmounted(() => {
 
 async function chooseInputs() {
 	const { open } = await import('@tauri-apps/plugin-dialog')
-	const picked = await open({ multiple: true, filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'jpe', 'jif', 'jfif', 'jfi', 'tif', 'tiff', 'webp', 'avif', 'jxl', 'heic', 'heif', 'gif', 'pnm', 'pgm', 'ppm', 'pam', 'pfm'] }] })
+	const picked = await open({ multiple: true, filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'jpe', 'jif', 'jfif', 'jfi', 'tif', 'tiff', 'webp', 'avif', 'jxl', 'heic', 'heif', 'gif', 'pnm', 'pgm', 'ppm', 'pam', 'pfm', 'pgx', 'y4m', 'svg', 'svgz'] }] })
 	scanned.value = []
 	scannedRoot.value = ''
 	if (Array.isArray(picked)) inputPaths.value = picked
@@ -223,8 +228,8 @@ async function convert() {
 			// selection has no tree to reproduce.
 			const found = scanned.value.find(entry => entry.path === input)
 			const report = found && mirrorStructure.value
-				? await invokeCommand<ConversionReport>('convert_scanned', { settings: settings.value, input, relative: found.relative, outputRoot: outputDirectory.value })
-				: await invokeCommand<ConversionReport>('convert_image', { settings: settings.value, input, outputDirectory: outputDirectory.value })
+				? await invokeCommand<ConversionReport>('convert_scanned', { settings: settings.value, input, relative: found.relative, outputRoot: outputDirectory.value, replaceExisting: replaceExisting.value })
+				: await invokeCommand<ConversionReport>('convert_image', { settings: settings.value, input, outputDirectory: outputDirectory.value, replaceExisting: replaceExisting.value })
 			reports.value.push(report)
 		}
 		catch (error) {
@@ -242,13 +247,39 @@ async function convert() {
 	// Remember what was used, after the run rather than on every slider drag: these are
 	// settings that demonstrably got as far as the encoder.
 	try {
-		await invokeCommand<void>('save_preferences', { preferences: { settings: settings.value, outputDirectory: outputDirectory.value || null } })
+		await invokeCommand<void>('save_preferences', { preferences: { settings: settings.value, outputDirectory: outputDirectory.value || null, replaceExisting: replaceExisting.value } })
 	}
 	catch {
 		// Preferences are a convenience. Failing to store them must not look like a failed
 		// conversion, which is what the user actually asked for and which succeeded.
 	}
 }
+
+// What the queued run would write, worked out by the Rust core with the conversion
+// commands' own naming: the names two inputs share, and the files already there.
+interface OutputPlan { collisions: { output: string, inputs: string[] }[], existing: string[] }
+const outputPlan = ref<OutputPlan | null>(null)
+async function refreshOutputPlan() {
+	if (!isTauri() || !settings.value || !outputDirectory.value || inputPaths.value.length === 0) {
+		outputPlan.value = null
+		return
+	}
+	const inputs = inputPaths.value.map((path) => {
+		const found = scanned.value.find(entry => entry.path === path)
+		return { path, relative: found && mirrorStructure.value ? found.relative : null }
+	})
+	try {
+		outputPlan.value = await invokeCommand<OutputPlan>('plan_outputs', { format: settings.value.format, inputs, outputDirectory: outputDirectory.value })
+	}
+	catch {
+		// A warning that could not be worked out is not worth an error of its own: the
+		// conversion still reports each file's result.
+		outputPlan.value = null
+	}
+}
+watch([inputPaths, outputDirectory, mirrorStructure, () => settings.value?.format], refreshOutputPlan)
+// Files written by a run change what is already there.
+watch(busy, (running) => { if (!running) refreshOutputPlan() })
 
 async function savePreset() {
 	if (!settings.value) return
@@ -402,10 +433,6 @@ function basename(path: string): string {
 	<!-- The window's own frame: the Tauri window is frameless and transparent, so this
 	     rounded surface is the whole visible window. -->
 	<div class="flex h-full overflow-hidden rounded-[32px] bg-paleday-bg text-paleday-fg">
-		<h1 class="sr-only">
-			Skidbladnir
-		</h1>
-
 		<div
 			v-if="dragging"
 			class="pointer-events-none fixed inset-4 z-50 flex items-center justify-center rounded-[28px] bg-paleday-bg/90 text-sm font-semibold text-paleday-accent-text outline-2 outline-dashed outline-paleday-accent"
@@ -445,6 +472,10 @@ function basename(path: string): string {
 						<div class="flex w-72 flex-col gap-2 p-2 text-xs">
 							<ControlToggle v-model="includeSubfolders" label="Include subfolders" help="Choosing a folder also takes every folder inside it. Off takes only the images directly in it." />
 							<ControlToggle v-model="mirrorStructure" label="Recreate folder structure" help="When subfolders are included, mirror them in the destination. Off writes every file side by side." :disabled="!includeSubfolders" />
+							<ControlToggle v-model="replaceExisting" label="Replace existing files" help="A file already in the destination with the output's name is replaced. Off keeps it and skips that input." />
+							<UButton color="neutral" variant="soft" size="sm" icon="i-lucide-info" class="mx-2.5 self-start" @click="aboutOpen = true">
+								About and licences
+							</UButton>
 							<p v-if="backendVersion" class="px-2.5 pb-1 text-paleday-dim" data-selectable>
 								{{ backendVersion }}
 							</p>
@@ -545,6 +576,10 @@ function basename(path: string): string {
 		</aside>
 
 		<main class="flex min-w-0 flex-1 flex-col gap-4 pb-1.5" :class="sidebarCollapsed ? 'pl-2' : 'pl-6'">
+			<!-- Inside a landmark, so a screen reader's landmark navigation reaches it. -->
+			<h1 class="sr-only">
+				Skidbladnir
+			</h1>
 			<!-- The title bar: a drag region with the window buttons at its end. -->
 			<div class="flex shrink-0 items-center gap-4" data-tauri-drag-region>
 				<UButton
@@ -598,6 +633,8 @@ function basename(path: string): string {
 
 					<UpdateBanner />
 
+					<AboutPanel v-if="aboutOpen" :app-version="appVersion" :backend-version="backendVersion" :edition="edition" @close="aboutOpen = false" />
+
 					<UAlert
 						v-if="preferencesNotice"
 						color="warning"
@@ -613,6 +650,27 @@ function basename(path: string): string {
 						title="Not connected to the encoder"
 						:description="startupError"
 					/>
+
+					<div v-if="!busy && outputPlan && (outputPlan.collisions.length || outputPlan.existing.length)" class="flex flex-col gap-1 px-2.5 text-xs" role="status">
+						<template v-if="outputPlan.collisions.length">
+							<p class="text-paleday-warning">
+								{{ outputPlan.collisions.length === 1 ? 'Two queued files would be written to the same name' : `${outputPlan.collisions.length} names would each be written by more than one queued file` }}.
+								{{ replaceExisting ? 'Each later file replaces the one before it, so only the last is kept.' : 'Only the first is written; the others are skipped.' }}
+							</p>
+							<ul class="text-paleday-dim" data-selectable>
+								<li v-for="collision in outputPlan.collisions.slice(0, 5)" :key="collision.output">
+									{{ collision.inputs.map(basename).join(', ') }} → {{ basename(collision.output) }}
+								</li>
+								<li v-if="outputPlan.collisions.length > 5">
+									and {{ outputPlan.collisions.length - 5 }} more
+								</li>
+							</ul>
+						</template>
+						<p v-if="outputPlan.existing.length" :class="replaceExisting ? 'text-paleday-warning' : 'text-paleday-dim'">
+							{{ outputPlan.existing.length === 1 ? 'One output is' : `${outputPlan.existing.length} outputs are` }} already in the destination
+							{{ replaceExisting ? `and will be replaced. Turn off "Replace existing files" in the app settings to keep ${outputPlan.existing.length === 1 ? 'it' : 'them'}.` : `and will be kept; ${outputPlan.existing.length === 1 ? 'its input is' : 'their inputs are'} skipped.` }}
+						</p>
+					</div>
 
 					<div v-if="scannedRoot || animatedInputs.length || dropRejected || (inspected.length === 1 && inspected[0]?.webp)" class="flex flex-col gap-1 px-2.5 text-xs">
 						<div v-if="scannedRoot" class="flex flex-wrap items-start gap-x-6">
@@ -642,7 +700,7 @@ function basename(path: string): string {
 						</p>
 						<p v-if="dropRejected > 0" class="text-paleday-warning">
 							{{ dropRejected }} dropped {{ dropRejected === 1 ? 'file was' : 'files were' }} not a
-							PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC or GIF and {{ dropRejected === 1 ? 'was' : 'were' }} skipped.
+							PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC, GIF, PNM, PFM, PGX, Y4M or SVG and {{ dropRejected === 1 ? 'was' : 'were' }} skipped.
 						</p>
 					</div>
 

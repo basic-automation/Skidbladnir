@@ -2,7 +2,7 @@
 // Every cwebp option that changes the file it writes, one control per flag. Help text is
 // cwebp's own (`cwebp -longhelp`), with the flag it sets.
 //
-// cwebp's two shorthands, -preset and -z, are buttons that set the controls the way they
+// cwebp's two shorthands, -preset and -z, and its no-option defaults are buttons that set the controls the way they
 // set the config on the command line: the Rust core applies them, so their values are
 // libwebp's own rather than a copy here.
 import { computed, ref } from 'vue'
@@ -34,6 +34,16 @@ async function applyPreset() {
 	presetError.value = ''
 	try {
 		model.value = await invokeCommand<WebpSettings>('webp_apply_preset', { webp: model.value, preset: preset.value })
+	}
+	catch (error) {
+		presetError.value = String(error)
+	}
+}
+
+async function startFromCwebpDefaults() {
+	presetError.value = ''
+	try {
+		model.value = await invokeCommand<WebpSettings>('webp_cwebp_defaults', { webp: model.value })
 	}
 	catch (error) {
 		presetError.value = String(error)
@@ -101,6 +111,17 @@ const alphaCompression = computed({
 						-z · lossless, with the method and effort of the level
 					</p>
 				</div>
+				<div class="flex min-w-0 flex-col gap-2 px-2.5 py-[7px] text-xs">
+					<span class="font-semibold text-paleday-fg">cwebp's defaults</span>
+					<div class="flex items-center gap-2">
+						<UButton size="sm" color="neutral" variant="soft" @click="startFromCwebpDefaults">
+							Start from cwebp's defaults
+						</UButton>
+					</div>
+					<p class="text-paleday-dim">
+						no options · every control as a plain cwebp sets it, so the file matches cwebp with no flags
+					</p>
+				</div>
 			</div>
 			<p v-if="presetError" class="px-2.5 text-xs text-paleday-error" role="alert">
 				{{ presetError }}
@@ -160,6 +181,33 @@ const alphaCompression = computed({
 				<ControlToggle v-model="s.metadata.xmp" label="Copy XMP" help="-metadata xmp · copy XMP from the input if present" />
 			</div>
 		</ControlPanel>
+
+		<ControlDisclosure title="Animation">
+			<p class="px-2.5 text-xs text-paleday-dim">
+				For an animated WebP or a GIF only: img2webp's and gif2webp's own options. Still images ignore them.
+			</p>
+			<div class="grid grid-cols-3 gap-4">
+				<ControlToggle v-model="s.animation.minimizeSize" label="Minimise size" help="-min_size · search harder for the smallest file; slower, and places no keyframes" />
+				<ControlToggle v-model="s.animation.allowMixed" label="Mixed lossy and lossless" help="-mixed · each frame lossy or lossless, whichever is smaller" />
+				<ControlToggle v-model="s.animation.loopCompatibility" label="GIF loop compatibility" help="-loop_compatibility · gif2webp: read the GIF's loop count as Chrome up to M62 did" />
+			</div>
+			<div class="grid grid-cols-3 gap-4">
+				<ControlOptional v-model="s.animation.kmin" label="Minimum keyframe distance" :fallback="3" unset="-kmin · not given: the tool's default (gif2webp 9 lossless, 3 lossy)">
+					<ControlNumber v-model="s.animation.kmin" label="At least, in frames" :min="-2147483648" :max="2147483647" help="-kmin · min distance between key frames" />
+				</ControlOptional>
+				<ControlOptional v-model="s.animation.kmax" label="Maximum keyframe distance" :fallback="5" unset="-kmax · not given: the tool's default (gif2webp 17 lossless, 5 lossy)">
+					<ControlNumber v-model="s.animation.kmax" label="At most, in frames" :min="-2147483648" :max="2147483647" help="-kmax · max distance between key frames; 1 makes every frame a keyframe, 0 none" />
+				</ControlOptional>
+				<ControlOptional v-model="s.animation.loopCount" label="Set the loop count" :fallback="0" unset="-loop · not given: the source's own loop count is kept">
+					<ControlNumber v-model="s.animation.loopCount" label="Plays" :min="0" :max="65535" help="-loop · how many times it plays; 0 is forever" />
+				</ControlOptional>
+			</div>
+			<div class="grid grid-cols-3 gap-4">
+				<ControlOptional v-model="s.animation.frameDuration" label="Set every frame's duration" :fallback="100" unset="-d · not given: each frame keeps its own timing">
+					<ControlNumber v-model="s.animation.frameDuration" label="Milliseconds per frame" :min="1" :max="2147483647" unit="ms" help="-d · frame duration, given once for every frame" />
+				</ControlOptional>
+			</div>
+		</ControlDisclosure>
 
 		<ControlPanel title="Performance">
 			<div class="grid grid-cols-3 gap-4">

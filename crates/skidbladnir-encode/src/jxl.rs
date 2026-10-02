@@ -592,6 +592,7 @@ impl Input {
 			SourceFormat::Jpeg => Self::jpeg(source),
 			SourceFormat::Pnm => Self::pnm(source),
 			SourceFormat::Pfm => Self::pfm(source),
+			SourceFormat::Pgx => Self::pgx(source),
 			SourceFormat::Gif => Self::gif(source),
 			_ => Self::other(source),
 		}
@@ -737,6 +738,20 @@ impl Input {
 			_ => return Self::other(source),
 		};
 		Self { width: source.width, height: source.height, bits_per_sample: 32, exponent_bits: 8, num_color_channels: if image.gray { 1 } else { 3 }, alpha_bits: 0, samples: Samples::F32(image.samples), colour: Colour::Encoding(srgb(image.gray, JXL_RENDERING_INTENT_PERCEPTUAL)), colour_given: false, colour_hints_ignored: false, intensity_target: 0.0, exif: Vec::new(), xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT }
+	}
+
+	/// `lib/extras/dec/pgx.cc`: one gray channel, the samples as stored in an 8- or 16-bit
+	/// container at the container's full range (`JXL_BIT_DEPTH_FROM_PIXEL_FORMAT`), gray
+	/// sRGB with the perceptual intent. That is the file's meaning only at 8 and 16 bits; at
+	/// any other depth, and when cropped or resized, the correct reading is encoded instead
+	/// ([`Self::other`]), and no longer matches `cjxl`.
+	fn pgx(source: &SourceImage) -> Self {
+		let image = match crate::pnm::pgx(&source.bytes) {
+			Ok(image) if image.cjxl_reads_it_right() && (image.width, image.height) == (source.width, source.height) => image,
+			_ => return Self::other(source),
+		};
+		let samples = if image.bits > 8 { Samples::U16(image.samples) } else { Samples::U8(image.samples.into_iter().map(|v| u8::try_from(v).unwrap_or(u8::MAX)).collect()) };
+		Self { width: source.width, height: source.height, bits_per_sample: image.bits, exponent_bits: 0, num_color_channels: 1, alpha_bits: 0, samples, colour: Colour::Encoding(srgb(true, JXL_RENDERING_INTENT_PERCEPTUAL)), colour_given: false, colour_hints_ignored: false, intensity_target: 0.0, exif: Vec::new(), xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT }
 	}
 
 	/// `lib/extras/dec/gif.cc` for a still GIF: always three colour channels, alpha only

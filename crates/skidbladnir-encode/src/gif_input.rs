@@ -39,6 +39,17 @@ use crate::{
 /// Returns a description of the failure: a malformed GIF, a frame outside the canvas, a
 /// colour index with no palette entry, or no frames at all.
 pub fn decode(bytes: &[u8]) -> Result<Animation, String> {
+	decode_with_compatible_loop(bytes).map(|(animation, _)| animation)
+}
+
+/// [`decode`], and also the loop count `gif2webp -loop_compatibility` gives the file: a
+/// GIF's repeat count taken as the number of plays, no loop extension as forever, and still
+/// none for a single frame.
+///
+/// # Errors
+///
+/// As [`decode`].
+pub fn decode_with_compatible_loop(bytes: &[u8]) -> Result<(Animation, u32), String> {
 	let mut options = DecodeOptions::new();
 	options.set_color_output(ColorOutput::Indexed);
 	let mut decoder = options.read_info(bytes).map_err(|error| format!("could not read the GIF: {error}"))?;
@@ -114,8 +125,12 @@ pub fn decode(bytes: &[u8]) -> Result<Animation, String> {
 		(_, Repeat::Finite(repeats)) if repeats < u16::MAX => u32::from(repeats) + 1,
 		(_, Repeat::Finite(repeats)) => u32::from(repeats),
 	};
+	let compatible_loop_count = match (frames.len(), decoder.repeat()) {
+		(1, _) | (_, Repeat::Infinite) => 0,
+		(_, Repeat::Finite(repeats)) => u32::from(repeats),
+	};
 	let (width, height) = (u32::try_from(width).map_err(|_| "GIF too wide")?, u32::try_from(height).map_err(|_| "GIF too tall")?);
-	Ok(Animation { width, height, loop_count, background, frames })
+	Ok((Animation { width, height, loop_count, background, frames }, compatible_loop_count))
 }
 
 /// Whether a GIF has more than one frame, found without decoding any pixels. A GIF that

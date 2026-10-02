@@ -355,6 +355,15 @@ impl Input {
 		}
 	}
 
+	/// `heifio/decoder_y4m.cc`: `heif-enc` reads a Y4M's first frame as 8-bit 4:2:0 planes,
+	/// whatever its header says, from a header whose `W` and `H` it parses and a frame line
+	/// that is exactly `FRAME`. Where that reading is the file's (8-bit 4:2:0, which is
+	/// also a header with no `C` tag) the planes go in as they are, as `heif-enc` puts them;
+	/// any other Y4M, which `heif-enc` misreads or refuses, is converted to RGB instead.
+	fn y4m(source: &SourceImage) -> Self {
+		y4m_420_planes(&source.bytes).filter(|(width, height, _)| (*width, *height) == (source.width, source.height)).map_or_else(|| Self::other(source), |(_, _, planes)| Self { layout: Layout::Yuv420 { alpha: false }, planes, icc: None, exif: None, xmp: None, orientation: 1 })
+	}
+
 	/// A format `heif-enc` does not read here: its samples as they are, and the metadata
 	/// its container carries.
 	fn other(source: &SourceImage) -> Self {
@@ -444,6 +453,7 @@ pub fn encode(job: &EncodeJob, source: &SourceImage, on_progress: &mut dyn FnMut
 		SourceFormat::Jpeg => Input::jpeg(&source),
 		// 10-bit input is made from pixels, which `heif-enc` cannot do.
 		SourceFormat::Webp if !ten_bit => Input::webp(&source),
+		SourceFormat::Y4m if !ten_bit && matches!(source, Cow::Borrowed(_)) => Input::y4m(&source),
 		_ => Input::other(&source),
 	};
 	// Metadata left out is metadata the input never had.
@@ -552,6 +562,7 @@ pub(crate) fn x265_parameters(s: &HeicSettings, (width, height): (u32, u32)) -> 
 	parameters.push(("x265:psy-rdoq".to_owned(), tenths(s.psy_rdoq)));
 	parameters.push(("x265:deblock".to_owned(), if s.deblock { format!("{}:{}", s.deblock_strength, s.deblock_threshold) } else { "false".to_owned() }));
 	parameters.push(("x265:sao".to_owned(), (if s.sao { "true" } else { "false" }).to_owned()));
+	parameters.extend(s.x265_parameters.iter().map(|p| (format!("x265:{}", p.key), p.value.clone())));
 	parameters
 }
 
@@ -674,9 +685,42 @@ pub fn dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
 	Some((u32::try_from(size.0).ok()?, u32::try_from(size.1).ok()?))
 }
 
+/// A Y4M's first frame as `heif-enc` reads it, when that reading is the file's own: its
+/// size and its Y, Cb and Cr planes, for an 8-bit 4:2:0 file (a `C420*` tag or none) with a
+/// bare `FRAME` line. `None` for anything else.
+fn y4m_420_planes(bytes: &[u8]) -> Option<(u32, u32, Vec<Vec<u8>>)> {
+	let header_end = bytes.iter().position(|&b| b == b'\n')?;
+	let header = std::str::from_utf8(&bytes[..header_end]).ok()?.strip_prefix("YUV4MPEG2 ")?;
+	let (mut width, mut height) = (None, None);
+	for field in header.split(' ').filter(|field| !field.is_empty()) {
+		let (tag, value) = field.split_at(1);
+		match tag {
+			"W" => width = value.parse::<u32>().ok(),
+			"H" => height = value.parse::<u32>().ok(),
+			"C" if !matches!(value, "420" | "420jpeg" | "420paldv" | "420mpeg2") => return None,
+			_ => {}
+		}
+	}
+	let (width, height) = (width?, height?);
+	let rest = &bytes[header_end + 1..];
+	let frame_end = rest.iter().position(|&b| b == b'\n')?;
+	if &rest[..frame_end] != b"FRAME" {
+		return None;
+	}
+	let data = &rest[frame_end + 1..];
+	let (w, h) = (width as usize, height as usize);
+	let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+	let luma = w.checked_mul(h)?;
+	let chroma = cw.checked_mul(ch)?;
+	if data.len() < luma + 2 * chroma {
+		return None;
+	}
+	Some((width, height, vec![data[..luma].to_vec(), data[luma..luma + chroma].to_vec(), data[luma + chroma..luma + 2 * chroma].to_vec()]))
+}
+
 #[cfg(test)]
 mod tests {
-	use super::{SYSTEM_LIBHEIF, decode, dimensions, encode, encoder_name, exif_orientation, has_encoder, linked_version, set_exif_orientation};
+	use super::{SYSTEM_LIBHEIF, decode, dimensions, encode, encoder_name, exif_orientation, has_encoder, linked_version, set_exif_orientation, y4m_420_planes};
 	use crate::{
 		encoder::{EncodeError, RgbaImage}, settings::{EncodeJob, HEIC_X265, HeicSettings, OutputFormat, Resize}, source::SourceImage
 	};
@@ -947,5 +991,78 @@ mod tests {
 			let bytes = heic(&off, 64, 64, &pixels);
 			assert!(psnr(&pixels, &decode(&bytes).expect("decode").2) > 30.0);
 		}
+
+		/// A free-form `x265:` parameter reaches x265, after the controls: overriding one of
+		/// them with its own value changes nothing, with another value it does, and x265's
+		/// refusal of a parameter it does not know is an error, not a silent default.
+		#[test]
+		fn free_form_x265_parameters_reach_x265() {
+			use crate::settings::CodecOption;
+			let pixels = fixture(64, 64, false);
+			let with = |key: &str, value: &str| HeicSettings { x265_parameters: vec![CodecOption { key: key.into(), value: value.into() }], ..HeicSettings::default() };
+			let default = heic(&HeicSettings::default(), 64, 64, &pixels);
+			assert_eq!(heic(&with("aq-mode", "1"), 64, 64, &pixels), default, "the aq-mode control's own value, given again");
+			let changed = heic(&with("aq-mode", "0"), 64, 64, &pixels);
+			assert_ne!(changed, default, "a parameter after the controls overrides them");
+			assert!(psnr(&pixels, &decode(&changed).expect("decode").2) > 30.0);
+			let chroma = heic(&with("cbqpoffs", "12"), 64, 64, &pixels);
+			assert_ne!(chroma, default, "a parameter with no control");
+			assert!(psnr(&pixels, &decode(&chroma).expect("decode").2) > 25.0);
+			assert!(run(with("no-such-parameter", "1"), Resize::default(), 64, 64, &pixels, &mut |_| true).is_err(), "x265 refuses an unknown parameter, and so do we");
+		}
+	}
+
+	/// HEIC encodes running at once never trip libheif's memory limit. libheif 1.23 counts
+	/// an image's memory against its context's limits by their address; a HEIC source's
+	/// image that outlived its context could later take another context's count below zero,
+	/// and that encode then failed with "Memory usage of 18446744073709539283 bytes ...
+	/// exceeds the security limit" (seen on macOS CI, where addresses are reused readily).
+	#[test]
+	fn concurrent_encodes_keep_libheif_memory_accounting_sound() {
+		let dir = std::env::temp_dir().join(format!("skidbladnir-heic-threads-{}", std::process::id()));
+		let _ = std::fs::remove_dir_all(&dir);
+		std::fs::create_dir_all(&dir).expect("create");
+		let pixels = fixture(64, 48, false);
+		let job = EncodeJob { format: OutputFormat::Heic, ..EncodeJob::default() };
+		let source = SourceImage::from_rgba(&RgbaImage { width: 64, height: 48, pixels: &pixels });
+		let heic = dir.join("source.heic");
+		std::fs::write(&heic, encode(&job, &source, &mut |_| true).expect("make a HEIC source")).expect("write");
+		let png = dir.join("source.png");
+		image::RgbaImage::from_raw(64, 48, pixels).expect("buffer").save(&png).expect("write");
+		let failures: Vec<String> = std::thread::scope(|scope| {
+			let workers: Vec<_> = (0..8)
+				.map(|worker| {
+					let (dir, heic, png, job) = (&dir, &heic, &png, &job);
+					scope.spawn(move || {
+						let mut failed = Vec::new();
+						for round in 0..25 {
+							let input = if (worker + round) % 2 == 0 { heic } else { png };
+							let output = dir.join(format!("out-{worker}-{round}.heic"));
+							if let Err(error) = crate::source::encode_file(job, input, &output) {
+								failed.push(format!("worker {worker} round {round}: {error}"));
+							}
+						}
+						failed
+					})
+				})
+				.collect();
+			workers.into_iter().flat_map(|worker| worker.join().expect("a worker panicked")).collect()
+		});
+		let _ = std::fs::remove_dir_all(&dir);
+		assert!(failures.is_empty(), "{} of 200 concurrent encodes failed:\n{}", failures.len(), failures.join("\n"));
+	}
+
+	/// `heif-enc`'s Y4M reading is taken only where it is the file's own: 8-bit 4:2:0 with a
+	/// bare `FRAME` line. Everything else goes through RGB.
+	#[test]
+	fn y4m_planes_only_for_what_heif_enc_reads_correctly() {
+		let file = |header: &str, frame: &str, size: usize| [header.as_bytes(), b"\n", frame.as_bytes(), b"\n", &vec![128; size]].concat();
+		let planes = y4m_420_planes(&file("YUV4MPEG2 W4 H2 F25:1 C420jpeg", "FRAME", 12)).expect("4:2:0 is read as planes");
+		assert_eq!((planes.0, planes.1, planes.2.iter().map(Vec::len).collect::<Vec<_>>()), (4, 2, vec![8, 2, 2]));
+		assert!(y4m_420_planes(&file("YUV4MPEG2 W4 H2", "FRAME", 12)).is_some(), "no C tag is 4:2:0");
+		assert!(y4m_420_planes(&file("YUV4MPEG2 W4 H2 C444", "FRAME", 24)).is_none(), "heif-enc misreads 4:4:4");
+		assert!(y4m_420_planes(&file("YUV4MPEG2 W4 H2 C420p10", "FRAME", 24)).is_none(), "and 10-bit");
+		assert!(y4m_420_planes(&file("YUV4MPEG2 W4 H2", "FRAME Ixyz", 12)).is_none(), "and refuses frame parameters");
+		assert!(y4m_420_planes(&file("YUV4MPEG2 W4 H2", "FRAME", 11)).is_none(), "a short frame is not read");
 	}
 }

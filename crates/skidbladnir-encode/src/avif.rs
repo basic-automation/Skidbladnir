@@ -57,6 +57,8 @@ struct SkidAvifInput {
 	ignore_icc: c_int,
 	ignore_exif: c_int,
 	ignore_xmp: c_int,
+	y4m: *const u8,
+	y4m_size: usize,
 }
 
 #[repr(C)]
@@ -113,6 +115,7 @@ struct SkidAvifSettings {
 unsafe extern "C" {
 	fn skid_avif_encode(input: *const SkidAvifInput, settings: *const SkidAvifSettings, out: *mut *mut u8, out_size: *mut usize, error: *mut c_char, error_size: usize) -> c_int;
 	fn skid_avif_free(data: *mut u8);
+	fn skid_y4m_decode(data: *const u8, size: usize, out: *mut *mut u8, width: *mut u32, height: *mut u32, depth: *mut u32, has_alpha: *mut c_int, error: *mut c_char, error_size: usize) -> c_int;
 	fn skid_avif_version() -> *const c_char;
 	fn skid_avif_versions() -> *const c_char;
 }
@@ -337,21 +340,23 @@ pub fn encode(job: &EncodeJob, source: &SourceImage, on_progress: &mut dyn FnMut
 	// A JPEG as it is on disk goes to avifenc's own reader; cropped or resized, its pixels
 	// are all there is.
 	let jpeg = (source.format == SourceFormat::Jpeg && !source.bytes.is_empty() && matches!(source, Cow::Borrowed(_))).then_some(source.bytes.as_slice());
+	// So does a Y4M, whose planes avifenc encodes as they are.
+	let y4m = (source.format == SourceFormat::Y4m && !source.bytes.is_empty() && matches!(source, Cow::Borrowed(_))).then_some(source.bytes.as_slice());
 	let input = match source.format {
-		_ if jpeg.is_some() => Input::default(),
+		_ if jpeg.is_some() || y4m.is_some() => Input::default(),
 		_ if source.bytes.is_empty() => Input::other(&source, settings),
 		SourceFormat::Png => Input::png(&source, settings),
 		SourceFormat::Jpeg => Input::jpeg(&source, settings),
 		_ => Input::other(&source, settings),
 	};
-	let output = encode_input(settings, source.width, source.height, &input, jpeg)?;
+	let output = encode_input(settings, source.width, source.height, &input, jpeg, y4m)?;
 	if !on_progress(100) {
 		return Err(EncodeError::Cancelled);
 	}
 	Ok(output)
 }
 
-fn encode_input(s: &AvifSettings, width: u32, height: u32, input: &Input, jpeg: Option<&[u8]>) -> Result<Vec<u8>, EncodeError> {
+fn encode_input(s: &AvifSettings, width: u32, height: u32, input: &Input, jpeg: Option<&[u8]>, y4m: Option<&[u8]>) -> Result<Vec<u8>, EncodeError> {
 	let [icc_file, exif_file, xmp_file] = s.metadata_files().map(|path| path.map(|path| std::fs::read(path).map_err(|error| EncodeError::Avif(format!("could not read `{}`: {error}", path.display())))).transpose());
 	let (icc_file, exif_file, xmp_file) = (icc_file?, exif_file?, xmp_file?);
 	let options: Vec<(CString, CString)> = s.codec_options.iter().map(|option| Ok((CString::new(option.key.clone())?, CString::new(option.value.clone())?))).collect::<Result<_, std::ffi::NulError>>().map_err(|_| EncodeError::Avif("a codec option contains a NUL byte".to_owned()))?;
@@ -361,7 +366,7 @@ fn encode_input(s: &AvifSettings, width: u32, height: u32, input: &Input, jpeg: 
 	let (icc, icc_size) = bytes(input.icc.as_ref());
 	let (exif, exif_size) = bytes(input.exif.as_ref());
 	let (xmp, xmp_size) = bytes(input.xmp.as_ref());
-	let raw = SkidAvifInput { width, height, pixels: input.samples.as_ptr(), rgb_depth: input.rgb_depth, channels: input.channels, raw_gray: c_int::from(input.raw_gray), has_cicp: c_int::from(input.cicp.is_some()), cicp_primaries: input.cicp.map_or(0, |c| c.0), cicp_transfer: input.cicp.map_or(0, |c| c.1), icc, icc_size, has_srgb: c_int::from(input.srgb), has_gama: c_int::from(input.gama.is_some()), gama: input.gama.unwrap_or(0.0), has_chrm: c_int::from(input.chrm.is_some()), chrm: input.chrm.unwrap_or([0.0; 8]), exif, exif_size, xmp, xmp_size, exif_sets_transforms: c_int::from(input.exif_sets_transforms), jpeg: jpeg.map_or(ptr::null(), <[u8]>::as_ptr), jpeg_size: jpeg.map_or(0, <[u8]>::len), ignore_icc: c_int::from(s.icc != MetadataSource::Keep), ignore_exif: c_int::from(s.exif != MetadataSource::Keep), ignore_xmp: c_int::from(s.xmp != MetadataSource::Keep) };
+	let raw = SkidAvifInput { width, height, pixels: input.samples.as_ptr(), rgb_depth: input.rgb_depth, channels: input.channels, raw_gray: c_int::from(input.raw_gray), has_cicp: c_int::from(input.cicp.is_some()), cicp_primaries: input.cicp.map_or(0, |c| c.0), cicp_transfer: input.cicp.map_or(0, |c| c.1), icc, icc_size, has_srgb: c_int::from(input.srgb), has_gama: c_int::from(input.gama.is_some()), gama: input.gama.unwrap_or(0.0), has_chrm: c_int::from(input.chrm.is_some()), chrm: input.chrm.unwrap_or([0.0; 8]), exif, exif_size, xmp, xmp_size, exif_sets_transforms: c_int::from(input.exif_sets_transforms), jpeg: jpeg.map_or(ptr::null(), <[u8]>::as_ptr), jpeg_size: jpeg.map_or(0, <[u8]>::len), ignore_icc: c_int::from(s.icc != MetadataSource::Keep), ignore_exif: c_int::from(s.exif != MetadataSource::Keep), ignore_xmp: c_int::from(s.xmp != MetadataSource::Keep), y4m: y4m.map_or(ptr::null(), <[u8]>::as_ptr), y4m_size: y4m.map_or(0, <[u8]>::len) };
 
 	let unset = |value: Option<u8>| value.map_or(-1, c_int::from);
 	let (tile_rows_log2, tile_cols_log2, autotiling) = match s.tiling {
@@ -468,6 +473,46 @@ pub fn dimensions(avif: &[u8]) -> Option<(u32, u32)> {
 		at = start + 4;
 	}
 	best
+}
+
+/// A decoded Y4M: its size, 8-bit RGBA, 16-bit RGBA when it had more than 8 bits, and
+/// whether it had an alpha plane.
+pub type Y4mPixels = (u32, u32, Vec<u8>, Option<Vec<u16>>, bool);
+
+/// Read a Y4M (`YUV4MPEG2`, its first frame) as `avifenc`'s reader does, and convert it to
+/// RGB with libavif's defaults for an image that signals no colour space (BT.601, the
+/// file's range). For every output but AVIF, which takes the planes as they are.
+///
+/// # Errors
+///
+/// The reader's or the conversion's message.
+pub fn decode_y4m(bytes: &[u8]) -> Result<Y4mPixels, String> {
+	let mut out: *mut u8 = ptr::null_mut();
+	let (mut width, mut height, mut depth, mut has_alpha) = (0_u32, 0_u32, 0_u32, 0 as c_int);
+	let mut error = [0 as c_char; 256];
+	// SAFETY: every pointer is to a live local or the input slice; the shim allocates `out`
+	// with libavif's allocator, released below with its free.
+	let ok = unsafe { skid_y4m_decode(bytes.as_ptr(), bytes.len(), &raw mut out, &raw mut width, &raw mut height, &raw mut depth, &raw mut has_alpha, error.as_mut_ptr(), error.len()) };
+	if ok == 0 || out.is_null() {
+		// SAFETY: the shim writes a NUL-terminated message into `error` on failure.
+		return Err(unsafe { std::ffi::CStr::from_ptr(error.as_ptr()) }.to_string_lossy().into_owned());
+	}
+	let samples = (width as usize) * (height as usize) * 4;
+	let bytes_per_sample = if depth > 8 { 2 } else { 1 };
+	// SAFETY: the shim wrote `samples` samples of `depth` bits, `bytes_per_sample` bytes
+	// each, to `out`.
+	let raw = unsafe { std::slice::from_raw_parts(out, samples * bytes_per_sample) }.to_vec();
+	let (pixels, deep) = if depth > 8 {
+		let deep: Vec<u16> = raw.as_chunks::<2>().0.iter().map(|&pair| u16::from_ne_bytes(pair)).collect();
+		// The high byte, as a 16-bit PNG's is narrowed.
+		let pixels = deep.iter().map(|&sample| sample.to_be_bytes()[0]).collect();
+		(pixels, Some(deep))
+	} else {
+		(raw, None)
+	};
+	// SAFETY: `out` came from the shim and is freed once.
+	unsafe { skid_avif_free(out) };
+	Ok((width, height, pixels, deep, has_alpha != 0))
 }
 
 #[cfg(test)]

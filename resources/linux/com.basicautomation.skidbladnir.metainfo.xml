@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata for software centres and AppImageHub. Installed by the .deb and the
+     AppImage as /usr/share/metainfo/com.basicautomation.skidbladnir.metainfo.xml (see
+     tauri.linux.conf.json and tauri.gpl.conf.json). The newest <release> must be the app's
+     version: src-tauri/src/lib.rs tests it. Validate with `appstreamcli validate`. -->
+<component type="desktop-application">
+  <id>com.basicautomation.skidbladnir</id>
+  <name>Skidbladnir</name>
+  <summary>Convert images to next-generation formats</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>ISC</project_license>
+  <developer id="io.basicautomation">
+    <name>Basic Automation</name>
+  </developer>
+  <description>
+    <p>
+      Skidbladnir converts images to WebP, AVIF, JPEG XL and HEIC. For a still image it
+      offers every option of the official command-line encoders, each as a control labelled
+      with the flag it sets, and writes the same bytes those tools write, apart from a few
+      documented cases.
+    </p>
+    <ul>
+      <li>WebP with every cwebp option, and animated WebP from animated WebP or GIF</li>
+      <li>AVIF with every avifenc option (libaom), JPEG XL with every cjxl option</li>
+      <li>HEIC, the format iPhones use, with heif-enc's options</li>
+      <li>Reads PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC, GIF, PNM, PFM, PGX, Y4M and SVG</li>
+      <li>Keeps colour profiles and metadata the way each tool does</li>
+      <li>Previews the result beside the original before anything is written</li>
+      <li>Converts whole folders, with progress per file and a Cancel that leaves no half-written image</li>
+    </ul>
+    <p>
+      This is the standard edition, which writes HEIC with the Kvazaar encoder.
+    </p>
+  </description>
+  <launchable type="desktop-id">Skidbladnir.desktop</launchable>
+  <url type="homepage">https://basicautomation.io/projects/skidbladnir</url>
+  <url type="bugtracker">https://github.com/basic-automation/Skidbladnir/issues</url>
+  <url type="vcs-browser">https://github.com/basic-automation/Skidbladnir</url>
+  <categories>
+    <category>Graphics</category>
+  </categories>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Every cwebp option as a control, labelled with its flag</caption>
+      <image type="source" width="1280" height="960">https://raw.githubusercontent.com/basic-automation/Skidbladnir/master/resources/linux/screenshot.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>An AVIF encode previewed beside the original</caption>
+      <image type="source" width="1280" height="960">https://raw.githubusercontent.com/basic-automation/Skidbladnir/master/resources/linux/screenshot-avif.png</image>
+    </screenshot>
+  </screenshots>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="1.2.0" date="2026-10-02"/>
+    <release version="1.1.0" date="2026-10-01"/>
+    <release version="1.0.0" date="2026-10-01"/>
+  </releases>
+</component>

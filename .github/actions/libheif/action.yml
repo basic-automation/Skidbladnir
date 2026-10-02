@@ -47,7 +47,7 @@ runs:
           image="$image-glibc$(getconf GNU_LIBC_VERSION | cut -d' ' -f2)"
         fi
         echo "image=$image" >> "$GITHUB_OUTPUT"
-        echo "key=libheif-${{ inputs.edition }}-${{ runner.os }}-$image-${{ inputs.target-arch }}-$(git submodule status third_party | awk '{print $1}' | tr -d '+-' | tr '\n' '-')${{ hashFiles('scripts/build-libheif.sh') }}" >> "$GITHUB_OUTPUT"
+        echo "key=libheif-${{ inputs.edition }}-${{ runner.os }}-${{ runner.arch }}-$image-${{ inputs.target-arch }}-$(git submodule status third_party | awk '{print $1}' | tr -d '+-' | tr '\n' '-')${{ hashFiles('scripts/build-libheif.sh') }}" >> "$GITHUB_OUTPUT"
 
     - name: Restore libheif
       id: cache

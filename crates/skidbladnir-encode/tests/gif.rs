@@ -202,6 +202,68 @@ fn matches_reference_gif2webp() {
 	eprintln!("GIF PARITY OK: {compared} conversions byte-identical to gif2webp");
 }
 
+/// The animation encoder's own options, as `gif2webp` takes them: `-min_size`, `-mixed`,
+/// `-kmin`/`-kmax` (replacing either of gif2webp's own defaults on its own) and
+/// `-loop_compatibility`. Converted through the same route a file takes in the app
+/// (`source::animated_source`), since the loop-count reading happens there.
+#[test]
+fn matches_reference_gif2webp_with_animation_options() {
+	use skidbladnir_encode::{
+		settings::{EncodeJob, WebpAnimation}, source::animated_source
+	};
+
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let Some(gif2webp) = reference_gif2webp().filter(|tool| reference_version(tool) == Some(skidbladnir_encode::encoder::linked_encoder_version())) else {
+		let message = "GIF PARITY NOT RUN: no version-matched reference gif2webp, so its animation options are UNVERIFIED in this run.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+
+	let lossless = WebpSettings { lossless: true, exact: true, ..Default::default() };
+	let lossy = WebpSettings { multi_threading: true, ..WebpSettings::libwebp_defaults() };
+	let a = WebpAnimation::default;
+	let with = |base: &WebpSettings, animation: WebpAnimation| WebpSettings { animation, ..base.clone() };
+	let cases: Vec<(&str, WebpSettings, Vec<&str>)> = vec![
+		("-min_size", with(&lossless, WebpAnimation { minimize_size: true, ..a() }), vec!["-min_size"]),
+		("-lossy -min_size", with(&lossy, WebpAnimation { minimize_size: true, ..a() }), vec!["-lossy", "-min_size"]),
+		// gif2webp -mixed also sets the config lossy, whatever came before it.
+		("-mixed", with(&lossless, WebpAnimation { allow_mixed: true, ..a() }), vec!["-mixed"]),
+		("-mixed -q 40", with(&WebpSettings { quality: 40.0, ..lossy.clone() }, WebpAnimation { allow_mixed: true, ..a() }), vec!["-mixed", "-q", "40"]),
+		("-kmin 4 -kmax 8", with(&lossless, WebpAnimation { kmin: Some(4), kmax: Some(8), ..a() }), vec!["-kmin", "4", "-kmax", "8"]),
+		("-lossy -kmax 2", with(&lossy, WebpAnimation { kmax: Some(2), ..a() }), vec!["-lossy", "-kmax", "2"]),
+		("-kmin 12 alone", with(&lossless, WebpAnimation { kmin: Some(12), ..a() }), vec!["-kmin", "12"]),
+		("-kmax 0", with(&lossless, WebpAnimation { kmax: Some(0), ..a() }), vec!["-kmax", "0"]),
+		("-loop_compatibility", with(&lossless, WebpAnimation { loop_compatibility: true, ..a() }), vec!["-loop_compatibility"]),
+		("-lossy -loop_compatibility", with(&lossy, WebpAnimation { loop_compatibility: true, ..a() }), vec!["-lossy", "-loop_compatibility"]),
+	];
+
+	let dir = env::temp_dir().join(format!("skidbladnir-gif-options-{}", std::process::id()));
+	let _ = fs::remove_dir_all(&dir);
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+	let mut compared = 0;
+	let mut mismatches = Vec::new();
+	for (fixture_name, gif_bytes) in fixtures() {
+		let input = dir.join("input.gif");
+		fs::write(&input, &gif_bytes).expect("write the GIF");
+		let source = animated_source(&input, &gif_bytes).expect("decode the fixture").expect("a GIF is an animated source");
+		for (name, settings, flags) in &cases {
+			let output = dir.join("reference.webp");
+			let run = Command::new(&gif2webp).args(flags).arg(&input).arg("-o").arg(&output).output().expect("run gif2webp");
+			assert!(run.status.success(), "gif2webp failed on {fixture_name} / {name}: {}", String::from_utf8_lossy(&run.stderr));
+			let theirs = fs::read(&output).expect("read the reference output");
+			let ours = source.encode(&EncodeJob::from(settings.clone()), &mut |_| true).expect("encode");
+			compared += 1;
+			if ours != theirs {
+				mismatches.push(format!("{fixture_name} / {name}: ours {} bytes, gif2webp {} bytes", ours.len(), theirs.len()));
+			}
+		}
+	}
+	let _ = fs::remove_dir_all(&dir);
+	assert!(mismatches.is_empty(), "GIF PARITY FAILED for {} of {compared} conversions:\n{}", mismatches.len(), mismatches.join("\n"));
+	eprintln!("GIF PARITY OK: {compared} conversions with animation options byte-identical to gif2webp");
+}
+
 /// An application extension carrying `payload` the way its kind is written into a GIF: an
 /// ICC profile in length-prefixed sub-blocks, an XMP packet raw, followed by XMP's 258-byte
 /// "magic trailer" (`0x01`, `0xff` down to `0x00`, then the block terminator), which lets the

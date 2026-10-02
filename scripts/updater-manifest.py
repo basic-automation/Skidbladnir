@@ -10,8 +10,8 @@ built without the signing key, is left out — its users are simply not offered 
 which is the right failure: an unsigned entry would be refused by every client anyway.
 
 The keys are the updater plugin's `{os}-{arch}-{bundle}` targets, so a copy installed from
-the .deb is updated with a .deb and one from the AppImage with an AppImage, rather than
-one format replacing the other.
+the .deb is updated with a .deb, one from the .rpm with an .rpm and one from the AppImage
+with an AppImage, rather than one format replacing another.
 
 Each edition has its own manifest, and `--prefix` picks its installers out of a directory
 that holds both: `Skidbladnir_` (the default) for the standard edition's latest.json,
@@ -37,6 +37,10 @@ import urllib.parse
 TARGETS = [
 	(re.compile(r"_amd64\.AppImage$"), "linux-x86_64-appimage"),
 	(re.compile(r"_amd64\.deb$"), "linux-x86_64-deb"),
+	(re.compile(r"_x86_64\.rpm$"), "linux-x86_64-rpm"),
+	(re.compile(r"_aarch64\.AppImage$"), "linux-aarch64-appimage"),
+	(re.compile(r"_arm64\.deb$"), "linux-aarch64-deb"),
+	(re.compile(r"_aarch64\.rpm$"), "linux-aarch64-rpm"),
 	(re.compile(r"_x64-setup\.exe$"), "windows-x86_64-nsis"),
 	(re.compile(r"_aarch64\.app\.tar\.gz$"), "darwin-aarch64-app"),
 	(re.compile(r"_x64\.app\.tar\.gz$"), "darwin-x86_64-app"),
