@@ -212,16 +212,16 @@ jobs:
   # mismatch is an option or a reader that differs, never a version. A missing or
   # mismatched reference fails the job rather than skipping it.
   #
-  # Linux x86-64 and macOS on Apple silicon: the same sources built on each, so the
-  # comparison also covers libwebp's, libaom's and libjxl's ARM code paths, which a
-  # Linux-only gate never ran.
+  # Linux x86-64, Linux on ARM64 and macOS on Apple silicon: the same sources built on
+  # each, so the comparison also covers libwebp's, libaom's and libjxl's ARM code paths, on
+  # both ARM systems the releases ship for.
   parity:
     name: parity with the reference encoders / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -242,6 +242,8 @@ jobs:
         run: brew install libpng libtiff giflib libavif jpeg-xl libheif
 
       - name: Install nasm
+        # For x86 SIMD; Linux on ARM uses the system assembler.
+        if: runner.os != 'Linux' || runner.arch == 'X64'
         uses: ilammy/setup-nasm@v1
 
       - name: Build libheif (Kvazaar + libde265)
@@ -256,8 +258,8 @@ jobs:
         uses: actions/cache@v6
         with:
           path: build/reference
-          key: reference-${{ runner.os }}-${{ hashFiles('.gitmodules', 'Cargo.lock', 'scripts/build-reference-tools.sh', 'scripts/build-reference-avifenc.sh', 'scripts/build-libheif.sh') }}-${{ github.sha }}
-          restore-keys: reference-${{ runner.os }}-${{ hashFiles('.gitmodules', 'Cargo.lock', 'scripts/build-reference-tools.sh', 'scripts/build-reference-avifenc.sh', 'scripts/build-libheif.sh') }}-
+          key: reference-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.gitmodules', 'Cargo.lock', 'scripts/build-reference-tools.sh', 'scripts/build-reference-avifenc.sh', 'scripts/build-libheif.sh') }}-${{ github.sha }}
+          restore-keys: reference-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.gitmodules', 'Cargo.lock', 'scripts/build-reference-tools.sh', 'scripts/build-reference-avifenc.sh', 'scripts/build-libheif.sh') }}-
 
       - name: Build the reference encoders
         run: |
