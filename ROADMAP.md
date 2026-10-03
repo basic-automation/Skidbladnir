@@ -1493,8 +1493,10 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       with `-DHAVE_WINCODEC_H=0` (the check is skipped when the variable is set) and run only
       the gates that never hand cwebp a PNG, JPEG or TIFF — the PAM control surface, the
       cwebp-defaults reset, WebP and PNM sources, raw YUV — as a Windows parity leg.
-      Wired in as CI's `parity-windows` job (the four `tests/parity.rs` gates of that kind;
-      `continue-on-error` until it has passed there). Next: the PNM gate, then libpng,
+      **First slice done (2026-10-02):** CI's `parity-windows` job runs the four
+      `tests/parity.rs` gates of that kind, and on its first run every case matched with MSVC
+      builds of both sides — 138 control-surface settings, 552 WebP-to-WebP conversions, 138
+      raw YUV conversions and the defaults reset (run 37092442114); now a gate. Next: the PNM gate, then libpng,
       libjpeg-turbo and libtiff for cwebp on Windows, then the other tools.
 
 **Multi-image features the tools have, deferred by the owner (2026-09-28):**
@@ -1553,9 +1555,9 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       the size its settings give, and checks each file's header on disk and that the process
       it started is still the one running (the webview fallback relaunches and exits). 5 of 5
       on the dev host (Hyprland); forced onto the webview window, every one fails.
-- [ ] Run `scripts/gpui-smoke.sh` in CI as a gate. Wired in (2026-10-02) but
-      `continue-on-error` until seen passing: the Linux window job with Mesa's lavapipe on
-      Xvfb, and the Windows job against the installed app (Direct3D, WARP on a GPU-less
+- [ ] Run `scripts/gpui-smoke.sh` in CI as a gate. **Linux: a gate** since it passed on its
+      first run, both editions, 5 of 5 with Mesa's lavapipe on Xvfb (run 37092442114).
+      Windows: wired in against the installed app, `continue-on-error` until seen passing (Direct3D, WARP on a GPU-less
       runner; the script writes the real `%APPDATA%` configuration there, which it allows
       only under `CI=true`). macOS is not wired: the release workflow already launches the
       macOS app and screenshots its window.
