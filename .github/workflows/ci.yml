@@ -401,9 +401,10 @@ jobs:
   # the libwebp this crate builds there. cwebp would read PNG, JPEG and TIFF through WIC on
   # Windows, a different decoder from the ones the other gates match, so WIC is switched
   # off and only the gates that never hand cwebp those formats run: the PAM control
-  # surface, the cwebp-defaults reset, WebP sources and raw YUV (ROADMAP.md, Phase 8).
+  # surface, the cwebp-defaults reset, WebP, PNM and raw YUV sources, and img2webp's and
+  # webpmux's animation gates (ROADMAP.md, Phase 8).
   parity-windows:
-    name: parity with cwebp / windows (first slice)
+    name: parity with cwebp, img2webp, webpmux / windows
     runs-on: windows-2022
     timeout-minutes: 60
     defaults:
@@ -424,17 +425,21 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build the reference cwebp, without WIC
+      - name: Build the reference cwebp, img2webp and webpmux, without WIC
         run: |
-          cmake -S third_party/libwebp -B "$RUNNER_TEMP/libwebp" -DBUILD_SHARED_LIBS=OFF -DHAVE_WINCODEC_H=0 -DWEBP_BUILD_CWEBP=ON -DWEBP_BUILD_DWEBP=OFF -DWEBP_BUILD_GIF2WEBP=OFF -DWEBP_BUILD_IMG2WEBP=OFF -DWEBP_BUILD_VWEBP=OFF -DWEBP_BUILD_WEBPINFO=OFF -DWEBP_BUILD_WEBPMUX=OFF -DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_EXTRAS=OFF
-          cmake --build "$RUNNER_TEMP/libwebp" --config Release --target cwebp
-          cwebp=$(find "$RUNNER_TEMP/libwebp" -iname cwebp.exe | head -1)
-          "$cwebp" -version
-          echo "SKIDBLADNIR_REFERENCE_CWEBP=$(cygpath -m "$cwebp")" >> "$GITHUB_ENV"
+          cmake -S third_party/libwebp -B "$RUNNER_TEMP/libwebp" -DBUILD_SHARED_LIBS=OFF -DHAVE_WINCODEC_H=0 -DWEBP_BUILD_CWEBP=ON -DWEBP_BUILD_DWEBP=OFF -DWEBP_BUILD_GIF2WEBP=OFF -DWEBP_BUILD_IMG2WEBP=ON -DWEBP_BUILD_VWEBP=OFF -DWEBP_BUILD_WEBPINFO=OFF -DWEBP_BUILD_WEBPMUX=ON -DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_EXTRAS=OFF
+          cmake --build "$RUNNER_TEMP/libwebp" --config Release --target cwebp img2webp webpmux
+          for tool in cwebp img2webp webpmux; do
+            path=$(find "$RUNNER_TEMP/libwebp" -iname "$tool.exe" | head -1)
+            "$path" -version
+            echo "SKIDBLADNIR_REFERENCE_$(echo "$tool" | tr a-z A-Z)=$(cygpath -m "$path")" >> "$GITHUB_ENV"
+          done
           echo "SKIDBLADNIR_REQUIRE_PARITY=1" >> "$GITHUB_ENV"
 
-      - name: byte parity with cwebp, for what it reads without WIC
-        run: cargo test --release --package skidbladnir-encode --test parity -- matches_reference_cwebp_across_the_whole_control_surface cwebps_defaults_are_a_bare_cwebp matches_reference_cwebp_through_a_webp_file matches_reference_cwebp_through_raw_yuv --nocapture
+      - name: byte parity with cwebp, img2webp and webpmux, for what they read without WIC
+        # tests/parity.rs's PAM, WebP and raw YUV gates and tests/pnm.rs's cwebp ones (never a
+        # PNG, JPEG or TIFF), and every tests/animation.rs gate (PAM frames).
+        run: cargo test --release --package skidbladnir-encode --test parity --test pnm --test animation -- matches_reference_cwebp_across_the_whole_control_surface cwebps_defaults_are_a_bare_cwebp matches_reference_cwebp_through_a_webp_file matches_reference_cwebp_through_raw_yuv matches_cwebp_reading_pnm refuses_what_cwebp_refuses matches_reference_img2webp keeps_an_animations_metadata_as_webpmux_sets_it frame_changes_apply lossless_round_trip lossy_round_trip a_reference_animation a_still_webp resize_applies never_enlarge progress_and_cancel controls_without --nocapture
 
   # The same smoke test, on Windows. This is the only place the Windows build is
   # LAUNCHED rather than just compiled: the dev host cannot run it, and nobody had

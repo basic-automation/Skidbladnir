@@ -1496,8 +1496,7 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       **First slice done (2026-10-02):** CI's `parity-windows` job runs the four
       `tests/parity.rs` gates of that kind, and on its first run every case matched with MSVC
       builds of both sides — 138 control-surface settings, 552 WebP-to-WebP conversions, 138
-      raw YUV conversions and the defaults reset (run 37092442114); now a gate. Next: the PNM gate, then libpng,
-      libjpeg-turbo and libtiff for cwebp on Windows, then the other tools.
+x
 
 **Multi-image features the tools have, deferred by the owner (2026-09-28):**
 
