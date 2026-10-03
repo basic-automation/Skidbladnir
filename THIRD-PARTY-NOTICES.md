@@ -15,6 +15,13 @@ source is the exact upstream tags named below, at
 `scripts/build-libheif.sh` in Skidbladnir's repository is how the shipped library is
 built from them.
 
+**The Linux AppImage's system libraries.** So that it runs where they are missing, the
+AppImage also carries the Ubuntu 22.04 libraries the app needs (GTK, WebKitGTK, GLib and
+others, most of them LGPL), each package's Debian copyright file inside it at
+`usr/share/doc/<package>/copyright`. They are unmodified; their source is the Ubuntu
+source package of the same version, from <https://launchpad.net/ubuntu/jammy>. The
+.deb and .rpm packages use the system's own copies instead.
+
 ## libwebp
 
 The WebP encoder and decoder, statically linked. Licence: BSD-3-Clause.

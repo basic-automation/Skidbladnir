@@ -85,7 +85,13 @@ lgpl = ["**libheif and libde265 (LGPL-3.0).** They are shipped as one shared lib
 	"source is the exact upstream tags named below, at",
 	"<https://github.com/strukturag/libheif> and <https://github.com/strukturag/libde265>;",
 	"`scripts/build-libheif.sh` in Skidbladnir's repository is how the shipped library is",
-	"built from them.", ""]
+	"built from them.", "",
+	"**The Linux AppImage's system libraries.** So that it runs where they are missing, the",
+	"AppImage also carries the Ubuntu 22.04 libraries the app needs (GTK, WebKitGTK, GLib and",
+	"others, most of them LGPL), each package's Debian copyright file inside it at",
+	"`usr/share/doc/<package>/copyright`. They are unmodified; their source is the Ubuntu",
+	"source package of the same version, from <https://launchpad.net/ubuntu/jammy>. The",
+	".deb and .rpm packages use the system's own copies instead.", ""]
 editions = {
 	"THIRD-PARTY-NOTICES.md": (["# Third-party notices", "",
 		"This is the **standard edition** of Skidbladnir. Skidbladnir is ISC-licensed (`LICENSE`),",
