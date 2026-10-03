@@ -17,7 +17,9 @@ and its icon collections — and libpng, whose gamma arithmetic png_gamma.rs rep
 with licence texts from LICENSES/third-party/ (see the README there), and end with the Rust
 crates compiled into the app: LICENSES/third-party/rust-crates.md, which cargo-about writes
 from the crates' own licence files (about.toml says how; regenerate it first after any
-Cargo.lock change).
+Cargo.lock change), and the npm packages in the webview window's bundle:
+LICENSES/third-party/javascript.md, which the frontend build writes when asked
+(frontend/tools/javascript-notices.ts; regenerate it after any package-lock.json change).
 
 Run it after bumping any of them; CI's `notices` check fails if either file is stale.
 """
@@ -90,8 +92,8 @@ editions = {
 		"and this build's HEIC encoder is Kvazaar (BSD-3-Clause), not x265. The build ships",
 		"libheif and libde265 as a separate, replaceable LGPL-3.0 shared library, described",
 		"next. It includes the native libraries below, whose licences require their notices to",
-		"travel with the app, then libpng's licence, the font and icons the window bundles, and",
-		"the Rust crates compiled into it.",
+		"travel with the app, then libpng's licence, the font and icons the window bundles, the",
+		"JavaScript packages in the webview window, and the Rust crates compiled into the app.",
 		""] + lgpl, common + [kvazaar] + heif + [libpng] + frontend),
 	"THIRD-PARTY-NOTICES-GPL.md": (["# Third-party notices", "",
 		"This is the **GPL edition** of Skidbladnir. Skidbladnir's own source is ISC-licensed",
@@ -108,11 +110,12 @@ editions = {
 		"`frontend/package-lock.json` in that archive, and are published unmodified on",
 		"<https://crates.io> and <https://www.npmjs.com>.", "",
 		"It includes the native libraries below, whose licences require their notices to travel",
-		"with the app, then libpng's licence, the font and icons the window bundles, and the Rust",
-		"crates compiled into it.", ""] + lgpl, common + [x265] + heif + [libpng] + frontend),
+		"with the app, then libpng's licence, the font and icons the window bundles, the",
+		"JavaScript packages in the webview window, and the Rust crates compiled into the app.", ""] + lgpl, common + [x265] + heif + [libpng] + frontend),
 }
 
 rust_crates = (third / "rust-crates.md").read_text(encoding="utf-8")
+javascript = (third / "javascript.md").read_text(encoding="utf-8")
 
 stale = []
 for name, (intro, sections) in editions.items():
@@ -128,6 +131,11 @@ for name, (intro, sections) in editions.items():
 			else:
 				text = path.read_text(encoding="utf-8", errors="replace").rstrip()
 			out += ["```text", text, "```", ""]
+	out += ["## JavaScript packages", "",
+		"The npm packages whose code the webview window's bundle carries (the window Skidbladnir",
+		"falls back to when the native one cannot open), grouped by licence text, each text as",
+		"the packages below it carry it.", ""]
+	out += [javascript.strip("\n"), ""]
 	out += ["## Rust crates", "",
 		"The Rust crates compiled into the app on any of the platforms it is built for, grouped",
 		"by licence text: each text is quoted as the crates below it carry it, under the licence",

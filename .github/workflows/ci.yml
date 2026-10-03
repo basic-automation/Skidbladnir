@@ -148,6 +148,15 @@ jobs:
           npm --prefix frontend ci
           npm --prefix frontend run generate
 
+      - name: The JavaScript packages' notices are current
+        # LICENSES/third-party/javascript.md lists the npm packages whose code the bundle just
+        # built carries (frontend/tools/javascript-notices.ts); a lockfile or import change
+        # without regenerating it fails here. One leg is enough: the bundle is the same on all.
+        if: matrix.os == 'ubuntu-latest' && matrix.edition == 'standard'
+        run: |
+          SKIDBLADNIR_JS_NOTICES="$RUNNER_TEMP/javascript.md" npm --prefix frontend run generate
+          diff -u LICENSES/third-party/javascript.md "$RUNNER_TEMP/javascript.md" || { echo "::error::LICENSES/third-party/javascript.md is stale: run SKIDBLADNIR_JS_NOTICES=../LICENSES/third-party/javascript.md npm run generate in frontend/, then scripts/third-party-notices.py"; exit 1; }
+
       - name: Install nasm
         # libaom, libjpeg-turbo and the AV1 decoder (rav1d) assemble their SIMD with nasm;
         # rav1d's and libaom's builds fail outright without it. So does x265's, in the GPL

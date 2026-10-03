@@ -1518,13 +1518,20 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       the same cargo-about and fails if the listing is stale. MIT is preferred where a
       crate offers a choice: Apache-2.0 first came out larger (918 KB against 550 KB),
       because crates' copies of the Apache text differ in their whitespace.
-- [ ] Notices for the rest of what the installers carry: the JavaScript libraries in the
-      webview window's bundle (Vue, Nuxt, Nuxt UI, Reka UI and their dependencies, mostly
-      MIT) and the Ubuntu libraries inside the AppImage. Check them in CI beside
-      `third-party-notices.py --check`.
-- [ ] Dependabot's cargo PRs now fail CI's Rust-crates notices check until someone
-      regenerates `LICENSES/third-party/rust-crates.md` and the notices on the PR branch
-      (that check is the point: a new crate's licence must reach the notices). A workflow
+- [x] Notices for the JavaScript packages in the webview window's bundle (2026-10-02): a
+      Vite plugin (`frontend/tools/javascript-notices.ts`, active only when
+      `SKIDBLADNIR_JS_NOTICES` names a file) lists every npm package with a module that kept
+      code in the client bundle after tree-shaking — 35 packages (Vue, Nuxt, Nuxt UI, Reka
+      UI, Floating UI, VueUse, the Tauri API…), every one with a licence file — grouped by
+      licence text into `LICENSES/third-party/javascript.md`, appended to both editions'
+      notices. CI's Linux rust leg rebuilds it and fails if it is stale. A clean rebuild is
+      byte-identical.
+- [ ] Notices for the Ubuntu libraries inside the AppImage (the rest of what the
+      installers carry). Check them in CI beside `third-party-notices.py --check`.
+- [ ] Dependabot's cargo and npm PRs now fail CI's notices checks until someone
+      regenerates `LICENSES/third-party/rust-crates.md` or `javascript.md`, and the
+      notices, on the PR branch (that check is the point: a new package's licence must
+      reach the notices). A workflow
       that regenerates and pushes them for Dependabot's branches would save the manual
       step; it needs a token that can push to them, so it is a security decision.
 - [ ] Two Dependabot alerts with no clean fix (2026-10-01): `glib` 0.18 (unsound

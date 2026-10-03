@@ -19,3 +19,12 @@ the upstream text, unmodified, retrieved on 2026-10-01:
 
 Update a file when its package's licence changes; the generator checks that the icon
 collections it describes are exactly those in `frontend/package.json`.
+
+Two files here are generated rather than retrieved, and CI fails if either is stale:
+
+| File | Covers | Written by |
+|---|---|---|
+| `rust-crates.md` | the Rust crates compiled into the app, on every platform it is built for | `cargo about generate --locked --fail about.hbs -o LICENSES/third-party/rust-crates.md` (configuration in `about.toml`), after any `Cargo.lock` change |
+| `javascript.md` | the npm packages whose code the webview window's bundle carries | `SKIDBLADNIR_JS_NOTICES=../LICENSES/third-party/javascript.md npm run generate` in `frontend/` (`frontend/tools/javascript-notices.ts`), after any `package-lock.json` change |
+
+Then run `scripts/third-party-notices.py` to copy them into the notices.

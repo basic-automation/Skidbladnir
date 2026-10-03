@@ -1,3 +1,5 @@
+import { javascriptNotices } from './tools/javascript-notices'
+
 // Tauri serves this as static files from a bundled directory, so there is no Node server
 // at runtime: `ssr: false` plus the static Nitro preset produce a pure SPA in
 // `.output/public`, which is what `frontendDist` in src-tauri/tauri.conf.json points at.
@@ -24,7 +26,9 @@ export default defineNuxtConfig({
 	icon: { provider: 'iconify', customCollections: [{ prefix: 'skid', dir: './assets/icons' }], clientBundle: { scan: true, includeCustomCollections: true } },
 
 	css: ['~/assets/css/main.css'],
-	vite: { clearScreen: false },
+	// javascriptNotices lists the npm packages the bundle carries, for the third-party notices,
+	// when SKIDBLADNIR_JS_NOTICES names a file to write (tools/javascript-notices.ts).
+	vite: { clearScreen: false, plugins: [javascriptNotices()] },
 
 	// The window is the whole product; devtools ride along only when asked for.
 	devtools: { enabled: false },
