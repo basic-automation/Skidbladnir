@@ -34,7 +34,7 @@ with the exceptions listed under [What "every option" means](#what-every-option-
 <details>
 <summary>With WebP selected: the whole panel, and a preview</summary>
 
-![The Skidbladnir window with WebP selected: the format rail, the queue, destination and presets sidebar, and every cwebp option as a control labelled with its flag — compression, targets, presets and lossless levels, transparency, lossy tuning, metadata, performance, crop and resize — with a preview of the result beside the original](resources/images/screenshot.webp)
+![The Skidbladnir window with WebP selected: the format rail, the queue, destination and presets sidebar, and every cwebp option as a control labelled with its flag — compression, targets, presets and lossless levels, transparency, lossy tuning, metadata, animation, performance, crop and resize, raw YUV and TIFF input — with a preview of the result beside the original](resources/images/screenshot.webp)
 
 *WebP selected, with a file previewed: every `cwebp` option, each labelled with its flag.*
 
