@@ -1544,9 +1544,12 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       the size its settings give, and checks each file's header on disk and that the process
       it started is still the one running (the webview fallback relaunches and exits). 5 of 5
       on the dev host (Hyprland); forced onto the webview window, every one fails.
-- [ ] Run `scripts/gpui-smoke.sh` in CI: the runners have no GPU, so it needs a software
-      Vulkan driver (Mesa's lavapipe) under Xvfb on Linux, and has to be tried on the macOS
-      and Windows runners. Until then it is a dev-host check only.
+- [ ] Run `scripts/gpui-smoke.sh` in CI as a gate. Wired in (2026-10-02) but
+      `continue-on-error` until seen passing: the Linux window job with Mesa's lavapipe on
+      Xvfb, and the Windows job against the installed app (Direct3D, WARP on a GPU-less
+      runner; the script writes the real `%APPDATA%` configuration there, which it allows
+      only under `CI=true`). macOS is not wired: the release workflow already launches the
+      macOS app and screenshots its window.
 - [ ] Accessibility of the gpui window: no screen reader has been run against it (PR #67's
       "not tested"), and the axe audit (`a11y-audit.sh`) covers only the webview window.
 - [ ] Dragging files onto the gpui window has not been tested (PR #67); `SKID_INPUTS` takes

@@ -496,3 +496,10 @@ jobs:
 
       - name: Smoke test the installed app
         run: scripts/smoke-test.sh --app "$INSTALLED_APP"
+
+      - name: Smoke test the gpui window of the installed app
+        # The default window, which WebDriver cannot drive; Direct3D falls back to WARP on a
+        # runner with no GPU. Not yet a gate: it has not been seen to pass here
+        # (ROADMAP.md, Cross-cutting).
+        continue-on-error: true
+        run: scripts/gpui-smoke.sh --app "$INSTALLED_APP"
