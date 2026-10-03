@@ -1391,10 +1391,15 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       67x49 fixture (odd, so the chroma planes round up); with the planes sent through
       RGB instead, 77 diverge. A wrong length and a missing size are refused, as `cwebp`
       refuses them.
+- [x] `heif-enc --raw` has no result to reproduce in this build (checked 2026-10-02): its
+      reader (`heifio/decoder_raw.cc`) makes one typed component in a custom colour space,
+      which only libheif's uncompressed codec can write, and the libheif Skidbladnir ships
+      and the reference `heif-enc` are built with HEVC encoders only. Run here:
+      `heif-enc --raw-width 8 --raw-height 8 --raw-type uint8 m.raw -o m.heic` fails with
+      "Unsupported feature: Unsupported color conversion", and this `heif-enc` has no `-U`.
+      Revisit only if uncompressed HEIF output is ever added.
 - [ ] More input formats the tools read: animated GIF and APNG into `cjxl` (with the
-      multi-image work below), EXR (`cjxl`, needs OpenEXR), and `heif-enc --raw`
-      (one channel of samples, `--raw-type` uint8 to float64, at `--raw-width`/`--raw-height`;
-      `heifio/decoder_raw.cc`).
+      multi-image work below) and EXR (`cjxl`, needs OpenEXR).
 - [x] Animated WebP's own options as controls (2026-10-01): `-mixed`, `-min_size`,
       `-kmin`/`-kmax`, `img2webp -loop` and `gif2webp -loop_compatibility`
       (`WebpAnimation`). Found on the way: under `-mixed` the encoder still reads the
