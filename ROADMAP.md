@@ -1496,7 +1496,13 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       **First slice done (2026-10-02):** CI's `parity-windows` job runs the four
       `tests/parity.rs` gates of that kind, and on its first run every case matched with MSVC
       builds of both sides — 138 control-surface settings, 552 WebP-to-WebP conversions, 138
-x
+      raw YUV conversions and the defaults reset (run 37092442114); now a gate. Second slice
+      (CI result in the PR): the PNM gate's cwebp half and every `tests/animation.rs` gate,
+      with `img2webp` and `webpmux` built the same way. Third slice, a CI trial
+      (`parity-windows-images`, `continue-on-error`): cwebp, img2webp, gif2webp and webpmux
+      with libjpeg-turbo from our submodule and libpng, libtiff and giflib from vcpkg,
+      static runtime, running every `tests/parity.rs`, `tests/animation.rs` and
+      `tests/gif.rs` gate but `cjxl`'s. Then avifenc, cjxl and heif-enc.
 
 **Multi-image features the tools have, deferred by the owner (2026-09-28):**
 
