@@ -8,8 +8,8 @@
 //! the data window's pixels placed in it and zero elsewhere; linear light with sRGB
 //! primaries and a D65 white unless the file names its chromaticities; and its white
 //! luminance as the intensity target. It refuses `UINT` and subsampled channels, and colour
-//! or alpha channels of mixed types. Any other channels become extra channels in `cjxl`'s
-//! output; Skidbladnir leaves them out (see [`Exr::extra_channels`]).
+//! or alpha channels of mixed types. Every other channel becomes a named extra channel, as
+//! `cjxl` makes it one ([`Exr::extra`]).
 
 /// The EXR magic number, the first four bytes of every file.
 pub const MAGIC: [u8; 4] = [0x76, 0x2f, 0x31, 0x01];
@@ -33,9 +33,20 @@ pub struct Exr {
 	pub chromaticities: Option<[[f32; 2]; 4]>,
 	/// The file's white luminance, or 0 when it has none.
 	pub intensity_target: f32,
-	/// How many channels beyond the colour and alpha the file has, which `cjxl` encodes as
-	/// extra channels and Skidbladnir does not.
-	pub extra_channels: usize,
+	/// The channels beyond the colour and alpha, in channel order, which `cjxl` keeps as
+	/// optional extra channels.
+	pub extra: Vec<ExtraChannel>,
+}
+
+/// One of an EXR's channels beyond its colour and alpha.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExtraChannel {
+	/// Its name in the file.
+	pub name: String,
+	/// Whether it is stored as half floats rather than floats.
+	pub half: bool,
+	/// Its samples over the display window, halves widened exactly.
+	pub samples: Vec<f32>,
 }
 
 impl Exr {
@@ -103,6 +114,7 @@ pub fn decode(bytes: &[u8]) -> Result<Exr, String> {
 		return Err("OpenEXR color channels with different types are not supported, as cjxl does not read them".to_owned());
 	}
 	let used: Vec<usize> = colour.iter().chain(alpha.iter()).copied().collect();
+	let extras: Vec<usize> = (0..channels.len()).filter(|at| !used.contains(at)).collect();
 
 	let display = image.attributes.display_window;
 	let (display_x, display_y) = (display.position.x(), display.position.y());
@@ -129,18 +141,22 @@ pub fn decode(bytes: &[u8]) -> Result<Exr, String> {
 		}
 	};
 	let index_of = |value: i64| usize::try_from(value).unwrap_or(0);
+	let mut extra: Vec<ExtraChannel> = extras.iter().map(|&at| ExtraChannel { name: names[at].to_owned(), half: is_half(at), samples: vec![0.0; pixels] }).collect();
 	for y in y1..y2 {
 		for x in x1..x2 {
 			let source = index_of(y - i64::from(data_y)) * data_width + index_of(x - i64::from(data_x));
-			let target = (index_of(y - i64::from(display_y)) * width + index_of(x - i64::from(display_x))) * per_pixel;
+			let target = index_of(y - i64::from(display_y)) * width + index_of(x - i64::from(display_x));
 			for (channel, &at) in used.iter().enumerate() {
-				samples[target + channel] = sample(at, source);
+				samples[target * per_pixel + channel] = sample(at, source);
+			}
+			for (channel, &at) in extra.iter_mut().zip(&extras) {
+				channel.samples[target] = sample(at, source);
 			}
 		}
 	}
 
 	let chromaticities = image.attributes.chromaticities.map(|c| [[c.red.x(), c.red.y()], [c.green.x(), c.green.y()], [c.blue.x(), c.blue.y()], [c.white.x(), c.white.y()]]);
-	Ok(Exr { width: u32::try_from(width).map_err(|_| "the EXR image is too wide")?, height: u32::try_from(height).map_err(|_| "the EXR image is too tall")?, gray, alpha: alpha.is_some(), half, samples, chromaticities, intensity_target: layer.attributes.white_luminance.unwrap_or(0.0), extra_channels: channels.len() - used.len() })
+	Ok(Exr { width: u32::try_from(width).map_err(|_| "the EXR image is too wide")?, height: u32::try_from(height).map_err(|_| "the EXR image is too tall")?, gray, alpha: alpha.is_some(), half, samples, chromaticities, intensity_target: layer.attributes.white_luminance.unwrap_or(0.0), extra })
 }
 
 /// The image as 8- and 16-bit RGBA for the formats whose tools do not read EXR: the alpha

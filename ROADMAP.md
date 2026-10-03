@@ -1415,9 +1415,12 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       `JxlEncoderProcessOutput` on half-float alpha at `-d 25`, `-q 0` and resampling 2-8).
       Dropping the premultiplied flag fails 84, and declaring halves as floats 114, of the
       first 124 (before the DWA files were added).
-- [ ] EXR channels beyond colour and alpha: `cjxl` keeps them as optional extra channels,
-      named; Skidbladnir leaves them out, so such a file's JPEG XL differs from `cjxl`'s.
-      Needs extra-channel support in `jxl.rs` (`JxlEncoderSetExtraChannelInfo`/`Name`/`Buffer`).
+- [x] EXR channels beyond colour and alpha (2026-10-02): written as `cjxl` writes them, each
+      a named optional extra channel after the alpha, with a value-initialised info (not
+      `JxlEncoderInitExtraChannelInfo`'s) at its own half/float depth, and its buffer after
+      the frame. 15 more cases in `matches_cjxl_through_exr` (RGBA with a float depth and a
+      half mask, gray with a depth, two layers with the second as extras), 149 in all;
+      leaving out the names, or the channels, fails all 15.
 - [ ] HTJ2K-compressed EXR: the `exr` crate cannot decompress it (`compression/mod.rs`
       returns "yet unimplemented compression method").
 - [ ] Animated GIF and APNG into `cjxl` (with the multi-image work below).
