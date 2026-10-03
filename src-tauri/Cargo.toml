@@ -9,6 +9,8 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+# Not published to crates.io; the app ships as installers (and is left out of the notices).
+publish = false
 
 [lib]
 # The logic lives in a library, with the binary a thin wrapper, which is what makes it
