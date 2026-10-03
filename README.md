@@ -73,8 +73,9 @@ with the exceptions listed under [What "every option" means](#what-every-option-
 | JPEG XL | `cjxl` 0.12.0 | libjxl 0.12.0 | 551 cases: every option, PNG, PNM, PFM, PGX, EXR, still-GIF and JPEG XL inputs, JPEG recompression and decoding |
 | HEIC | `heif-enc -e kvazaar` 1.23.5 | libheif 1.23.5 + Kvazaar 2.3.2 | 182 cases: every option, PNG, JPEG, TIFF (RGB, straight alpha, and premultiplied alpha read as `heif-enc` reads it on request), WebP, HEIC and 8-bit 4:2:0 Y4M inputs |
 
-That is 4,270 cases in all. CI runs every one of them on Linux x86-64 and on macOS with
-Apple silicon, for every pull request and every push to `master`.
+That is 4,270 cases in all. CI runs every one of them on Linux x86-64, Linux ARM64 and
+macOS with Apple silicon, and on Windows all of WebP's, animated WebP's and nearly all of
+JPEG XL's (not yet AVIF's or HEIC's), for every pull request and every push to `master`.
 
 The [GPL edition](#editions) writes HEIC with x265 instead, adding `heif-enc`'s `-L`
 lossless, 4:4:4 and 4:2:2 chroma, 10-bit output, x265's main tuning controls and any

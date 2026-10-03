@@ -445,12 +445,11 @@ jobs:
   # libraries the Linux references use rather than WIC — libjpeg-turbo from our own
   # submodule (the version the app links), libpng, libtiff and giflib from vcpkg, all on the
   # static C runtime — so every tests/parity.rs, tests/animation.rs and tests/gif.rs gate can
-  # run there. Not yet a gate: it has not been seen to pass (ROADMAP.md, Phase 8).
+  # run there (ROADMAP.md, Phase 8).
   parity-windows-images:
-    name: parity with libwebp's tools and image readers / windows (trial)
+    name: parity with libwebp's tools and image readers / windows
     runs-on: windows-2022
     timeout-minutes: 75
-    continue-on-error: true
     defaults:
       run:
         shell: bash
@@ -496,12 +495,11 @@ jobs:
   # already builds the library so for the app), reading JPEG through our libjpeg-turbo and
   # PNG and GIF through vcpkg's libpng and giflib. libjxl finds OpenEXR only through
   # pkg-config, which Windows lacks, so the EXR gate and the JPEG XL-source one (one of whose
-  # sources is an EXR) are left out. Not yet a gate (ROADMAP.md, Phase 8).
+  # sources is an EXR) are left out (ROADMAP.md, Phase 8).
   parity-windows-jxl:
-    name: parity with cjxl / windows (trial)
+    name: parity with cjxl / windows
     runs-on: windows-2022
     timeout-minutes: 75
-    continue-on-error: true
     defaults:
       run:
         shell: bash
