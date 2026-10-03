@@ -7296,6 +7296,7 @@ dependencies = [
  "avif-decode",
  "cc",
  "cmake",
+ "exr",
  "flate2",
  "gif",
  "image",

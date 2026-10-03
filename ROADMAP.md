@@ -1398,8 +1398,29 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       `heif-enc --raw-width 8 --raw-height 8 --raw-type uint8 m.raw -o m.heic` fails with
       "Unsupported feature: Unsupported color conversion", and this `heif-enc` has no `-U`.
       Revisit only if uncompressed HEIF output is ever added.
-- [ ] More input formats the tools read: animated GIF and APNG into `cjxl` (with the
-      multi-image work below) and EXR (`cjxl`, needs OpenEXR).
+- [x] EXR input, as `cjxl` reads it (2026-10-02): `src/exr_input.rs` reads with the `exr`
+      crate (BSD-3-Clause, pure Rust, already in the tree through `image`) and picks what
+      libjxl's `exr.cc` picks — R/G/B or the first layer's triple, else the first channel as
+      gray, that prefix's alpha (premultiplied), the display window with the data window
+      placed in it, linear light with sRGB primaries or the file's chromaticities, white
+      luminance as the intensity target, and its refusals (`UINT`, subsampled, mixed
+      types). JPEG XL gets the samples as stored (half or float), alpha flagged
+      premultiplied unless `--premultiply` says otherwise; the other formats get the sRGB
+      curve, clipped at white. The reference `cjxl` is now built with OpenEXR
+      (`build-reference-tools.sh` fails if it is missing; CI installs `libopenexr-dev` and
+      Homebrew's `openexr`). Gate `matches_cjxl_through_exr`: 134 cases over 10 files (half
+      and float, RGB/RGBA/gray, a named layer, data windows inside and past the display
+      window, P3 chromaticities with 203 nits, uncompressed, RLE, ZIP, PIZ, PXR24, B44,
+      DWAA and DWAB), 126 byte for byte and 8 that `cjxl` and Skidbladnir both refuse (libjxl 0.12.0 fails
+      `JxlEncoderProcessOutput` on half-float alpha at `-d 25`, `-q 0` and resampling 2-8).
+      Dropping the premultiplied flag fails 84, and declaring halves as floats 114, of the
+      first 124 (before the DWA files were added).
+- [ ] EXR channels beyond colour and alpha: `cjxl` keeps them as optional extra channels,
+      named; Skidbladnir leaves them out, so such a file's JPEG XL differs from `cjxl`'s.
+      Needs extra-channel support in `jxl.rs` (`JxlEncoderSetExtraChannelInfo`/`Name`/`Buffer`).
+- [ ] HTJ2K-compressed EXR: the `exr` crate cannot decompress it (`compression/mod.rs`
+      returns "yet unimplemented compression method").
+- [ ] Animated GIF and APNG into `cjxl` (with the multi-image work below).
 - [x] Animated WebP's own options as controls (2026-10-01): `-mixed`, `-min_size`,
       `-kmin`/`-kmax`, `img2webp -loop` and `gif2webp -loop_compatibility`
       (`WebpAnimation`). Found on the way: under `-mixed` the encoder still reads the

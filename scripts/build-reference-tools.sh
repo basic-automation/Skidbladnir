@@ -14,7 +14,8 @@
 # version the app links — so JPEG parity compares encoders, not decoder versions. PNG goes
 # through the system libpng, whose rules the app follows (libpng 1.6), and cwebp reads TIFF
 # through the system libtiff, so their development files are needed, with zlib's and
-# giflib's (for gif2webp); avifenc's configure step fetches libargparse from GitHub.
+# giflib's (for gif2webp), and OpenEXR's for cjxl, which reads EXR through it; avifenc's
+# configure step fetches libargparse from GitHub.
 #
 #   scripts/build-reference-tools.sh [--prefix <dir>]
 #
@@ -63,7 +64,9 @@ echo "==> heif-enc" >&2
 
 echo "==> cjxl" >&2
 libjxl=$(cd "$root" && cargo metadata --format-version 1 | python3 -c 'import json,sys; print([p for p in json.load(sys.stdin)["packages"] if p["name"] == "jpegxl-src"][0]["manifest_path"].rsplit("/", 1)[0] + "/libjxl")')
-cmake -S "$libjxl" -B "$work/libjxl" "${common[@]}" -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF -DJPEGXL_ENABLE_TOOLS=ON -DJPEGXL_ENABLE_DOXYGEN=OFF -DJPEGXL_ENABLE_MANPAGES=OFF -DJPEGXL_ENABLE_BENCHMARK=OFF -DJPEGXL_ENABLE_EXAMPLES=OFF -DJPEGXL_ENABLE_JNI=OFF -DJPEGXL_ENABLE_SJPEG=OFF -DJPEGXL_ENABLE_OPENEXR=OFF -DJPEGXL_BUNDLE_LIBPNG=OFF -DJPEGXL_ENABLE_PLUGINS=OFF "-DCMAKE_PREFIX_PATH=$jpeg" >/dev/null
+cmake -S "$libjxl" -B "$work/libjxl" "${common[@]}" -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF -DJPEGXL_ENABLE_TOOLS=ON -DJPEGXL_ENABLE_DOXYGEN=OFF -DJPEGXL_ENABLE_MANPAGES=OFF -DJPEGXL_ENABLE_BENCHMARK=OFF -DJPEGXL_ENABLE_EXAMPLES=OFF -DJPEGXL_ENABLE_JNI=OFF -DJPEGXL_ENABLE_SJPEG=OFF -DJPEGXL_ENABLE_OPENEXR=ON -DJPEGXL_BUNDLE_LIBPNG=OFF -DJPEGXL_ENABLE_PLUGINS=OFF "-DCMAKE_PREFIX_PATH=$jpeg" >/dev/null
+# libjxl leaves EXR out quietly when it cannot find OpenEXR; the EXR gate needs it in.
+grep -q '^OpenEXR_FOUND:INTERNAL=1' "$work/libjxl/CMakeCache.txt" || { echo "cjxl would be built without EXR: install OpenEXR's development files" >&2; exit 1; }
 cmake --build "$work/libjxl" --parallel "$jobs" --target cjxl >/dev/null
 cp "$work/libjxl/tools/cjxl" "$prefix/bin/cjxl"
 

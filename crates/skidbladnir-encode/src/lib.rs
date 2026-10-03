@@ -18,6 +18,7 @@ pub mod avifenc;
 pub mod cjxl;
 pub mod cwebp;
 pub mod encoder;
+pub mod exr_input;
 pub mod gif_input;
 pub mod heic;
 pub mod heif_enc;

@@ -62,6 +62,8 @@ pub enum SourceFormat {
 	/// Y4M (`YUV4MPEG2`), its first frame, read by `avifenc`'s own reader
 	/// ([`crate::avif::decode_y4m`]).
 	Y4m,
+	/// `OpenEXR`, its first part, read the way `cjxl` reads it ([`crate::exr_input`]).
+	Exr,
 	/// Raw 8-bit I420 planes, as `cwebp -s` reads them: known by the `.yuv` extension, since
 	/// such a file has no signature, and readable only with its size
 	/// ([`EncodeJob::yuv_size`]).
@@ -89,6 +91,7 @@ impl SourceFormat {
 			[b'P', b'G', b' ', ..] => Some(Self::Pgx),
 			_ if crate::svg::sniff(bytes) => Some(Self::Svg),
 			[b'Y', b'U', b'V', b'4', b'M', b'P', b'E', b'G', b'2', b' ', ..] => Some(Self::Y4m),
+			[0x76, 0x2f, 0x31, 0x01, ..] => Some(Self::Exr),
 			_ => None,
 		}
 	}
@@ -110,6 +113,7 @@ impl SourceFormat {
 			Self::Pgx => "PGX",
 			Self::Svg => "SVG",
 			Self::Y4m => "Y4M",
+			Self::Exr => "EXR",
 			Self::Yuv => "YUV",
 		}
 	}
@@ -381,6 +385,11 @@ pub fn decode_with(path: &Path, bytes: Vec<u8>, yuv_size: Option<RawSize>) -> Re
 		SourceFormat::Svg => {
 			let raster = crate::svg::rasterise(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?;
 			Decoded::rgba((raster.width, raster.height, raster.pixels))
+		}
+		SourceFormat::Exr => {
+			let image = crate::exr_input::decode(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?;
+			let (pixels, deep) = crate::exr_input::rgba(&image);
+			Decoded { width: image.width, height: image.height, pixels, deep: Some(deep), gray: image.gray, has_alpha: image.alpha }
 		}
 		SourceFormat::Yuv => {
 			let size = yuv_size.ok_or_else(|| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: "a .yuv file has no header to give its size: set it under Raw YUV input".to_owned() })?;
@@ -1219,6 +1228,30 @@ mod tests {
 		assert_eq!(output_collisions(&plan(&[("/in/a.png", "/out/a.webp"), ("/in/b.png", "/out/b.webp")])), Vec::new());
 		let case = output_collisions(&plan(&[("/in/Photo.png", "/out/Photo.webp"), ("/in/photo.jpg", "/out/photo.webp")]));
 		assert_eq!(case.len(), usize::from(cfg!(any(windows, target_os = "macos"))), "names differing only in case collide where the filesystem ignores case");
+	}
+
+	/// An EXR converts to every format: to JPEG XL as `cjxl` reads it (`tests/jxl_parity.rs`),
+	/// to the others as linear light given the sRGB curve, its premultiplied alpha undone.
+	#[test]
+	fn converts_an_exr_to_every_format() {
+		use exr::prelude::{AnyChannel, AnyChannels, Encoding, FlatSamples, Image, Layer, LayerAttributes, WritableImage as _, f16};
+		let scratch = Scratch::new("exr");
+		let input = scratch.join("light.exr");
+		// Linear 0.2 at half coverage, stored premultiplied: 0.1 in the file.
+		let channel = |name: &str, value: f32| AnyChannel::new(name, FlatSamples::F16(vec![f16::from_f32(value); 12]));
+		let channels = AnyChannels::sort(vec![channel("R", 0.1), channel("G", 0.1), channel("B", 0.1), channel("A", 0.5)].into());
+		Image::from_layer(Layer::new((4, 3), LayerAttributes::default(), Encoding::UNCOMPRESSED, channels)).write().to_file(&input).expect("write");
+		let inspected = super::inspect_paths(std::slice::from_ref(&input));
+		assert!(inspected[0].supported && inspected[0].format == Some("EXR"), "{inspected:?}");
+		let image = load(&input).expect("an EXR loads");
+		assert_eq!((image.format, image.width, image.height, image.has_alpha, image.gray), (SourceFormat::Exr, 4, 3, true, false));
+		// sRGB of linear 0.2 is 0.4845, so 124 of 255; alpha 0.5 is 128.
+		assert_eq!(&image.pixels[..4], &[124, 124, 124, 128]);
+		for format in [OutputFormat::Webp, OutputFormat::Avif, OutputFormat::Jxl, OutputFormat::Heic] {
+			let output = scratch.join(&format!("light.{}", format.extension()));
+			let conversion = encode_file(&EncodeJob { format, ..EncodeJob::default() }, &input, &output).unwrap_or_else(|error| panic!("{format:?}: {error}"));
+			assert_eq!((conversion.width, conversion.height), (4, 3), "{format:?}");
+		}
 	}
 
 	/// A `.yuv` file is raw I420, known by its extension: offered to the queue and found by

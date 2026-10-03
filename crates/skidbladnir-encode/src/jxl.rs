@@ -569,6 +569,30 @@ struct Input {
 	/// or at the codestream's bit depth (`JXL_BIT_DEPTH_FROM_CODESTREAM`), as `cjxl`'s PNM
 	/// reader hands them over.
 	bit_depth: c_int,
+	/// What kind of alpha the samples carry.
+	alpha_kind: AlphaKind,
+}
+
+/// The alpha a reader hands over: integer and straight from every format but EXR, whose
+/// alpha is floating-point, with the colour premultiplied by it. `cjxl`'s `--premultiply`
+/// overrides the premultiplication either way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AlphaKind {
+	Integer,
+	PremultipliedFloat { exponent_bits: u32 },
+}
+
+impl AlphaKind {
+	const fn exponent_bits(self) -> u32 {
+		match self {
+			Self::Integer => 0,
+			Self::PremultipliedFloat { exponent_bits } => exponent_bits,
+		}
+	}
+
+	const fn premultiplied(self) -> bool {
+		matches!(self, Self::PremultipliedFloat { .. })
+	}
 }
 
 /// The colour `cjxl`'s PNG decoder starts from: sRGB, relative intent.
@@ -594,6 +618,7 @@ impl Input {
 			SourceFormat::Pfm => Self::pfm(source),
 			SourceFormat::Pgx => Self::pgx(source),
 			SourceFormat::Gif => Self::gif(source),
+			SourceFormat::Exr => Self::exr(source),
 			_ => Self::other(source),
 		}
 	}
@@ -701,7 +726,7 @@ impl Input {
 		let colour_given = given != Given::None;
 		let intensity_target = if encoding.transfer_function == JXL_TRANSFER_FUNCTION_PQ { max_cll } else { 0.0 };
 		let frame = JxlFrameHeader { duration: 100, timecode: 0, name_length: 0, is_last: JXL_TRUE, layer_info: JxlLayerInfo { have_crop: JXL_FALSE, crop_x0: 0, crop_y0: 0, xsize: source.width, ysize: source.height, blend_info: JxlBlendInfo { blendmode: JXL_BLEND_REPLACE, source: 1, alpha: 0, clamp: JXL_FALSE }, save_as_reference: 1 } };
-		Self { width: source.width, height: source.height, bits_per_sample: bits, exponent_bits: 0, num_color_channels: if colour { 3 } else { 1 }, alpha_bits: if alpha { bits } else { 0 }, samples: Self::samples(source, !colour, alpha, bit_depth > 8), colour: icc.map_or(Colour::Encoding(encoding), Colour::Icc), colour_given, colour_hints_ignored: false, intensity_target, exif, xmp, jumbf: Vec::new(), frame, lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT }
+		Self { width: source.width, height: source.height, bits_per_sample: bits, exponent_bits: 0, num_color_channels: if colour { 3 } else { 1 }, alpha_bits: if alpha { bits } else { 0 }, samples: Self::samples(source, !colour, alpha, bit_depth > 8), colour: icc.map_or(Colour::Encoding(encoding), Colour::Icc), colour_given, colour_hints_ignored: false, intensity_target, exif, xmp, jumbf: Vec::new(), frame, lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT, alpha_kind: AlphaKind::Integer }
 	}
 
 	/// `lib/extras/dec/jpg.cc`: a JPEG decoded to 8-bit pixels (`-j 0`).
@@ -709,7 +734,7 @@ impl Input {
 		let markers = jpeg_markers(&source.bytes);
 		let exif = markers.iter().find(|(marker, data)| *marker == 0xe1 && data.len() >= 8 && data.starts_with(b"Exif\0\0")).map_or_else(Vec::new, |(_, data)| data[6..].to_vec());
 		let colour = jpeg_icc(&markers).map_or_else(|| Colour::Encoding(srgb(source.gray, JXL_RENDERING_INTENT_PERCEPTUAL)), Colour::Icc);
-		Self { width: source.width, height: source.height, bits_per_sample: 8, exponent_bits: 0, num_color_channels: if source.gray { 1 } else { 3 }, alpha_bits: 0, samples: Self::samples(source, source.gray, false, false), colour, colour_given: true, colour_hints_ignored: true, intensity_target: 0.0, exif, xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: true, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT }
+		Self { width: source.width, height: source.height, bits_per_sample: 8, exponent_bits: 0, num_color_channels: if source.gray { 1 } else { 3 }, alpha_bits: 0, samples: Self::samples(source, source.gray, false, false), colour, colour_given: true, colour_hints_ignored: true, intensity_target: 0.0, exif, xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: true, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT, alpha_kind: AlphaKind::Integer }
 	}
 
 	/// `lib/extras/dec/pnm.cc`: the samples as stored, at `log2(maxval + 1)` bits and read
@@ -726,7 +751,7 @@ impl Input {
 		let raw = crate::pnm::raw_samples(&source.bytes, &header);
 		let samples = if bits > 8 { Samples::U16(raw) } else { Samples::U8(raw.into_iter().map(|v| u8::try_from(v).unwrap_or(u8::MAX)).collect()) };
 		let gray = header.gray();
-		Self { width: source.width, height: source.height, bits_per_sample: bits, exponent_bits: 0, num_color_channels: if gray { 1 } else { 3 }, alpha_bits: if header.alpha() { bits } else { 0 }, samples, colour: Colour::Encoding(srgb(gray, JXL_RENDERING_INTENT_PERCEPTUAL)), colour_given: false, colour_hints_ignored: false, intensity_target: 0.0, exif: Vec::new(), xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_CODESTREAM }
+		Self { width: source.width, height: source.height, bits_per_sample: bits, exponent_bits: 0, num_color_channels: if gray { 1 } else { 3 }, alpha_bits: if header.alpha() { bits } else { 0 }, samples, colour: Colour::Encoding(srgb(gray, JXL_RENDERING_INTENT_PERCEPTUAL)), colour_given: false, colour_hints_ignored: false, intensity_target: 0.0, exif: Vec::new(), xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_CODESTREAM, alpha_kind: AlphaKind::Integer }
 	}
 
 	/// `lib/extras/dec/pnm.cc` for a PFM: 32-bit floats as they are stored, top row first,
@@ -737,7 +762,31 @@ impl Input {
 			Ok(image) if (image.width, image.height) == (source.width, source.height) => image,
 			_ => return Self::other(source),
 		};
-		Self { width: source.width, height: source.height, bits_per_sample: 32, exponent_bits: 8, num_color_channels: if image.gray { 1 } else { 3 }, alpha_bits: 0, samples: Samples::F32(image.samples), colour: Colour::Encoding(srgb(image.gray, JXL_RENDERING_INTENT_PERCEPTUAL)), colour_given: false, colour_hints_ignored: false, intensity_target: 0.0, exif: Vec::new(), xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT }
+		Self { width: source.width, height: source.height, bits_per_sample: 32, exponent_bits: 8, num_color_channels: if image.gray { 1 } else { 3 }, alpha_bits: 0, samples: Samples::F32(image.samples), colour: Colour::Encoding(srgb(image.gray, JXL_RENDERING_INTENT_PERCEPTUAL)), colour_given: false, colour_hints_ignored: false, intensity_target: 0.0, exif: Vec::new(), xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT, alpha_kind: AlphaKind::Integer }
+	}
+
+	/// `lib/extras/dec/exr.cc` ([`crate::exr_input`]): the samples as stored, half or float,
+	/// in linear light with sRGB primaries and a D65 white, or the file's chromaticities;
+	/// alpha premultiplied, as EXR stores it; its white luminance as the intensity target;
+	/// and colour hints ignored, as `cjxl`'s EXR reader ignores them. When cropped or resized,
+	/// the correct reading is encoded instead ([`Self::other`]).
+	fn exr(source: &SourceImage) -> Self {
+		let image = match crate::exr_input::decode(&source.bytes) {
+			Ok(image) if (image.width, image.height) == (source.width, source.height) => image,
+			_ => return Self::other(source),
+		};
+		let (bits, exponent) = if image.half { (16, 5) } else { (32, 8) };
+		let mut encoding = srgb(image.gray, JXL_RENDERING_INTENT_PERCEPTUAL);
+		encoding.transfer_function = JXL_TRANSFER_FUNCTION_LINEAR;
+		if let Some([red, green, blue, white]) = image.chromaticities {
+			encoding.primaries = JXL_PRIMARIES_CUSTOM;
+			encoding.white_point = JXL_WHITE_POINT_CUSTOM;
+			encoding.primaries_red_xy = red.map(f64::from);
+			encoding.primaries_green_xy = green.map(f64::from);
+			encoding.primaries_blue_xy = blue.map(f64::from);
+			encoding.white_point_xy = white.map(f64::from);
+		}
+		Self { width: image.width, height: image.height, bits_per_sample: bits, exponent_bits: exponent, num_color_channels: if image.gray { 1 } else { 3 }, alpha_bits: if image.alpha { bits } else { 0 }, samples: Samples::F32(image.samples), colour: Colour::Encoding(encoding), colour_given: true, colour_hints_ignored: true, intensity_target: image.intensity_target, exif: Vec::new(), xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT, alpha_kind: if image.alpha { AlphaKind::PremultipliedFloat { exponent_bits: exponent } } else { AlphaKind::Integer } }
 	}
 
 	/// `lib/extras/dec/pgx.cc`: one gray channel, the samples as stored in an 8- or 16-bit
@@ -751,7 +800,7 @@ impl Input {
 			_ => return Self::other(source),
 		};
 		let samples = if image.bits > 8 { Samples::U16(image.samples) } else { Samples::U8(image.samples.into_iter().map(|v| u8::try_from(v).unwrap_or(u8::MAX)).collect()) };
-		Self { width: source.width, height: source.height, bits_per_sample: image.bits, exponent_bits: 0, num_color_channels: 1, alpha_bits: 0, samples, colour: Colour::Encoding(srgb(true, JXL_RENDERING_INTENT_PERCEPTUAL)), colour_given: false, colour_hints_ignored: false, intensity_target: 0.0, exif: Vec::new(), xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT }
+		Self { width: source.width, height: source.height, bits_per_sample: image.bits, exponent_bits: 0, num_color_channels: 1, alpha_bits: 0, samples, colour: Colour::Encoding(srgb(true, JXL_RENDERING_INTENT_PERCEPTUAL)), colour_given: false, colour_hints_ignored: false, intensity_target: 0.0, exif: Vec::new(), xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT, alpha_kind: AlphaKind::Integer }
 	}
 
 	/// `lib/extras/dec/gif.cc` for a still GIF: always three colour channels, alpha only
@@ -772,7 +821,7 @@ impl Input {
 		let colour_given = metadata.icc.is_some();
 		let colour = metadata.icc.map_or_else(|| Colour::Encoding(srgb(source.gray, JXL_RENDERING_INTENT_RELATIVE)), Colour::Icc);
 		let frame = JxlFrameHeader::default();
-		Self { width: source.width, height: source.height, bits_per_sample: bits, exponent_bits: 0, num_color_channels: if source.gray { 1 } else { 3 }, alpha_bits: if source.has_alpha { bits } else { 0 }, samples: Self::samples(source, source.gray, source.has_alpha, deep), colour, colour_given, colour_hints_ignored: false, intensity_target: 0.0, exif: metadata.exif.unwrap_or_default(), xmp: metadata.xmp.unwrap_or_default(), jumbf: Vec::new(), frame, lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT }
+		Self { width: source.width, height: source.height, bits_per_sample: bits, exponent_bits: 0, num_color_channels: if source.gray { 1 } else { 3 }, alpha_bits: if source.has_alpha { bits } else { 0 }, samples: Self::samples(source, source.gray, source.has_alpha, deep), colour, colour_given, colour_hints_ignored: false, intensity_target: 0.0, exif: metadata.exif.unwrap_or_default(), xmp: metadata.xmp.unwrap_or_default(), jumbf: Vec::new(), frame, lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT, alpha_kind: AlphaKind::Integer }
 	}
 
 	/// `ApplyColorHints`: the `-x` hints, in the order `cjxl` applies them.
@@ -1089,6 +1138,8 @@ fn encode_pixels(settings: &JxlSettings, source: &SourceImage) -> Result<Vec<u8>
 	info.num_color_channels = input.num_color_channels;
 	info.num_extra_channels = u32::from(alpha);
 	info.alpha_bits = input.alpha_bits;
+	info.alpha_exponent_bits = input.alpha_kind.exponent_bits();
+	info.alpha_premultiplied = c_int::from(input.alpha_kind.premultiplied());
 	if settings.override_bitdepth != 0 {
 		info.bits_per_sample = u32::from(settings.override_bitdepth);
 		info.exponent_bits_per_sample = if settings.override_bitdepth == 32 { 8 } else { 0 };
@@ -1138,8 +1189,8 @@ fn encode_pixels(settings: &JxlSettings, source: &SourceImage) -> Result<Vec<u8>
 			extra.assume_init()
 		};
 		extra.bits_per_sample = input.alpha_bits;
-		extra.exponent_bits_per_sample = 0;
-		extra.alpha_premultiplied = c_int::from(settings.premultiply == 1);
+		extra.exponent_bits_per_sample = input.alpha_kind.exponent_bits();
+		extra.alpha_premultiplied = c_int::from(if settings.premultiply == -1 { input.alpha_kind.premultiplied() } else { settings.premultiply == 1 });
 		encoder.check("JxlEncoderSetExtraChannelInfo", unsafe { JxlEncoderSetExtraChannelInfo(encoder.enc, 0, &raw const extra) })?;
 		let blend = JxlBlendInfo { clamp: JXL_FALSE, ..input.frame.layer_info.blend_info };
 		encoder.check("JxlEncoderSetExtraChannelBlendInfo", unsafe { JxlEncoderSetExtraChannelBlendInfo(frame, 0, &raw const blend) })?;
