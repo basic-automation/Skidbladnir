@@ -1441,9 +1441,13 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       a SIMD target: both builds carry AVX2, SSE4 and SSE2 only (`nm`). `cargo test
       --release` (CI's parity job, and what ships) matches all 126; the gate leaves the two
       out only under `debug_assertions`.
+- [x] A JPEG XL's IPTC and `jhgm` boxes (2026-10-02): read as `cjxl` reads them and written
+      back as it writes them (IPTC as an `xml ` box after the XMP and JUMBF, then `jhgm`;
+      `--container=0` strips them with the rest). 6 more cases, from `cjxl`'s own container
+      with the two boxes appended: 132 in all, release build; dropping the boxes fails 5
+      (the sixth is `--container=0`).
 - [ ] JPEG XL to JPEG XL, not matched yet: several frames or layers (animation, deferred with
-      the multi-image work), a cropped layer, IPTC and `jhgm` boxes — each converted from its
-      pixels instead.
+      the multi-image work) and a cropped layer — each converted from its pixels instead.
 - [ ] HTJ2K-compressed EXR: the `exr` crate cannot decompress it (`compression/mod.rs`
       returns "yet unimplemented compression method").
 - [ ] Animated GIF and APNG into `cjxl` (with the multi-image work below).

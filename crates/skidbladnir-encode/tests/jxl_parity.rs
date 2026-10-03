@@ -362,8 +362,8 @@ fn matches_cjxl_through_exr() {
 /// the codestream's depth, orientation undone, the Exif box's orientation reset, extra
 /// channels kept) and encodes again. The sources are written by the reference `cjxl` itself:
 /// lossless and lossy (XYB) colour with alpha, 16-bit gray, Exif with an orientation and
-/// XMP, a float image from PFM, and an EXR with extra channels. The first runs the whole
-/// option surface.
+/// XMP, a float image from PFM, an EXR with extra channels, and a container with IPTC and
+/// `jhgm` boxes. The first runs the whole option surface and every hint.
 #[test]
 fn matches_cjxl_from_jpeg_xl() {
 	use exr::prelude::{Compression, FlatSamples, f16};
@@ -392,6 +392,20 @@ fn matches_cjxl_from_jpeg_xl() {
 		assert!(made.status.success(), "cjxl must write the {name} source: {}", String::from_utf8_lossy(&made.stderr));
 		sources.push((name, output));
 	}
+	// cjxl's own container, with an IPTC box and a `jhgm` one after the codestream: cjxl
+	// carries IPTC back as an `xml ` box, and `jhgm` as it is.
+	let container = run.dir.join("container.jxl");
+	let made = Command::new(&run.cjxl).arg(&rgba).arg(&container).args(["-d", "0", "-e", "3", "--container=1", "--quiet"]).output().expect("run cjxl");
+	assert!(made.status.success(), "cjxl must write the container source");
+	let mut boxed = fs::read(&container).expect("read the container");
+	for (kind, payload) in [(*b"iptc", b"\x1c\x02\x00\x00\x02\x00\x04\x1c\x02\x05\x00\x05title".as_slice()), (*b"jhgm", b"\x00gain map stand-in".as_slice())] {
+		boxed.extend(u32::try_from(8 + payload.len()).expect("small").to_be_bytes());
+		boxed.extend(kind);
+		boxed.extend(payload);
+	}
+	let boxed_path = run.dir.join("source-boxes.jxl");
+	fs::write(&boxed_path, &boxed).expect("write the boxed source");
+	sources.push(("IPTC and jhgm boxes", boxed_path));
 	let d = || JxlSettings { effort: 3, ..JxlSettings::default() };
 	let few = [("default", JxlSettings::default()), ("-d 0", JxlSettings { target: JxlTarget::Distance(0.0), ..d() }), ("-d 3", JxlSettings { target: JxlTarget::Distance(3.0), ..d() }), ("-q 95", JxlSettings { target: JxlTarget::Quality(95.0), ..d() }), ("modular lossless", JxlSettings { modular: Tristate::On, target: JxlTarget::Distance(0.0), ..d() }), ("container off", JxlSettings { container: Tristate::Off, ..d() })];
 	for (index, (name, input)) in sources.iter().enumerate() {

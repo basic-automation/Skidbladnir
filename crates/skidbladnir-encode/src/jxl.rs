@@ -618,6 +618,9 @@ struct Input {
 	/// For a JPEG XL input, what libjxl's decoder said of it, which `cjxl` hands to the
 	/// encoder as it is.
 	decoded: Option<Decoded>,
+	/// Boxes after the Exif, XMP and JUMBF ones, in `cjxl`'s order: a JPEG XL input's IPTC
+	/// (written back as an `xml ` box, as `cjxl` writes it) and `jhgm`.
+	extra_boxes: Vec<([u8; 4], Vec<u8>)>,
 }
 
 /// An extra channel beyond the first alpha: its description, its name and its samples over
@@ -801,7 +804,7 @@ impl Input {
 		let colour_given = given != Given::None;
 		let intensity_target = if encoding.transfer_function == JXL_TRANSFER_FUNCTION_PQ { max_cll } else { 0.0 };
 		let frame = JxlFrameHeader { duration: 100, timecode: 0, name_length: 0, is_last: JXL_TRUE, layer_info: JxlLayerInfo { have_crop: JXL_FALSE, crop_x0: 0, crop_y0: 0, xsize: source.width, ysize: source.height, blend_info: JxlBlendInfo { blendmode: JXL_BLEND_REPLACE, source: 1, alpha: 0, clamp: JXL_FALSE }, save_as_reference: 1 } };
-		Self { width: source.width, height: source.height, bits_per_sample: bits, exponent_bits: 0, num_color_channels: if colour { 3 } else { 1 }, alpha_bits: if alpha { bits } else { 0 }, samples: Self::samples(source, !colour, alpha, bit_depth > 8), colour: icc.map_or(Colour::Encoding(encoding), Colour::Icc), colour_given, colour_hints_ignored: false, intensity_target, exif, xmp, jumbf: Vec::new(), frame, lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT, alpha_kind: AlphaKind::INTEGER, extra_channels: Vec::new(), decoded: None }
+		Self { width: source.width, height: source.height, bits_per_sample: bits, exponent_bits: 0, num_color_channels: if colour { 3 } else { 1 }, alpha_bits: if alpha { bits } else { 0 }, samples: Self::samples(source, !colour, alpha, bit_depth > 8), colour: icc.map_or(Colour::Encoding(encoding), Colour::Icc), colour_given, colour_hints_ignored: false, intensity_target, exif, xmp, jumbf: Vec::new(), frame, lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT, alpha_kind: AlphaKind::INTEGER, extra_channels: Vec::new(), decoded: None, extra_boxes: Vec::new() }
 	}
 
 	/// `lib/extras/dec/jpg.cc`: a JPEG decoded to 8-bit pixels (`-j 0`).
@@ -809,7 +812,7 @@ impl Input {
 		let markers = jpeg_markers(&source.bytes);
 		let exif = markers.iter().find(|(marker, data)| *marker == 0xe1 && data.len() >= 8 && data.starts_with(b"Exif\0\0")).map_or_else(Vec::new, |(_, data)| data[6..].to_vec());
 		let colour = jpeg_icc(&markers).map_or_else(|| Colour::Encoding(srgb(source.gray, JXL_RENDERING_INTENT_PERCEPTUAL)), Colour::Icc);
-		Self { width: source.width, height: source.height, bits_per_sample: 8, exponent_bits: 0, num_color_channels: if source.gray { 1 } else { 3 }, alpha_bits: 0, samples: Self::samples(source, source.gray, false, false), colour, colour_given: true, colour_hints_ignored: true, intensity_target: 0.0, exif, xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: true, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT, alpha_kind: AlphaKind::INTEGER, extra_channels: Vec::new(), decoded: None }
+		Self { width: source.width, height: source.height, bits_per_sample: 8, exponent_bits: 0, num_color_channels: if source.gray { 1 } else { 3 }, alpha_bits: 0, samples: Self::samples(source, source.gray, false, false), colour, colour_given: true, colour_hints_ignored: true, intensity_target: 0.0, exif, xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: true, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT, alpha_kind: AlphaKind::INTEGER, extra_channels: Vec::new(), decoded: None, extra_boxes: Vec::new() }
 	}
 
 	/// `lib/extras/dec/pnm.cc`: the samples as stored, at `log2(maxval + 1)` bits and read
@@ -826,7 +829,7 @@ impl Input {
 		let raw = crate::pnm::raw_samples(&source.bytes, &header);
 		let samples = if bits > 8 { Samples::U16(raw) } else { Samples::U8(raw.into_iter().map(|v| u8::try_from(v).unwrap_or(u8::MAX)).collect()) };
 		let gray = header.gray();
-		Self { width: source.width, height: source.height, bits_per_sample: bits, exponent_bits: 0, num_color_channels: if gray { 1 } else { 3 }, alpha_bits: if header.alpha() { bits } else { 0 }, samples, colour: Colour::Encoding(srgb(gray, JXL_RENDERING_INTENT_PERCEPTUAL)), colour_given: false, colour_hints_ignored: false, intensity_target: 0.0, exif: Vec::new(), xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_CODESTREAM, alpha_kind: AlphaKind::INTEGER, extra_channels: Vec::new(), decoded: None }
+		Self { width: source.width, height: source.height, bits_per_sample: bits, exponent_bits: 0, num_color_channels: if gray { 1 } else { 3 }, alpha_bits: if header.alpha() { bits } else { 0 }, samples, colour: Colour::Encoding(srgb(gray, JXL_RENDERING_INTENT_PERCEPTUAL)), colour_given: false, colour_hints_ignored: false, intensity_target: 0.0, exif: Vec::new(), xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_CODESTREAM, alpha_kind: AlphaKind::INTEGER, extra_channels: Vec::new(), decoded: None, extra_boxes: Vec::new() }
 	}
 
 	/// `lib/extras/dec/pnm.cc` for a PFM: 32-bit floats as they are stored, top row first,
@@ -837,7 +840,7 @@ impl Input {
 			Ok(image) if (image.width, image.height) == (source.width, source.height) => image,
 			_ => return Self::other(source),
 		};
-		Self { width: source.width, height: source.height, bits_per_sample: 32, exponent_bits: 8, num_color_channels: if image.gray { 1 } else { 3 }, alpha_bits: 0, samples: Samples::F32(image.samples), colour: Colour::Encoding(srgb(image.gray, JXL_RENDERING_INTENT_PERCEPTUAL)), colour_given: false, colour_hints_ignored: false, intensity_target: 0.0, exif: Vec::new(), xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT, alpha_kind: AlphaKind::INTEGER, extra_channels: Vec::new(), decoded: None }
+		Self { width: source.width, height: source.height, bits_per_sample: 32, exponent_bits: 8, num_color_channels: if image.gray { 1 } else { 3 }, alpha_bits: 0, samples: Samples::F32(image.samples), colour: Colour::Encoding(srgb(image.gray, JXL_RENDERING_INTENT_PERCEPTUAL)), colour_given: false, colour_hints_ignored: false, intensity_target: 0.0, exif: Vec::new(), xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT, alpha_kind: AlphaKind::INTEGER, extra_channels: Vec::new(), decoded: None, extra_boxes: Vec::new() }
 	}
 
 	/// `lib/extras/dec/exr.cc` ([`crate::exr_input`]): the samples as stored, half or float,
@@ -861,7 +864,7 @@ impl Input {
 			encoding.primaries_blue_xy = blue.map(f64::from);
 			encoding.white_point_xy = white.map(f64::from);
 		}
-		Self { width: image.width, height: image.height, bits_per_sample: bits, exponent_bits: exponent, num_color_channels: if image.gray { 1 } else { 3 }, alpha_bits: if image.alpha { bits } else { 0 }, samples: Samples::F32(image.samples), colour: Colour::Encoding(encoding), colour_given: true, colour_hints_ignored: true, intensity_target: image.intensity_target, exif: Vec::new(), xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT, alpha_kind: if image.alpha { AlphaKind { exponent_bits: exponent, premultiplied: true } } else { AlphaKind::INTEGER }, extra_channels: image.extra.into_iter().map(ExtraChannel::from_exr).collect(), decoded: None }
+		Self { width: image.width, height: image.height, bits_per_sample: bits, exponent_bits: exponent, num_color_channels: if image.gray { 1 } else { 3 }, alpha_bits: if image.alpha { bits } else { 0 }, samples: Samples::F32(image.samples), colour: Colour::Encoding(encoding), colour_given: true, colour_hints_ignored: true, intensity_target: image.intensity_target, exif: Vec::new(), xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT, alpha_kind: if image.alpha { AlphaKind { exponent_bits: exponent, premultiplied: true } } else { AlphaKind::INTEGER }, extra_channels: image.extra.into_iter().map(ExtraChannel::from_exr).collect(), decoded: None, extra_boxes: Vec::new() }
 	}
 
 	/// A JPEG XL input, decoded by libjxl as `cjxl` decodes one ([`decode_like_cjxl`]); one
@@ -885,7 +888,7 @@ impl Input {
 			_ => return Self::other(source),
 		};
 		let samples = if image.bits > 8 { Samples::U16(image.samples) } else { Samples::U8(image.samples.into_iter().map(|v| u8::try_from(v).unwrap_or(u8::MAX)).collect()) };
-		Self { width: source.width, height: source.height, bits_per_sample: image.bits, exponent_bits: 0, num_color_channels: 1, alpha_bits: 0, samples, colour: Colour::Encoding(srgb(true, JXL_RENDERING_INTENT_PERCEPTUAL)), colour_given: false, colour_hints_ignored: false, intensity_target: 0.0, exif: Vec::new(), xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT, alpha_kind: AlphaKind::INTEGER, extra_channels: Vec::new(), decoded: None }
+		Self { width: source.width, height: source.height, bits_per_sample: image.bits, exponent_bits: 0, num_color_channels: 1, alpha_bits: 0, samples, colour: Colour::Encoding(srgb(true, JXL_RENDERING_INTENT_PERCEPTUAL)), colour_given: false, colour_hints_ignored: false, intensity_target: 0.0, exif: Vec::new(), xmp: Vec::new(), jumbf: Vec::new(), frame: JxlFrameHeader::default(), lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT, alpha_kind: AlphaKind::INTEGER, extra_channels: Vec::new(), decoded: None, extra_boxes: Vec::new() }
 	}
 
 	/// `lib/extras/dec/gif.cc` for a still GIF: always three colour channels, alpha only
@@ -906,7 +909,7 @@ impl Input {
 		let colour_given = metadata.icc.is_some();
 		let colour = metadata.icc.map_or_else(|| Colour::Encoding(srgb(source.gray, JXL_RENDERING_INTENT_RELATIVE)), Colour::Icc);
 		let frame = JxlFrameHeader::default();
-		Self { width: source.width, height: source.height, bits_per_sample: bits, exponent_bits: 0, num_color_channels: if source.gray { 1 } else { 3 }, alpha_bits: if source.has_alpha { bits } else { 0 }, samples: Self::samples(source, source.gray, source.has_alpha, deep), colour, colour_given, colour_hints_ignored: false, intensity_target: 0.0, exif: metadata.exif.unwrap_or_default(), xmp: metadata.xmp.unwrap_or_default(), jumbf: Vec::new(), frame, lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT, alpha_kind: AlphaKind::INTEGER, extra_channels: Vec::new(), decoded: None }
+		Self { width: source.width, height: source.height, bits_per_sample: bits, exponent_bits: 0, num_color_channels: if source.gray { 1 } else { 3 }, alpha_bits: if source.has_alpha { bits } else { 0 }, samples: Self::samples(source, source.gray, source.has_alpha, deep), colour, colour_given, colour_hints_ignored: false, intensity_target: 0.0, exif: metadata.exif.unwrap_or_default(), xmp: metadata.xmp.unwrap_or_default(), jumbf: Vec::new(), frame, lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT, alpha_kind: AlphaKind::INTEGER, extra_channels: Vec::new(), decoded: None, extra_boxes: Vec::new() }
 	}
 
 	/// `ApplyColorHints`: the `-x` hints, in the order `cjxl` applies them.
@@ -1191,8 +1194,9 @@ fn encode_pixels(settings: &JxlSettings, source: &SourceImage) -> Result<Vec<u8>
 		input.exif.clear();
 		input.xmp.clear();
 		input.jumbf.clear();
+		input.extra_boxes.clear();
 	}
-	let use_boxes = !input.exif.is_empty() || !input.xmp.is_empty() || !input.jumbf.is_empty();
+	let use_boxes = !input.exif.is_empty() || !input.xmp.is_empty() || !input.jumbf.is_empty() || input.extra_boxes.iter().any(|(_, bytes)| !bytes.is_empty());
 	let use_container = settings.container == Tristate::On || use_boxes;
 
 	let encoder = Encoder::new(settings)?;
@@ -1257,7 +1261,7 @@ fn encode_pixels(settings: &JxlSettings, source: &SourceImage) -> Result<Vec<u8>
 		// an Exif block libjxl recognises, and no box is written for it.
 		let exif = if is_exif(&input.exif) { [&[0_u8; 4][..], &input.exif].concat() } else { Vec::new() };
 		let compress = c_int::from(settings.compress_boxes != Tristate::Off);
-		for (kind, bytes) in [(b"Exif", &exif), (b"xml ", &input.xmp), (b"jumb", &input.jumbf)] {
+		for (kind, bytes) in [(b"Exif", &exif), (b"xml ", &input.xmp), (b"jumb", &input.jumbf)].into_iter().chain(input.extra_boxes.iter().map(|(kind, bytes)| (kind, bytes))) {
 			if !bytes.is_empty() {
 				encoder.check("JxlEncoderAddBox", unsafe { JxlEncoderAddBox(encoder.enc, kind.as_ptr(), bytes.as_ptr(), bytes.len(), compress) })?;
 			}
@@ -1402,9 +1406,9 @@ fn reset_exif_orientation(exif: &mut [u8]) {
 /// orientation undone, spot colours rendered; the data's colour as an enumerated encoding
 /// if libjxl can express it, else as ICC; its Exif (offset stripped, orientation reset), XMP
 /// and JUMBF boxes; and every extra channel past the first alpha with its own description
-/// and name. `None` for what is not matched here — a file of more than one frame (layers or
-/// an animation), a frame smaller than the image, an IPTC or `jhgm` box — or a decode
-/// failure, so the caller falls back to the pixels another decoder gives.
+/// and name; and its IPTC and `jhgm` boxes. `None` for what is not matched here — a file of
+/// more than one frame (layers or an animation), or a frame smaller than the image — or a
+/// decode failure, so the caller falls back to the pixels another decoder gives.
 #[expect(clippy::too_many_lines, reason = "one decode loop, following DecodeImageJXL's")]
 fn decode_like_cjxl(bytes: &[u8]) -> Option<Input> {
 	const SUCCESS: c_int = 0;
@@ -1452,31 +1456,24 @@ fn decode_like_cjxl(bytes: &[u8]) -> Option<Input> {
 	let mut target: OutImage;
 	let mut extra_samples: Vec<Vec<f32>> = Vec::new();
 	let mut preview: Option<Vec<f32>> = None;
-	let (mut exif, mut xmp, mut jumbf) = (Vec::new(), Vec::new(), Vec::new());
-	// The box being read: which of the three, and how much of its buffer is filled.
-	let mut current: Option<(u8, usize)> = None;
-	let finish_box = |current: &mut Option<(u8, usize)>, exif: &mut Vec<u8>, xmp: &mut Vec<u8>, jumbf: &mut Vec<u8>| {
+	// Exif, XMP, JUMBF, IPTC and `jhgm`, as `ppf.metadata` keeps them.
+	let mut boxes: [Vec<u8>; 5] = Default::default();
+	// The box being read: which, and where its current buffer starts.
+	let mut current: Option<(usize, usize)> = None;
+	let finish_box = |current: &mut Option<(usize, usize)>, boxes: &mut [Vec<u8>; 5]| {
 		if let Some((which, filled)) = current.take() {
 			// SAFETY: `dec.0` is live; the buffer was set by `JxlDecoderSetBoxBuffer`.
 			let remaining = unsafe { JxlDecoderReleaseBoxBuffer(dec.0) };
-			let target = match which {
-				0 => exif,
-				1 => xmp,
-				_ => jumbf,
-			};
+			let target = &mut boxes[which];
 			let written = target.len() - filled - remaining;
 			target.truncate(filled + written);
 		}
 	};
-	let more_box = |current: &mut Option<(u8, usize)>, exif: &mut Vec<u8>, xmp: &mut Vec<u8>, jumbf: &mut Vec<u8>| -> Option<()> {
+	let more_box = |current: &mut Option<(usize, usize)>, boxes: &mut [Vec<u8>; 5]| -> Option<()> {
 		let (which, _) = (*current)?;
 		// SAFETY: as above.
 		let remaining = unsafe { JxlDecoderReleaseBoxBuffer(dec.0) };
-		let target = match which {
-			0 => &mut *exif,
-			1 => &mut *xmp,
-			_ => &mut *jumbf,
-		};
+		let target = &mut boxes[which];
 		let filled = target.len() - remaining;
 		target.resize(filled + CHUNK, 0);
 		*current = Some((which, filled));
@@ -1489,7 +1486,7 @@ fn decode_like_cjxl(bytes: &[u8]) -> Option<Input> {
 		match status {
 			SUCCESS => break,
 			BOX => {
-				finish_box(&mut current, &mut exif, &mut xmp, &mut jumbf);
+				finish_box(&mut current, &mut boxes);
 				let mut kind = [0_u8; 4];
 				// SAFETY: `kind` has the four bytes libjxl writes.
 				ok(unsafe { JxlDecoderGetBoxType(dec.0, kind.as_mut_ptr(), JXL_TRUE) })?;
@@ -1497,17 +1494,14 @@ fn decode_like_cjxl(bytes: &[u8]) -> Option<Input> {
 					b"Exif" => Some(0),
 					b"xml " => Some(1),
 					b"jumb" => Some(2),
-					b"iptc" | b"jhgm" => return None,
+					b"iptc" => Some(3),
+					b"jhgm" => Some(4),
 					_ => None,
 				};
 				if let Some(which) = which {
 					// A second box of a kind replaces the first, as cjxl's `BoxProcessor` writes
 					// each from the start of its vector.
-					let target = match which {
-						0 => &mut exif,
-						1 => &mut xmp,
-						_ => &mut jumbf,
-					};
+					let target = &mut boxes[which];
 					target.clear();
 					target.resize(CHUNK, 0);
 					let filled = 0;
@@ -1516,7 +1510,7 @@ fn decode_like_cjxl(bytes: &[u8]) -> Option<Input> {
 					ok(unsafe { JxlDecoderSetBoxBuffer(dec.0, target.as_mut_ptr().add(filled), CHUNK) })?;
 				}
 			}
-			BOX_NEED_MORE_OUTPUT => more_box(&mut current, &mut exif, &mut xmp, &mut jumbf)?,
+			BOX_NEED_MORE_OUTPUT => more_box(&mut current, &mut boxes)?,
 			BASIC_INFO => {
 				// SAFETY: `info` is a valid destination.
 				ok(unsafe { JxlDecoderGetBasicInfo(dec.0, &raw mut info) })?;
@@ -1598,10 +1592,11 @@ fn decode_like_cjxl(bytes: &[u8]) -> Option<Input> {
 			_ => return None,
 		}
 	}
-	finish_box(&mut current, &mut exif, &mut xmp, &mut jumbf);
+	finish_box(&mut current, &mut boxes);
 	if frames != 1 || samples.is_empty() {
 		return None;
 	}
+	let [mut exif, xmp, jumbf, iptc, jhgm] = boxes;
 	// The Exif box's offset, then a TIFF header; anything else is kept as it came.
 	if exif.len() >= 16 {
 		let offset = u32::from_be_bytes([exif[0], exif[1], exif[2], exif[3]]) as usize;
@@ -1612,7 +1607,7 @@ fn decode_like_cjxl(bytes: &[u8]) -> Option<Input> {
 	}
 	let extra_channels = extra.into_iter().zip(extra_samples).map(|((_, info, name), samples)| ExtraChannel { info, name, samples }).collect();
 	let alpha_kind = AlphaKind { exponent_bits: info.alpha_exponent_bits, premultiplied: info.alpha_premultiplied != 0 };
-	Some(Input { width: info.xsize, height: info.ysize, bits_per_sample: info.bits_per_sample, exponent_bits: info.exponent_bits_per_sample, num_color_channels: info.num_color_channels, alpha_bits: info.alpha_bits, samples: Samples::F32(samples), colour: colour?, colour_given: true, colour_hints_ignored: false, intensity_target: info.intensity_target, exif, xmp, jumbf, frame, lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT, alpha_kind, extra_channels, decoded: Some(Decoded { info, frame_name }) })
+	Some(Input { width: info.xsize, height: info.ysize, bits_per_sample: info.bits_per_sample, exponent_bits: info.exponent_bits_per_sample, num_color_channels: info.num_color_channels, alpha_bits: info.alpha_bits, samples: Samples::F32(samples), colour: colour?, colour_given: true, colour_hints_ignored: false, intensity_target: info.intensity_target, exif, xmp, jumbf, frame, lossy_source: false, bit_depth: JXL_BIT_DEPTH_FROM_PIXEL_FORMAT, alpha_kind, extra_channels, decoded: Some(Decoded { info, frame_name }), extra_boxes: vec![(*b"xml ", iptc), (*b"jhgm", jhgm)] })
 }
 
 /// Recompress a JPEG file's bytes into JPEG XL losslessly: `cjxl -j 1`.
