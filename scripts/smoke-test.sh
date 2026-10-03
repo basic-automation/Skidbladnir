@@ -394,6 +394,26 @@ check "reads Y4M input" \
 	 const a=await I.invoke('convert_image', { settings: s, input, outputDirectory: out });
 	 return found[0].format + ' ' + [w, a].map(r => r.outputPath.split(/[\\\\/]/).pop() + ' ' + r.width + 'x' + r.height).join(' ')" "Y4M smoke.webp 20x12 smoke.avif 20x12"
 
+# Raw YUV: a .yuv is offered to the queue by its extension, refused with no size, and read
+# at the size the settings give (cwebp's -s). Odd, so the chroma planes round up.
+"$PY" - "$scratch/raw.yuv" <<'YUV'
+import sys
+w, h = 21, 13
+uv = ((w + 1) // 2) * ((h + 1) // 2)
+open(sys.argv[1], 'wb').write(bytes((x * 9 + y * 5) % 220 + 16 for y in range(h) for x in range(w)) + bytes(128 for _ in range(2 * uv)))
+YUV
+check "reads raw YUV input at the size given" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const input='$(app_path "$scratch/raw.yuv")', out='$(app_path "$scratch/from-netpbm")';
+	 const found=await I.invoke('inspect_dropped_paths', { paths: [input] });
+	 const s=await I.invoke('default_settings');
+	 const unsized=await I.invoke('convert_image', { settings: s, input, outputDirectory: out }).then(() => 'converted', () => 'refused');
+	 s.yuvSize={ width: 21, height: 13 };
+	 const w=await I.invoke('convert_image', { settings: s, input, outputDirectory: out });
+	 s.format='avif';
+	 const a=await I.invoke('convert_image', { settings: s, input, outputDirectory: out });
+	 return found[0].format + ' ' + unsized + ' ' + [w, a].map(r => r.outputPath.split(/[\\\\/]/).pop() + ' ' + r.width + 'x' + r.height).join(' ')" "YUV refused raw.webp 21x13 raw.avif 21x13"
+
 echo
 if [ "$failures" -gt 0 ]; then
 	echo "$failures check(s) failed."
