@@ -1519,6 +1519,26 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
 
 ## Cross-cutting
 
+- [x] **The gpui window is the default** (1.3.0, PR #67, an owner-requested session rather
+      than a routine run): `crates/skidbladnir-gpui`, opened by `src-tauri` through the
+      default `gpui` feature, with the Nuxt webview kept as a fallback (`SKIDBLADNIR_UI=webview`,
+      or automatically when gpui cannot open a window). Every UI change goes into both.
+      <https://github.com/basic-automation/Skidbladnir/pull/67>
+- [x] Something automated opens the gpui window (2026-10-02): `scripts/gpui-smoke.sh` launches
+      it with its debug variables (`SKID_FORMAT`, `SKID_INPUTS`, `SKID_CONVERT`) and a scratch
+      configuration, has it convert a PNG to WebP, AVIF, JPEG XL and HEIC, and checks each
+      file's header on disk and that the process it started is still the one running (the
+      webview fallback relaunches and exits). 4 of 4 on the dev host (Hyprland); forced onto
+      the webview window, all 4 fail.
+- [ ] Run `scripts/gpui-smoke.sh` in CI: the runners have no GPU, so it needs a software
+      Vulkan driver (Mesa's lavapipe) under Xvfb on Linux, and has to be tried on the macOS
+      and Windows runners. Until then it is a dev-host check only.
+- [ ] Accessibility of the gpui window: no screen reader has been run against it (PR #67's
+      "not tested"), and the axe audit (`a11y-audit.sh`) covers only the webview window.
+- [ ] Dragging files onto the gpui window has not been tested (PR #67); `SKID_INPUTS` takes
+      the drop path in code, not a real drag.
+- [ ] The gpui window on macOS and Windows has not been opened by a person (CI builds and
+      tests it; the Windows installer smoke runs the webview window).
 - [x] The saving percentage is computed **once**, in Rust. `savingOf()` is gone from
       `pages/index.vue`; the conversion report and the preview both carry the core's
       `saving_percent`, and the window only formats it (commit 235dbc0 — this box was left

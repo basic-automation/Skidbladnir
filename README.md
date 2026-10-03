@@ -432,6 +432,7 @@ tool to download and no subprocess.
 cargo test --workspace     # includes the encoder-parity tests
 scripts/smoke-test.sh      # drives the webview window: renders, IPC, a real conversion
 scripts/a11y-audit.sh      # axe-core against the live webview window
+scripts/gpui-smoke.sh      # opens the gpui window and converts to every format
 ```
 
 The parity tests compare each encoder with its reference tool and need them built from

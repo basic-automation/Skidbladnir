@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Open the gpui window — the default one since 1.3.0 — and have it convert a file to every
+# format, end to end, checking each result on disk.
+#
+# WHY THIS EXISTS
+# ---------------
+# scripts/smoke-test.sh drives the webview window over WebDriver, and there is no WebDriver
+# for gpui, so until this script nothing automated opened the window most people get. It
+# drives the window through its debug variables instead (crates/skidbladnir-gpui/src/app.rs,
+# `debug_state`): SKID_FORMAT picks the format, SKID_INPUTS queues a file as a drop would,
+# SKID_CONVERT presses Convert. The output directory comes from a preferences file written
+# into a scratch configuration directory, so the user's own settings are never read or
+# written.
+#
+# It also checks that the gpui window is what ran: when gpui cannot open a window, the app
+# relaunches itself as the webview window (SKIDBLADNIR_UI=webview) and exits, so the process
+# this script started must still be running when the converted file appears.
+#
+# USAGE
+#   cargo build --release -p skidbladnir      # or cargo tauri build --no-bundle
+#   scripts/gpui-smoke.sh [--app <binary>]
+#
+# Needs a display (Wayland or X11) and a GPU driver gpui can use. A bare binary built outside
+# a bundle needs libheif beside it (build/libheif/lib/libheif.so.1), as the installers ship it.
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+app="$root/target/release/skidbladnir"
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--app) app="$2"; shift 2;;
+		*) echo "unknown argument: $1" >&2; exit 2;;
+	esac
+done
+[ -x "$app" ] || { echo "no app at $app: build it first, or pass --app" >&2; exit 2; }
+app=$(cd "$(dirname "$app")" && pwd)/$(basename "$app")
+
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/skidbladnir-gpui-smoke.XXXXXX")
+pid=
+cleanup() {
+	[ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+	rm -rf "$scratch"
+}
+trap cleanup EXIT
+mkdir -p "$scratch/config/com.basicautomation.skidbladnir" "$scratch/data" "$scratch/out"
+printf '{"settings":{},"outputDirectory":"%s"}\n' "$scratch/out" > "$scratch/config/com.basicautomation.skidbladnir/preferences.json"
+
+# A 40x30 RGBA PNG with a gradient and a transparent band.
+python3 - "$scratch/input.png" <<'PNG'
+import struct, sys, zlib
+w, h = 40, 30
+raw = b''.join(b'\0' + bytes(v for x in range(w) for v in (x * 6, y * 8, 128, 0 if 10 <= y < 15 else 255)) for y in range(h))
+chunk = lambda kind, data: struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+open(sys.argv[1], 'wb').write(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 6, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b''))
+PNG
+
+failures=0
+for format in webp avif jxl heic; do
+	output="$scratch/out/input.$format"
+	XDG_CONFIG_HOME="$scratch/config" XDG_DATA_HOME="$scratch/data" SKID_FORMAT="$format" SKID_INPUTS="$scratch/input.png" SKID_CONVERT=1 "$app" > "$scratch/$format.log" 2>&1 &
+	pid=$!
+	written=
+	for _ in $(seq 1 300); do
+		if [ -s "$output" ] && ! ls "$scratch/out"/.skidbladnir-* >/dev/null 2>&1; then written=1; break; fi
+		kill -0 "$pid" 2>/dev/null || break
+		sleep 0.1
+	done
+	alive=$(kill -0 "$pid" 2>/dev/null && echo yes || echo no)
+	kill "$pid" 2>/dev/null || true
+	wait "$pid" 2>/dev/null || true
+	pid=
+	magic_ok=$(python3 - "$output" "$format" <<'MAGIC'
+import sys
+try:
+    head = open(sys.argv[1], 'rb').read(16)
+except OSError:
+    head = b''
+ok = {'webp': head[:4] == b'RIFF' and head[8:12] == b'WEBP', 'avif': head[4:12] == b'ftypavif', 'jxl': head[:2] == b'\xff\x0a' or head[4:8] == b'JXL ', 'heic': head[4:12] == b'ftypheic'}[sys.argv[2]]
+print('yes' if ok else 'no')
+MAGIC
+)
+	if [ -n "$written" ] && [ "$alive" = yes ] && [ "$magic_ok" = yes ]; then
+		echo "ok   the gpui window converts to $format ($(wc -c < "$output") bytes)"
+	else
+		echo "FAIL the gpui window converts to $format: written=${written:-no} started-process-alive=$alive header-ok=$magic_ok"
+		sed 's/^/       /' "$scratch/$format.log" | tail -n 5
+		failures=$((failures + 1))
+	fi
+done
+
+echo
+if [ "$failures" -gt 0 ]; then
+	echo "$failures check(s) failed."
+	exit 1
+fi
+echo "all checks passed"
