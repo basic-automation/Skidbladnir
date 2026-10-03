@@ -1421,6 +1421,27 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       the frame. 15 more cases in `matches_cjxl_through_exr` (RGBA with a float depth and a
       half mask, gray with a depth, two layers with the second as extras), 149 in all;
       leaving out the names, or the channels, fails all 15.
+- [x] JPEG XL to JPEG XL, as `cjxl` converts it (2026-10-02): `cjxl` decodes a `.jxl`
+      input with libjxl (`DecodeImageJXL`, `coalescing=false`), and so does Skidbladnir now
+      (`jxl::decode_like_cjxl`, the decoder already linked): float samples at the
+      codestream's depth through an image callback (as `use_image_callback` has it), alpha
+      kept premultiplied or not as coded, orientation undone and the Exif box's offset
+      stripped and orientation reset (`ResetExifOrientation`), XMP and JUMBF, the data's
+      colour as an encoding or else ICC, every extra channel past the first alpha with its
+      own description and name, and the decoder's basic info and frame header (with its
+      name) handed to the encoder as `cjxl` hands `ppf.info` over. Gate
+      `matches_cjxl_from_jpeg_xl`: 124 cases over six sources `cjxl` wrote (lossless and
+      lossy RGBA, 16-bit gray, Exif orientation 6 with XMP, float from PFM, EXR with extra
+      channels; the option surface and every hint on the first), 122 byte for byte and 2
+      that both refuse. Mutations: no orientation reset fails 6; ICC for every colour, 20.
+- [ ] JPEG XL to JPEG XL, the rest: a **lossy source made lossless** differs from `cjxl`'s in
+      2 of 9,216 samples by one level (seen on the dev host; the decoded floats round the
+      other way). The decode path is the same, so the likely cause is libjxl's float maths on
+      a different SIMD target in the two builds (the reference `cjxl` reports AVX2), not
+      verified; check whether CI's runners, or building the reference with the same
+      Highway targets, make it match. Also not matched yet: several frames or layers
+      (animation, deferred with the multi-image work), a cropped layer, IPTC and `jhgm`
+      boxes — each converted from its pixels instead.
 - [ ] HTJ2K-compressed EXR: the `exr` crate cannot decompress it (`compression/mod.rs`
       returns "yet unimplemented compression method").
 - [ ] Animated GIF and APNG into `cjxl` (with the multi-image work below).

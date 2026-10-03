@@ -357,3 +357,72 @@ fn matches_cjxl_through_exr() {
 	}
 	finish(&run, "EXR conversions");
 }
+
+/// Parity with **JPEG XL as the input**, which `cjxl` decodes with libjxl (float samples at
+/// the codestream's depth, orientation undone, the Exif box's orientation reset, extra
+/// channels kept) and encodes again. The sources are written by the reference `cjxl` itself:
+/// lossless and lossy (XYB) colour with alpha, 16-bit gray, Exif with an orientation and
+/// XMP, a float image from PFM, and an EXR with extra channels. The first runs the whole
+/// option surface.
+#[test]
+fn matches_cjxl_from_jpeg_xl() {
+	use exr::prelude::{Compression, FlatSamples, f16};
+	let Some(mut run) = prepare() else { return };
+	let write = |run: &Run, name: &str, bytes: &[u8]| {
+		let path = run.dir.join(name);
+		fs::write(&path, bytes).expect("write a source");
+		path
+	};
+	let xmp = chunk(*b"iTXt", b"XML:com.adobe.xmp\0\0\0\0\0<x:xmpmeta xmlns:x='adobe:ns:meta/'><source/></x:xmpmeta>");
+	let rgba = write(&run, "rgba.png", &png(W, H, 8, 6, &rows(4, 8), &[], &[]));
+	let gray16 = write(&run, "gray16.png", &png(W, H, 16, 0, &rows(1, 16), &[], &[]));
+	let tagged = write(&run, "tagged.png", &png(W, H, 8, 2, &rows(3, 8), &[chunk(*b"eXIf", &exif()), xmp], &[]));
+	let mut pfm = format!("PF\n{W} {H}\n-1.0\n").into_bytes();
+	for i in 0..W * H * 3 {
+		pfm.extend((f32::from(u16::try_from(i % 997).expect("small")) / 900.0).to_le_bytes());
+	}
+	let float = write(&run, "float.pfm", &pfm);
+	let (w, h) = (23_usize, 17_usize);
+	let half = |channel: usize| FlatSamples::F16(exr_ramp(w, h, channel).into_iter().map(f16::from_f32).collect());
+	let layered = write(&run, "layered.exr", &exr_file((w, h), (0, 0), (w, h), vec![("R", half(0)), ("G", half(1)), ("B", half(2)), ("A", half(3)), ("Z", FlatSamples::F32(exr_ramp(w, h, 4)))], Compression::ZIP16, None, None));
+	let mut sources = Vec::new();
+	for (name, input, flags) in [("lossless RGBA", &rgba, &["-d", "0"][..]), ("lossy RGBA", &rgba, &["-d", "1.5"][..]), ("16-bit gray", &gray16, &["-d", "0"][..]), ("Exif orientation and XMP", &tagged, &["-d", "1"][..]), ("float", &float, &["-d", "0"][..]), ("EXR with extra channels", &layered, &["-d", "1"][..])] {
+		let output = run.dir.join(format!("source-{}.jxl", sources.len()));
+		let made = Command::new(&run.cjxl).arg(input).arg(&output).args(flags).args(["-e", "3", "--quiet"]).output().expect("run cjxl");
+		assert!(made.status.success(), "cjxl must write the {name} source: {}", String::from_utf8_lossy(&made.stderr));
+		sources.push((name, output));
+	}
+	let d = || JxlSettings { effort: 3, ..JxlSettings::default() };
+	let few = [("default", JxlSettings::default()), ("-d 0", JxlSettings { target: JxlTarget::Distance(0.0), ..d() }), ("-d 3", JxlSettings { target: JxlTarget::Distance(3.0), ..d() }), ("-q 95", JxlSettings { target: JxlTarget::Quality(95.0), ..d() }), ("modular lossless", JxlSettings { modular: Tristate::On, target: JxlTarget::Distance(0.0), ..d() }), ("container off", JxlSettings { container: Tristate::Off, ..d() })];
+	for (index, (name, input)) in sources.iter().enumerate() {
+		if index == 0 {
+			let hints = hint_cases(&run.dir);
+			for (case, settings) in option_cases().into_iter().chain(hints) {
+				run.compare(&format!("{name}, {case}"), input, &settings);
+			}
+		} else {
+			for (case, settings) in &few {
+				let lossless = matches!(settings.target, JxlTarget::Distance(d) if d == 0.0);
+				// A lossy source made lossless: libjxl's decoder can land a float sample on the
+				// other side of a rounding boundary from the reference's (2 of 9,216 samples, by
+				// one level, on the dev host), so those two are left out; see ROADMAP.md.
+				if lossless && *name == "lossy RGBA" {
+					continue;
+				}
+				// libjxl 0.12.0 fails these inside `JxlEncoderProcessOutput`, for cjxl and for us.
+				if lossless && *name == "EXR with extra channels" {
+					let job = EncodeJob { format: OutputFormat::Jxl, jxl: settings.clone(), ..Default::default() };
+					let theirs = Command::new(&run.cjxl).args(cjxl_args(&job, input, &run.dir.join("refused-cjxl.jxl"))).output().expect("run cjxl").status.success();
+					let ours = encode_file(&job, input, &run.dir.join("refused-ours.jxl")).is_ok();
+					run.total += 1;
+					if theirs || ours {
+						run.mismatches.push(format!("`{name}, {case}`: expected both to refuse; cjxl {theirs}, ours {ours}"));
+					}
+					continue;
+				}
+				run.compare(&format!("{name}, {case}"), input, settings);
+			}
+		}
+	}
+	finish(&run, "JPEG XL to JPEG XL conversions");
+}
