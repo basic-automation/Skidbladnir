@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Open the gpui window — the default one since 1.3.0 — and have it convert a file to every
-# format, end to end, checking each result on disk.
+# Open the gpui window — the default one since 1.3.0 — and have it convert a PNG to every
+# format, and a raw YUV file at the size its settings give, checking each result on disk.
 #
 # WHY THIS EXISTS
 # ---------------
@@ -52,7 +52,8 @@ cleanup() {
 }
 trap cleanup EXIT
 mkdir -p "$scratch/config/com.basicautomation.skidbladnir" "$scratch/data" "$scratch/out"
-printf '{"settings":{},"outputDirectory":"%s"}\n' "$scratch/out" > "$scratch/config/com.basicautomation.skidbladnir/preferences.json"
+# The size a raw .yuv input is read at (cwebp's -s), for the raw YUV check below.
+printf '{"settings":{"yuvSize":{"width":21,"height":13}},"outputDirectory":"%s"}\n' "$scratch/out" > "$scratch/config/com.basicautomation.skidbladnir/preferences.json"
 
 # A 40x30 RGBA PNG with a gradient and a transparent band.
 python3 - "$scratch/input.png" <<'PNG'
@@ -63,10 +64,20 @@ chunk = lambda kind, data: struct.pack('>I', len(data)) + kind + data + struct.p
 open(sys.argv[1], 'wb').write(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 6, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b''))
 PNG
 
+# Raw I420 planes, 21x13 (odd, so the chroma planes round up), which only the size above
+# makes readable.
+python3 - "$scratch/raw.yuv" <<'YUV'
+import sys
+w, h = 21, 13
+uv = ((w + 1) // 2) * ((h + 1) // 2)
+open(sys.argv[1], 'wb').write(bytes((x * 9 + y * 5) % 220 + 16 for y in range(h) for x in range(w)) + bytes(128 for _ in range(2 * uv)))
+YUV
+
 failures=0
-for format in webp avif jxl heic; do
-	output="$scratch/out/input.$format"
-	XDG_CONFIG_HOME="$scratch/config" XDG_DATA_HOME="$scratch/data" SKID_FORMAT="$format" SKID_INPUTS="$scratch/input.png" SKID_CONVERT=1 "$app" > "$scratch/$format.log" 2>&1 &
+for job in input.png:webp input.png:avif input.png:jxl input.png:heic raw.yuv:webp; do
+	input="${job%%:*}" format="${job##*:}"
+	output="$scratch/out/${input%.*}.$format"
+	XDG_CONFIG_HOME="$scratch/config" XDG_DATA_HOME="$scratch/data" SKID_FORMAT="$format" SKID_INPUTS="$scratch/$input" SKID_CONVERT=1 "$app" > "$scratch/$input.$format.log" 2>&1 &
 	pid=$!
 	written=
 	for _ in $(seq 1 300); do
@@ -89,10 +100,10 @@ print('yes' if ok else 'no')
 MAGIC
 )
 	if [ -n "$written" ] && [ "$alive" = yes ] && [ "$magic_ok" = yes ]; then
-		echo "ok   the gpui window converts to $format ($(wc -c < "$output") bytes)"
+		echo "ok   the gpui window converts $input to $format ($(wc -c < "$output") bytes)"
 	else
-		echo "FAIL the gpui window converts to $format: written=${written:-no} started-process-alive=$alive header-ok=$magic_ok"
-		sed 's/^/       /' "$scratch/$format.log" | tail -n 5
+		echo "FAIL the gpui window converts $input to $format: written=${written:-no} started-process-alive=$alive header-ok=$magic_ok"
+		sed 's/^/       /' "$scratch/$input.$format.log" | tail -n 5
 		failures=$((failures + 1))
 	fi
 done

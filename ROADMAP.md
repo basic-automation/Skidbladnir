@@ -1528,10 +1528,10 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       <https://github.com/basic-automation/Skidbladnir/pull/67>
 - [x] Something automated opens the gpui window (2026-10-02): `scripts/gpui-smoke.sh` launches
       it with its debug variables (`SKID_FORMAT`, `SKID_INPUTS`, `SKID_CONVERT`) and a scratch
-      configuration, has it convert a PNG to WebP, AVIF, JPEG XL and HEIC, and checks each
-      file's header on disk and that the process it started is still the one running (the
-      webview fallback relaunches and exits). 4 of 4 on the dev host (Hyprland); forced onto
-      the webview window, all 4 fail.
+      configuration, has it convert a PNG to WebP, AVIF, JPEG XL and HEIC and a raw `.yuv` at
+      the size its settings give, and checks each file's header on disk and that the process
+      it started is still the one running (the webview fallback relaunches and exits). 5 of 5
+      on the dev host (Hyprland); forced onto the webview window, every one fails.
 - [ ] Run `scripts/gpui-smoke.sh` in CI: the runners have no GPU, so it needs a software
       Vulkan driver (Mesa's lavapipe) under Xvfb on Linux, and has to be tried on the macOS
       and Windows runners. Until then it is a dev-host check only.
