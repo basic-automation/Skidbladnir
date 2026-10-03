@@ -821,6 +821,9 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       files open in Safari, and in Firefox and Chrome as each enables it" gap to what is
       actually shipped, and re-check Firefox's status the same way.
       <https://jpegxl.com/news/>
+      Re-checked 2026-10-02: jpegxl.com's newest news is still that 25 September post;
+      Chrome's stable channel is 154, and Chromium's schedule puts 155 stable on 6 October
+      2026. <https://chromiumdash.appspot.com/fetch_milestone_schedule?mstone=155>
 - [x] **JPEG XL is close to its trigger — prepare, do not build yet.** *Superseded:* the
       owner asked for JPEG XL ahead of Chrome, and it shipped in 0.10.0 on libjxl (see
       "JPEG XL output and input" below), with `cjxl`'s whole surface since 0.14.0. Mozilla announced
@@ -1507,10 +1510,23 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       editions' notices (2026-10-01). Texts the packages lack are in
       `LICENSES/third-party/` with their sources; the generator refuses to run if
       `frontend/package.json`'s icon collections differ from the ones it describes.
-- [ ] Notices for the rest of what the installers carry: the Rust crates (`cargo-about`),
-      the JavaScript libraries in the frontend bundle (Vue, Nuxt, Nuxt UI, Reka UI and
-      their dependencies, mostly MIT), and the Ubuntu libraries inside the AppImage. Check
-      them in CI beside `third-party-notices.py --check`.
+- [x] Notices for the Rust crates (2026-10-02): `cargo-about` 0.9.2 (`about.toml`,
+      `about.hbs`) lists the 700-odd crates compiled into the app on any of the five
+      platforms it is built for (no build or dev dependencies, not Skidbladnir's own),
+      grouped by licence text, into `LICENSES/third-party/rust-crates.md`, which
+      `third-party-notices.py` appends to both editions' notices. CI's `deny` job installs
+      the same cargo-about and fails if the listing is stale. MIT is preferred where a
+      crate offers a choice: Apache-2.0 first came out larger (918 KB against 550 KB),
+      because crates' copies of the Apache text differ in their whitespace.
+- [ ] Notices for the rest of what the installers carry: the JavaScript libraries in the
+      webview window's bundle (Vue, Nuxt, Nuxt UI, Reka UI and their dependencies, mostly
+      MIT) and the Ubuntu libraries inside the AppImage. Check them in CI beside
+      `third-party-notices.py --check`.
+- [ ] Dependabot's cargo PRs now fail CI's Rust-crates notices check until someone
+      regenerates `LICENSES/third-party/rust-crates.md` and the notices on the PR branch
+      (that check is the point: a new crate's licence must reach the notices). A workflow
+      that regenerates and pushes them for Dependabot's branches would save the manual
+      step; it needs a token that can push to them, so it is a security decision.
 - [ ] Two Dependabot alerts with no clean fix (2026-10-01): `glib` 0.18 (unsound
       `VariantStrIter`, fixed in 0.20) comes with Tauri 2's GTK 3 bindings, and `esbuild`
       0.27 (a Windows dev-server file read, fixed in 0.28.1) is pinned `^0.27` by

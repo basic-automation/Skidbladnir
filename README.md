@@ -526,7 +526,7 @@ may replace with your own build. The GPL edition's builds include x265, so each 
 is distributed as a whole under the GNU GPL, version 3 or later
 ([LICENSES/GPL-3.0.txt](LICENSES/GPL-3.0.txt)); see [Editions](#editions).
 
-The native libraries each edition ships, and their licences, are listed in
-[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) and
+The native libraries each edition ships and the Rust crates compiled into it, with their
+licences, are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) and
 [THIRD-PARTY-NOTICES-GPL.md](THIRD-PARTY-NOTICES-GPL.md), and every installer carries its
 own edition's copy with its licence texts.

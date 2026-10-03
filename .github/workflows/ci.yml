@@ -68,8 +68,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny
+          # cargo-about pinned: another version may word the same licences differently.
+          tool: cargo-deny,cargo-about@0.9.2
       - run: cargo deny check
+      - name: Rust crates' notices are current
+        # LICENSES/third-party/rust-crates.md is cargo-about's listing of the crates compiled
+        # into the app (about.toml); a Cargo.lock change without regenerating it fails here.
+        run: |
+          cargo about generate --locked --fail about.hbs -o "$RUNNER_TEMP/rust-crates.md"
+          diff -u LICENSES/third-party/rust-crates.md "$RUNNER_TEMP/rust-crates.md" > "$RUNNER_TEMP/rust-crates.diff" || { head -n 50 "$RUNNER_TEMP/rust-crates.diff"; echo "::error::LICENSES/third-party/rust-crates.md is stale: run cargo about generate --locked --fail about.hbs -o LICENSES/third-party/rust-crates.md, then scripts/third-party-notices.py"; exit 1; }
       - name: Third-party notices are current
         # THIRD-PARTY-NOTICES.md and THIRD-PARTY-NOTICES-GPL.md are generated from the
         # licence files of the exact native sources that are built; bumping one without
