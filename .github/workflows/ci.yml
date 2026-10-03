@@ -400,6 +400,47 @@ jobs:
           path: screenshots/*.png
           if-no-files-found: error
 
+  # A first slice of byte parity on Windows: cwebp built there with CMake and MSVC, against
+  # the libwebp this crate builds there. cwebp would read PNG, JPEG and TIFF through WIC on
+  # Windows, a different decoder from the ones the other gates match, so WIC is switched
+  # off and only the gates that never hand cwebp those formats run: the PAM control
+  # surface, the cwebp-defaults reset, WebP sources and raw YUV. Not yet a gate (ROADMAP.md,
+  # Phase 8).
+  parity-windows:
+    name: parity with cwebp / windows (first slice)
+    runs-on: windows-2022
+    timeout-minutes: 60
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: Install nasm
+        uses: ilammy/setup-nasm@v1
+
+      - name: Build libheif (standard edition)
+        uses: ./.github/actions/libheif
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the reference cwebp, without WIC
+        run: |
+          cmake -S third_party/libwebp -B "$RUNNER_TEMP/libwebp" -DBUILD_SHARED_LIBS=OFF -DHAVE_WINCODEC_H=0 -DWEBP_BUILD_CWEBP=ON -DWEBP_BUILD_DWEBP=OFF -DWEBP_BUILD_GIF2WEBP=OFF -DWEBP_BUILD_IMG2WEBP=OFF -DWEBP_BUILD_VWEBP=OFF -DWEBP_BUILD_WEBPINFO=OFF -DWEBP_BUILD_WEBPMUX=OFF -DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_EXTRAS=OFF
+          cmake --build "$RUNNER_TEMP/libwebp" --config Release --target cwebp
+          cwebp=$(find "$RUNNER_TEMP/libwebp" -iname cwebp.exe | head -1)
+          "$cwebp" -version
+          echo "SKIDBLADNIR_REFERENCE_CWEBP=$(cygpath -m "$cwebp")" >> "$GITHUB_ENV"
+          echo "SKIDBLADNIR_REQUIRE_PARITY=1" >> "$GITHUB_ENV"
+
+      - name: byte parity with cwebp, for what it reads without WIC
+        run: cargo test --release --package skidbladnir-encode --test parity -- matches_reference_cwebp_across_the_whole_control_surface cwebps_defaults_are_a_bare_cwebp matches_reference_cwebp_through_a_webp_file matches_reference_cwebp_through_raw_yuv --nocapture
+
   # The same smoke test, on Windows. This is the only place the Windows build is
   # LAUNCHED rather than just compiled: the dev host cannot run it, and nobody had
   # opened a Windows build before this job existed. The Electron app is Windows-only,

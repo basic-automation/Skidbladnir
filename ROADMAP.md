@@ -1493,6 +1493,9 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       with `-DHAVE_WINCODEC_H=0` (the check is skipped when the variable is set) and run only
       the gates that never hand cwebp a PNG, JPEG or TIFF — the PAM control surface, the
       cwebp-defaults reset, WebP and PNM sources, raw YUV — as a Windows parity leg.
+      Wired in as CI's `parity-windows` job (the four `tests/parity.rs` gates of that kind;
+      `continue-on-error` until it has passed there). Next: the PNM gate, then libpng,
+      libjpeg-turbo and libtiff for cwebp on Windows, then the other tools.
 
 **Multi-image features the tools have, deferred by the owner (2026-09-28):**
 
