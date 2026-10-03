@@ -197,6 +197,28 @@ fn controls_without_an_img2webp_flag_reach_the_frames() {
 	}
 }
 
+/// A frame change applies from its frame and only from there, in either keyframe spacing
+/// (the GIF route, which has no reference with these options, included), and its duration
+/// reaches the timeline; one past the last frame changes nothing.
+#[test]
+fn frame_changes_apply_from_their_frame() {
+	let animation = fixture(0);
+	let lossy = WebpSettings { lossless: false, ..WebpSettings::default() };
+	let with_changes = |frame_changes: Vec<FrameChange>| WebpSettings { animation: WebpAnimation { frame_changes, ..WebpAnimation::default() }, ..lossy.clone() };
+	for keyframes in [animation::Keyframes::Libwebp, animation::Keyframes::Gif] {
+		let run = |settings: &WebpSettings| animation::encode_with(settings, Resize::default(), &animation, keyframes, &mut |_| true).expect("encode");
+		let plain = run(&lossy);
+		assert_eq!(run(&with_changes(vec![FrameChange { from_frame: 9, quality: Some(5.0), ..FrameChange::default() }])), plain, "{keyframes:?}: past the last frame");
+		assert_ne!(run(&with_changes(vec![FrameChange { from_frame: 3, quality: Some(5.0), ..FrameChange::default() }])), plain, "{keyframes:?}: from frame 3");
+		let slower = animation::decode(&run(&with_changes(vec![FrameChange { from_frame: 2, duration: Some(500), ..FrameChange::default() }]))).expect("decode");
+		let durations: Vec<u32> = slower.frames.iter().map(|frame| frame.duration_ms).collect();
+		assert_eq!(durations, vec![70, 500, 500, 500], "{keyframes:?}");
+	}
+	assert!(with_changes(vec![FrameChange { from_frame: 0, ..FrameChange::default() }]).validate().is_err(), "frames count from 1");
+	assert!(with_changes(vec![FrameChange { from_frame: 1, method: Some(7), ..FrameChange::default() }]).validate().is_err());
+	assert!(with_changes(vec![FrameChange { from_frame: 1, quality: Some(f32::NAN), ..FrameChange::default() }]).validate().is_err());
+}
+
 fn reference_img2webp() -> Option<PathBuf> {
 	if let Some(path) = env::var_os("SKIDBLADNIR_REFERENCE_IMG2WEBP") {
 		let path = PathBuf::from(path);
