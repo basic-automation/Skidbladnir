@@ -1486,7 +1486,13 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       parallel tests shared and deleted one directory; a counter replaced it. Every gate
       then passed on macOS in CI run 36956355147.
 - [ ] Parity on Windows: the reference tools would have to build there (`makefile.unix`
-      does not; CMake might).
+      does not; CMake might). A first slice, sized 2026-10-02 from libwebp's sources:
+      libwebp's CMake builds `cwebp` with MSVC, but on Windows it reads PNG, JPEG and TIFF
+      through WIC whenever `wincodec.h` is found (`cmake/deps.cmake`, `HAVE_WINCODEC_H`), a
+      different decoder from the libpng/libjpeg-turbo/libtiff the gates match. So: configure
+      with `-DHAVE_WINCODEC_H=0` (the check is skipped when the variable is set) and run only
+      the gates that never hand cwebp a PNG, JPEG or TIFF — the PAM control surface, the
+      cwebp-defaults reset, WebP and PNM sources, raw YUV — as a Windows parity leg.
 
 **Multi-image features the tools have, deferred by the owner (2026-09-28):**
 
