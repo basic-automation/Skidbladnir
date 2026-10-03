@@ -33,6 +33,14 @@ export interface EncodeJob {
 	heic: HeicSettings
 	/** Read a TIFF's alpha as cwebp (WebP) or heif-enc (HEIC) does, rather than correctly. */
 	tiffAlphaLikeReference: boolean
+	/** The size a `.yuv` input (raw I420) is read at, as cwebp's -s; null when none is given. */
+	yuvSize: RawSize | null
+}
+
+/** A width and height in pixels. */
+export interface RawSize {
+	width: number
+	height: number
 }
 
 /**

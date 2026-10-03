@@ -1382,9 +1382,19 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       **Gate:** `matches_cjxl_reading_pgx` 16 of 16 (8- and 16-bit, both byte orders, CRLF,
       the optional space; four settings), the 12-bit file checked to be read right and to
       differ from `cjxl`, and both refusals. Mutation: the generic route fails 16 of 16.
+- [x] Raw YUV input, as `cwebp -s` reads it (2026-10-02): a `.yuv` file (known by its
+      extension; raw planes have no signature) is 8-bit I420 at `EncodeJob::yuv_size`,
+      set under "Raw YUV input" in both windows. Into WebP the planes go straight into a
+      YUV picture, as `ReadYUV` puts them, and through libwebp's own YUV-to-ARGB on the
+      paths that need it; the other formats get that RGB. Parity gate
+      `matches_reference_cwebp_through_raw_yuv`: 138 of 138 settings byte for byte on a
+      67x49 fixture (odd, so the chroma planes round up); with the planes sent through
+      RGB instead, 77 diverge. A wrong length and a missing size are refused, as `cwebp`
+      refuses them.
 - [ ] More input formats the tools read: animated GIF and APNG into `cjxl` (with the
-      multi-image work below), EXR (`cjxl`, needs OpenEXR), and raw pixels
-      (`heif-enc --raw`, `cwebp -s`, which need the size given in the window).
+      multi-image work below), EXR (`cjxl`, needs OpenEXR), and `heif-enc --raw`
+      (one channel of samples, `--raw-type` uint8 to float64, at `--raw-width`/`--raw-height`;
+      `heifio/decoder_raw.cc`).
 - [x] Animated WebP's own options as controls (2026-10-01): `-mixed`, `-min_size`,
       `-kmin`/`-kmax`, `img2webp -loop` and `gif2webp -loop_compatibility`
       (`WebpAnimation`). Found on the way: under `-mixed` the encoder still reads the

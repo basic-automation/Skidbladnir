@@ -769,6 +769,70 @@ fn matches_reference_cwebp_through_a_webp_file() {
 	eprintln!("WEBP-SOURCE PARITY OK: {total} WebP-to-WebP conversions ({} sources x {} settings) matched the reference cwebp byte for byte.", sources.len(), cases.len());
 }
 
+/// Parity through **raw YUV** (`cwebp -s W H`), across the whole control surface: bare
+/// I420 planes with no header, which cwebp puts straight into a YUV picture, converting
+/// them to ARGB itself on the paths that need it (lossless, sharp YUV, crop, resize). The
+/// fixture is an odd size, so the half-size chroma planes round up.
+#[test]
+fn matches_reference_cwebp_through_raw_yuv() {
+	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
+	let Some(cwebp) = reference_cwebp().filter(|cwebp| reference_version(cwebp) == Some(skidbladnir_encode::encoder::linked_encoder_version())) else {
+		let message = "RAW-YUV PARITY NOT RUN: no version-matched reference cwebp.";
+		assert!(!require, "{message}");
+		eprintln!("{message}");
+		return;
+	};
+
+	let (width, height) = (67_u32, 49_u32);
+	let (uv_width, uv_height) = (width.div_ceil(2), height.div_ceil(2));
+	let mut planes = Vec::new();
+	for y in 0..height {
+		planes.extend((0..width).map(|x| u8::try_from((x * 13 + y * 7) % 220 + 16).expect("under 256")));
+	}
+	for shift in [0_u32, 40] {
+		for y in 0..uv_height {
+			planes.extend((0..uv_width).map(|x| u8::try_from((x * 7 + y * 3 + shift) % 224 + 16).expect("under 256")));
+		}
+	}
+	let dir = env::temp_dir().join(format!("skidbladnir-parity-yuv-{}", std::process::id()));
+	fs::create_dir_all(&dir).expect("create the scratch directory");
+	let input = dir.join("planes.yuv");
+	fs::write(&input, &planes).expect("write the planes");
+	let size = Some(skidbladnir_encode::settings::RawSize { width, height });
+
+	let mut mismatches: Vec<String> = Vec::new();
+	let cases = cases();
+	for (index, (name, settings)) in cases.iter().enumerate() {
+		let settings = EncodeJob { yuv_size: size, ..settings.clone() };
+		let theirs_path = dir.join(format!("cwebp-{index}.webp"));
+		let args = cwebp_args(&settings, &input, &theirs_path);
+		let run = Command::new(&cwebp).args(&args).output().expect("run the reference cwebp");
+		assert!(run.status.success(), "reference cwebp failed for `{name}`: {}", String::from_utf8_lossy(&run.stderr));
+		let expected = fs::read(&theirs_path).expect("read the reference output");
+		let ours_path = dir.join(format!("ours-{index}.webp"));
+		skidbladnir_encode::source::encode_file(&settings, &input, &ours_path).unwrap_or_else(|error| panic!("`{name}`: our pipeline failed: {error}"));
+		let actual = fs::read(&ours_path).expect("read our output");
+		if actual != expected {
+			mismatches.push(format!("`{name}`: ours {} bytes, cwebp {} bytes\n    cwebp {}", actual.len(), expected.len(), args.iter().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>().join(" ")));
+		}
+	}
+
+	// A length that is not the size's I420 planes is refused by both, and so is a .yuv with
+	// no size at all, which cwebp would try to read as an image and fail on.
+	let short = dir.join("short.yuv");
+	fs::write(&short, &planes[..planes.len() - 1]).expect("write");
+	let job = EncodeJob { yuv_size: size, ..EncodeJob::default() };
+	assert!(!Command::new(&cwebp).args(cwebp_args(&job, &short, &dir.join("short-cwebp.webp"))).output().expect("run cwebp").status.success(), "cwebp refuses a short file");
+	let error = skidbladnir_encode::source::encode_file(&job, &short, &dir.join("short-ours.webp")).expect_err("so do we");
+	assert!(error.to_string().contains("bytes"), "{error}");
+	let error = skidbladnir_encode::source::encode_file(&EncodeJob::default(), &input, &dir.join("unsized.webp")).expect_err("no size");
+	assert!(error.to_string().contains("Raw YUV"), "{error}");
+
+	let _ = fs::remove_dir_all(&dir);
+	assert!(mismatches.is_empty(), "{} of {} raw YUV conversions diverged from cwebp -s:\n  {}", mismatches.len(), cases.len(), mismatches.join("\n  "));
+	eprintln!("RAW-YUV PARITY OK: {} raw YUV conversions matched the reference cwebp -s byte for byte.", cases.len());
+}
+
 /// Parity through a **JPEG file**, across the whole control surface: JPEG to WebP is the
 /// conversion most people make.
 ///

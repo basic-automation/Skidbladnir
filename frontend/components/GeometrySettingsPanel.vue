@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The crop and resize every output format shares, in cwebp's order: crop the source, then
 // resize what is left. -resize_mode decides whether the resize applies to this image. And how
-// a TIFF's alpha is read, which also applies to every format.
+// a TIFF's alpha and a raw YUV file are read, which also apply to every format.
 import { computed } from 'vue'
 import type { EncodeJob, ResizeMode } from '~/composables/useSettings'
 
@@ -32,6 +32,17 @@ const MODES: { label: string, value: ResizeMode }[] = [{ label: 'Always', value:
 				<ControlNumber v-model="job.resize.height" label="Height" :min="0" unit="px" help="-resize h · 0 derives it from the width; both 0 is no resize" />
 				<ControlChoice v-model="job.resize.mode" label="When" :items="MODES" help="-resize_mode · always, down_only or up_only" />
 			</div>
+		</ControlPanel>
+
+		<ControlPanel title="Raw YUV input">
+			<ControlOptional v-model="job.yuvSize" label="Read .yuv files as raw I420" :fallback="{ width: 1920, height: 1080 }" unset="-s · not given: a .yuv file cannot be read">
+				<template #default="{ value }">
+					<div class="grid grid-cols-4 gap-2">
+						<ControlNumber v-model="value.width" label="Width" :min="1" :max="16383" unit="px" help="-s w" />
+						<ControlNumber v-model="value.height" label="Height" :min="1" :max="16383" unit="px" help="-s h" />
+					</div>
+				</template>
+			</ControlOptional>
 		</ControlPanel>
 
 		<ControlPanel title="TIFF input">

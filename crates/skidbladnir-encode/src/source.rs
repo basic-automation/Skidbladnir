@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-	encoder::{EncodeError, RgbaImage}, settings::{EncodeJob, OutputFormat}
+	encoder::{EncodeError, RgbaImage}, settings::{EncodeJob, OutputFormat, RawSize}
 };
 
 /// The input formats Skidbladnir accepts: the Electron app's list, plus AVIF.
@@ -62,6 +62,10 @@ pub enum SourceFormat {
 	/// Y4M (`YUV4MPEG2`), its first frame, read by `avifenc`'s own reader
 	/// ([`crate::avif::decode_y4m`]).
 	Y4m,
+	/// Raw 8-bit I420 planes, as `cwebp -s` reads them: known by the `.yuv` extension, since
+	/// such a file has no signature, and readable only with its size
+	/// ([`EncodeJob::yuv_size`]).
+	Yuv,
 }
 
 impl SourceFormat {
@@ -106,8 +110,21 @@ impl SourceFormat {
 			Self::Pgx => "PGX",
 			Self::Svg => "SVG",
 			Self::Y4m => "Y4M",
+			Self::Yuv => "YUV",
 		}
 	}
+
+	/// Identify a file's format: [`Self::Yuv`] for a `.yuv` file, which has no signature to
+	/// sniff, otherwise from its leading bytes ([`Self::sniff`]).
+	#[must_use]
+	pub fn identify(path: &Path, bytes: &[u8]) -> Option<Self> {
+		if is_raw_yuv(path) { Some(Self::Yuv) } else { Self::sniff(bytes) }
+	}
+}
+
+/// Whether `path` names a raw YUV file: a `.yuv` extension, in any case.
+fn is_raw_yuv(path: &Path) -> bool {
+	path.extension().and_then(OsStr::to_str).is_some_and(|extension| extension.eq_ignore_ascii_case("yuv"))
 }
 
 /// Whether an ISO-BMFF `ftyp` box names one of `brands`, as its major brand or among the
@@ -290,6 +307,10 @@ pub fn animated_source(path: &Path, bytes: &[u8]) -> Result<Option<AnimatedSourc
 	use crate::animation::Keyframes;
 
 	let failed = |format: SourceFormat, detail: String| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail };
+	// Raw planes are whatever their bytes are; a `.yuv` is never read as anything else.
+	if is_raw_yuv(path) {
+		return Ok(None);
+	}
 	if SourceFormat::sniff(bytes) == Some(SourceFormat::Gif) {
 		let (animation, compatible) = crate::gif_input::decode_with_compatible_loop(bytes).map_err(|detail| failed(SourceFormat::Gif, detail))?;
 		return Ok(Some(AnimatedSource { animation, keyframes: Keyframes::Gif, metadata: crate::gif_input::metadata(bytes), compatible_loop_count: Some(compatible) }));
@@ -307,7 +328,17 @@ pub fn animated_source(path: &Path, bytes: &[u8]) -> Result<Option<AnimatedSourc
 ///
 /// As [`load`], apart from reading the file.
 pub fn decode(path: &Path, bytes: Vec<u8>) -> Result<SourceImage, SourceError> {
-	let format = SourceFormat::sniff(&bytes).ok_or_else(|| SourceError::Unsupported { path: path.to_path_buf() })?;
+	decode_with(path, bytes, None)
+}
+
+/// [`decode`], with the size a `.yuv` file is read at ([`EncodeJob::yuv_size`]).
+///
+/// # Errors
+///
+/// As [`decode`]; a `.yuv` file with no size, or whose length is not that of I420 planes of
+/// that size, fails to decode.
+pub fn decode_with(path: &Path, bytes: Vec<u8>, yuv_size: Option<RawSize>) -> Result<SourceImage, SourceError> {
+	let format = SourceFormat::identify(path, &bytes).ok_or_else(|| SourceError::Unsupported { path: path.to_path_buf() })?;
 
 	let decoded = match format {
 		// libwebp decodes its own format; using a second WebP implementation here would
@@ -350,6 +381,11 @@ pub fn decode(path: &Path, bytes: Vec<u8>) -> Result<SourceImage, SourceError> {
 		SourceFormat::Svg => {
 			let raster = crate::svg::rasterise(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?;
 			Decoded::rgba((raster.width, raster.height, raster.pixels))
+		}
+		SourceFormat::Yuv => {
+			let size = yuv_size.ok_or_else(|| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail: "a .yuv file has no header to give its size: set it under Raw YUV input".to_owned() })?;
+			let (width, height, pixels) = crate::encoder::yuv420_to_rgba(&bytes, size.width, size.height).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?;
+			Decoded::rgba((width, height, pixels))
 		}
 		SourceFormat::Y4m => {
 			let (width, height, pixels, deep, has_alpha) = crate::avif::decode_y4m(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?;
@@ -650,7 +686,7 @@ pub struct PathInspection {
 pub fn inspect_paths(paths: &[PathBuf]) -> Vec<PathInspection> {
 	paths.iter()
 		.map(|path| {
-			let format = read_prefix(path).as_deref().and_then(SourceFormat::sniff);
+			let format = if is_raw_yuv(path) && path.is_file() { Some(SourceFormat::Yuv) } else { read_prefix(path).as_deref().and_then(SourceFormat::sniff) };
 			// Only WebP gets a second read, and only of its header — WebPGetFeatures does not
 			// decode, so this stays cheap even for a large selection.
 			let webp = (format == Some(SourceFormat::Webp)).then(|| fs::read(path).ok().and_then(|bytes| crate::inspect::inspect_webp(&bytes))).flatten();
@@ -739,7 +775,7 @@ pub fn scan_directory(root: &Path, recursive: bool) -> Vec<FoundImage> {
 				}
 				continue;
 			}
-			if read_prefix(&path).as_deref().and_then(SourceFormat::sniff).is_some() {
+			if is_raw_yuv(&path) || read_prefix(&path).as_deref().and_then(SourceFormat::sniff).is_some() {
 				let relative = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
 				found.push(FoundImage { path, relative });
 			}
@@ -958,7 +994,7 @@ pub fn encode_file_with_options(settings: &EncodeJob, input: &Path, output: &Pat
 		(Some(source), OutputFormat::Webp) => (source.encode(settings, on_progress)?, (source.animation.width, source.animation.height)),
 		(Some(source), _) if source.animation.frames.len() > 1 => return Err(SourceError::Animated { path: input.to_path_buf() }.into()),
 		_ => {
-			let image = decode(input, bytes)?;
+			let image = decode_with(input, bytes, settings.yuv_size)?;
 			(crate::encoder::encode_source_with_progress(settings, &image, on_progress)?, (image.width, image.height))
 		}
 	};
@@ -1016,7 +1052,7 @@ mod tests {
 	};
 
 	use super::{Conversion, ConvertError, OutputCollision, SourceFormat, encode_file, encode_file_with_options, load, output_collisions, output_path_in};
-	use crate::settings::{AvifSettings, Crop, EncodeJob, OutputFormat, Resize, WebpSettings};
+	use crate::settings::{AvifSettings, Crop, EncodeJob, OutputFormat, RawSize, Resize, WebpSettings};
 
 	/// A scratch directory that cleans itself up. Every test in this module writes only
 	/// inside one of these — nothing here touches a path outside the temp directory.
@@ -1183,6 +1219,38 @@ mod tests {
 		assert_eq!(output_collisions(&plan(&[("/in/a.png", "/out/a.webp"), ("/in/b.png", "/out/b.webp")])), Vec::new());
 		let case = output_collisions(&plan(&[("/in/Photo.png", "/out/Photo.webp"), ("/in/photo.jpg", "/out/photo.webp")]));
 		assert_eq!(case.len(), usize::from(cfg!(any(windows, target_os = "macos"))), "names differing only in case collide where the filesystem ignores case");
+	}
+
+	/// A `.yuv` file is raw I420, known by its extension: offered to the queue and found by
+	/// a scan, read only at the size the job gives, and converted to every format.
+	#[test]
+	fn converts_raw_yuv_at_the_size_given() {
+		let scratch = Scratch::new("yuv");
+		// 5x3: a 15-byte Y plane, then 3x2 U and V planes.
+		let mut planes = vec![235_u8; 15];
+		planes.extend([128_u8; 6]);
+		planes.extend([128_u8; 6]);
+		let input = scratch.join("frame.YUV");
+		fs::write(&input, &planes).expect("write");
+		let inspected = super::inspect_paths(std::slice::from_ref(&input));
+		assert!(inspected[0].supported && inspected[0].format == Some("YUV"), "{inspected:?}");
+		assert_eq!(super::scan_directory(&scratch.0, false).len(), 1, "a scan finds it");
+
+		let error = load(&input).expect_err("no size, no picture");
+		assert!(error.to_string().contains("Raw YUV input"), "{error}");
+		let size = Some(RawSize { width: 5, height: 3 });
+		let image = super::decode_with(&input, planes.clone(), size).expect("read at its size");
+		assert_eq!((image.format, image.width, image.height, image.has_alpha), (SourceFormat::Yuv, 5, 3, false));
+		// Limited-range white, as libwebp converts it.
+		assert!(image.pixels.chunks(4).all(|pixel| pixel == [255, 255, 255, 255]), "{:?}", &image.pixels[..4]);
+		let error = super::decode_with(&input, planes.clone(), Some(RawSize { width: 4, height: 3 })).expect_err("the wrong size");
+		assert!(error.to_string().contains("is 20 bytes, but this one is 27"), "{error}");
+
+		for format in [OutputFormat::Webp, OutputFormat::Avif, OutputFormat::Jxl, OutputFormat::Heic] {
+			let output = scratch.join(&format!("frame.{}", format.extension()));
+			let conversion = encode_file(&EncodeJob { format, yuv_size: size, ..EncodeJob::default() }, &input, &output).unwrap_or_else(|error| panic!("{format:?}: {error}"));
+			assert_eq!((conversion.width, conversion.height), (5, 3), "{format:?}");
+		}
 	}
 
 	/// An SVG converts to every output format at its own size, its transparency kept.
