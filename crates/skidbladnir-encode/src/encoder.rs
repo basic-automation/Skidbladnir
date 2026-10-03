@@ -52,7 +52,7 @@
 
 use std::ffi::c_int;
 
-use libwebp_sys::{VP8StatusCode, WEBP_CSP_MODE, WEBP_DECODER_ABI_VERSION, WEBP_ENCODER_ABI_VERSION, WebPBlendAlpha, WebPConfig, WebPConfigInitInternal, WebPDecode, WebPDecoderConfig, WebPEncCSP, WebPEncode, WebPFreeDecBuffer, WebPGetFeaturesInternal, WebPInitDecoderConfigInternal, WebPMemoryWrite, WebPMemoryWriter, WebPMemoryWriterClear, WebPMemoryWriterInit, WebPPicture, WebPPictureAlloc, WebPPictureCopy, WebPPictureFree, WebPPictureImportRGBA, WebPPictureImportRGBX, WebPPictureInitInternal, WebPPictureRescale, WebPPictureView, WebPPreset, WebPValidateConfig, WebPYUVABuffer};
+use libwebp_sys::{VP8StatusCode, WEBP_CSP_MODE, WEBP_DECODER_ABI_VERSION, WEBP_ENCODER_ABI_VERSION, WebPBlendAlpha, WebPConfig, WebPConfigInitInternal, WebPDecode, WebPDecoderConfig, WebPEncCSP, WebPEncode, WebPFreeDecBuffer, WebPGetFeaturesInternal, WebPInitDecoderConfigInternal, WebPMemoryWrite, WebPMemoryWriter, WebPMemoryWriterClear, WebPMemoryWriterInit, WebPPicture, WebPPictureAlloc, WebPPictureCopy, WebPPictureFree, WebPPictureImportRGBA, WebPPictureImportRGBX, WebPPictureInitInternal, WebPPictureRescale, WebPPictureView, WebPPictureYUVAToARGB, WebPPreset, WebPValidateConfig, WebPYUVABuffer};
 use thiserror::Error;
 
 use crate::{
@@ -110,6 +110,9 @@ pub enum EncodeError {
 	/// A libwebp call that allocates or converts failed, almost always out of memory.
 	#[error("libwebp call `{0}` failed")]
 	Libwebp(&'static str),
+	/// A raw YUV input whose size is out of range or does not match its length.
+	#[error("{0}")]
+	RawYuv(String),
 	/// `WebPEncode` failed, reporting this `error_code` from `WebPEncodingError`.
 	#[error("libwebp encoding failed with error code {0}")]
 	EncodeFailed(c_int),
@@ -351,8 +354,9 @@ pub fn encode_source_with_progress(job: &EncodeJob, source: &SourceImage, on_pro
 	}
 	let reread = job.tiff_alpha_like_reference.then(|| crate::source::tiff_like_reference(source, job.format)).flatten();
 	let source = reread.as_ref().unwrap_or(source);
-	// An SVG with a resize and no crop is drawn again at the new size, which keeps its edges
-	// sharp where scaling the raster would blur them, and is then encoded as it is.
+	// An SVG with a resize is drawn again at the new size, only the crop's rectangle of it if
+	// there is one, which keeps its edges sharp where scaling the raster would blur them, and
+	// is then encoded as it is.
 	let redrawn = svg_at_resize(job, source);
 	let (job, source) = match &redrawn {
 		Some((job, source)) => (job, source),
@@ -366,18 +370,24 @@ pub fn encode_source_with_progress(job: &EncodeJob, source: &SourceImage, on_pro
 	}
 }
 
-/// An SVG source drawn at the job's resize, and the job with nothing left to resize; `None`
-/// for any other source, a crop (which is in the drawing's own pixels), or no resize.
+/// An SVG source drawn at the job's resize — only the crop's rectangle, given in the
+/// drawing's own pixels, when there is a crop — and the job with nothing left to crop or
+/// resize; `None` for any other source, or no resize (a crop alone keeps the raster's own
+/// pixels exactly).
 fn svg_at_resize(job: &EncodeJob, source: &SourceImage) -> Option<(EncodeJob, SourceImage)> {
-	if source.format != SourceFormat::Svg || source.bytes.is_empty() || job.crop.is_some() {
+	if source.format != SourceFormat::Svg || source.bytes.is_empty() {
 		return None;
 	}
-	let resize = job.resize.for_source(source.width, source.height);
+	let resize = job.resize.for_source(job.crop.map_or(source.width, |c| c.width), job.crop.map_or(source.height, |c| c.height));
 	if resize.is_noop() {
 		return None;
 	}
-	let raster = crate::svg::rasterise_at(&source.bytes, resize.width, resize.height).ok()?;
-	Some((EncodeJob { resize: Resize::default(), ..job.clone() }, SourceImage { width: raster.width, height: raster.height, pixels: raster.pixels, deep: None, gray: false, has_alpha: source.has_alpha, format: source.format, bytes: source.bytes.clone() }))
+	let raster = match job.crop {
+		None => crate::svg::rasterise_at(&source.bytes, resize.width, resize.height),
+		Some(crop) => crate::svg::rasterise_region(&source.bytes, crop.x, crop.y, crop.width, crop.height, resize.width, resize.height),
+	}
+	.ok()?;
+	Some((EncodeJob { crop: None, resize: Resize::default(), ..job.clone() }, SourceImage { width: raster.width, height: raster.height, pixels: raster.pixels, deep: None, gray: false, has_alpha: source.has_alpha, format: source.format, bytes: source.bytes.clone() }))
 }
 
 /// The source after the job's crop and resize, with every sample depth it carries.
@@ -525,7 +535,16 @@ fn encode_webp(job: &EncodeJob, source: &SourceImage, on_progress: &mut dyn FnMu
 	// `-resize_mode` has had a chance to decline it. Matching it is a parity requirement,
 	// not an optimisation.
 	let use_argb = config.lossless == 1 || config.use_sharp_yuv == 1 || config.preprocessing > 0 || job.crop.is_some() || !job.resize.is_noop();
-	let mut picture = if !use_argb && source.format == SourceFormat::Webp && !source.bytes.is_empty() {
+	let mut picture = if source.format == SourceFormat::Yuv && !source.bytes.is_empty() {
+		// Raw I420 planes go into the picture as they are, as cwebp's ReadYUV puts them, and
+		// on the ARGB path through libwebp's own conversion, as it does too.
+		let mut picture = yuv420_picture(&source.bytes, source.width, source.height)?;
+		// SAFETY: the picture holds the YUV planes just allocated and filled.
+		if use_argb && unsafe { WebPPictureYUVAToARGB(&raw mut picture.0) } == 0 {
+			return Err(EncodeError::Libwebp("WebPPictureYUVAToARGB"));
+		}
+		picture
+	} else if !use_argb && source.format == SourceFormat::Webp && !source.bytes.is_empty() {
 		// A WebP source off the ARGB path is decoded straight into YUV 4:2:0, never RGB.
 		yuv_picture(&source.bytes, settings.keep_alpha)?
 	} else {
@@ -590,6 +609,74 @@ fn encode_webp(job: &EncodeJob, source: &SourceImage, on_progress: &mut dyn FnMu
 /// Decode a WebP file into a fresh YUV 4:2:0 `WebPPicture` (with an alpha plane if the
 /// file has alpha and it is kept), exactly as `cwebp`'s `ReadWebP` (`imageio/webpdec.c`)
 /// does when `use_argb` is off. Decoding to RGBA and converting back lands a few bytes away.
+/// Raw 8-bit I420 data — a `width` x `height` Y plane, then U and V planes of half the
+/// width and height, rounded up — in a YUV picture, exactly as `cwebp -s`'s `ReadYUV` lays
+/// it out, refused unless the data is exactly that long.
+fn yuv420_picture(data: &[u8], width: u32, height: u32) -> Result<Picture, EncodeError> {
+	const MAX_DIMENSION: u32 = 16383;
+	if width == 0 || height == 0 || width > MAX_DIMENSION || height > MAX_DIMENSION {
+		return Err(EncodeError::RawYuv(format!("a raw YUV size must be 1 to {MAX_DIMENSION} pixels each way, not {width}x{height}")));
+	}
+	let (y_width, y_height) = (width as usize, height as usize);
+	let (uv_width, uv_height) = (y_width.div_ceil(2), y_height.div_ceil(2));
+	let expected = y_width * y_height + 2 * uv_width * uv_height;
+	if data.len() != expected {
+		return Err(EncodeError::RawYuv(format!("a {width}x{height} raw YUV (I420) file is {expected} bytes, but this one is {}", data.len())));
+	}
+	let mut picture = Picture(unsafe {
+		let mut picture = std::mem::zeroed::<WebPPicture>();
+		if WebPPictureInitInternal(&raw mut picture, abi_version()) == 0 {
+			return Err(EncodeError::Libwebp("WebPPictureInit"));
+		}
+		picture
+	});
+	picture.0.use_argb = 0;
+	picture.0.width = width.cast_signed();
+	picture.0.height = height.cast_signed();
+	// SAFETY: a zeroed, initialised picture with its size set.
+	if unsafe { WebPPictureAlloc(&raw mut picture.0) } == 0 {
+		return Err(EncodeError::ImageTooLarge { width, height });
+	}
+	let (y, rest) = data.split_at(y_width * y_height);
+	let (u, v) = rest.split_at(uv_width * uv_height);
+	for (plane, destination, stride, row, rows) in [(y, picture.0.y, picture.0.y_stride, y_width, y_height), (u, picture.0.u, picture.0.uv_stride, uv_width, uv_height), (v, picture.0.v, picture.0.uv_stride, uv_width, uv_height)] {
+		let stride = usize::try_from(stride).unwrap_or(0);
+		for (index, source) in plane.chunks_exact(row).take(rows).enumerate() {
+			// SAFETY: WebPPictureAlloc made each plane `rows` rows of `stride` bytes, and a
+			// row of `row` bytes fits in a stride.
+			unsafe { std::ptr::copy_nonoverlapping(source.as_ptr(), destination.add(index * stride), row) };
+		}
+	}
+	Ok(picture)
+}
+
+/// Raw I420 data ([`yuv420_picture`]) as RGBA, through libwebp's own YUV-to-RGB
+/// conversion — the colours `cwebp -s` encodes from on its ARGB path — for every format
+/// other than WebP, and for the preview.
+///
+/// # Errors
+///
+/// A description of why the data cannot be read at that size.
+pub(crate) fn yuv420_to_rgba(data: &[u8], width: u32, height: u32) -> Result<(u32, u32, Vec<u8>), String> {
+	let mut picture = yuv420_picture(data, width, height).map_err(|error| error.to_string())?;
+	// SAFETY: the picture holds the YUV planes just filled.
+	if unsafe { WebPPictureYUVAToARGB(&raw mut picture.0) } == 0 {
+		return Err("libwebp could not convert the YUV planes".to_owned());
+	}
+	let stride = usize::try_from(picture.0.argb_stride).unwrap_or(0);
+	let (columns, rows) = (width as usize, height as usize);
+	let mut rgba = Vec::with_capacity(columns * rows * 4);
+	for row in 0..rows {
+		// SAFETY: the ARGB plane is `height` rows of `argb_stride` pixels, `width` of them used.
+		let pixels = unsafe { std::slice::from_raw_parts(picture.0.argb.add(row * stride), columns) };
+		rgba.extend(pixels.iter().flat_map(|&argb| {
+			let [a, r, g, b] = argb.to_be_bytes();
+			[r, g, b, a]
+		}));
+	}
+	Ok((width, height, rgba))
+}
+
 fn yuv_picture(webp: &[u8], keep_alpha: bool) -> Result<Picture, EncodeError> {
 	let decode_failed = EncodeError::Libwebp("WebPDecode");
 	let mut decoder = unsafe {

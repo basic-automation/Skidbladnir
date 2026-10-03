@@ -394,6 +394,57 @@ check "reads Y4M input" \
 	 const a=await I.invoke('convert_image', { settings: s, input, outputDirectory: out });
 	 return found[0].format + ' ' + [w, a].map(r => r.outputPath.split(/[\\\\/]/).pop() + ' ' + r.width + 'x' + r.height).join(' ')" "Y4M smoke.webp 20x12 smoke.avif 20x12"
 
+# EXR: half-float RGB, uncompressed, as cjxl reads it for JPEG XL and given the sRGB curve
+# for WebP. Written by hand: magic, the eight required attributes, the line offsets, and one
+# block per line with its channels in name order (B, G, R).
+"$PY" - "$scratch/light.exr" <<'EXR'
+import struct, sys
+w, h = 20, 12
+def attr(name, kind, value):
+    return name.encode() + b'\0' + kind.encode() + b'\0' + struct.pack('<i', len(value)) + value
+channels = b''.join(c + b'\0' + struct.pack('<iBBBBii', 1, 0, 0, 0, 0, 1, 1) for c in (b'B', b'G', b'R')) + b'\0'
+box = struct.pack('<iiii', 0, 0, w - 1, h - 1)
+header = b'\x76\x2f\x31\x01' + struct.pack('<i', 2) + attr('channels', 'chlist', channels) + attr('compression', 'compression', b'\0') + attr('dataWindow', 'box2i', box) + attr('displayWindow', 'box2i', box) + attr('lineOrder', 'lineOrder', b'\0') + attr('pixelAspectRatio', 'float', struct.pack('<f', 1.0)) + attr('screenWindowCenter', 'v2f', struct.pack('<ff', 0, 0)) + attr('screenWindowWidth', 'float', struct.pack('<f', 1.0)) + b'\0'
+lines = []
+for y in range(h):
+    data = b''.join(struct.pack('<%de' % w, *[(x * (c + 1) + y) / 40.0 for x in range(w)]) for c in range(3))
+    lines.append(struct.pack('<ii', y, len(data)) + data)
+start = len(header) + 8 * h
+offsets, at = [], start
+for line in lines:
+    offsets.append(at); at += len(line)
+open(sys.argv[1], 'wb').write(header + struct.pack('<%dQ' % h, *offsets) + b''.join(lines))
+EXR
+check "reads EXR input" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const input='$(app_path "$scratch/light.exr")', out='$(app_path "$scratch/from-netpbm")';
+	 const found=await I.invoke('inspect_dropped_paths', { paths: [input] });
+	 const s=await I.invoke('default_settings');
+	 const w=await I.invoke('convert_image', { settings: s, input, outputDirectory: out });
+	 s.format='jxl';
+	 const j=await I.invoke('convert_image', { settings: s, input, outputDirectory: out });
+	 return found[0].format + ' ' + [w, j].map(r => r.outputPath.split(/[\\\\/]/).pop() + ' ' + r.width + 'x' + r.height).join(' ')" "EXR light.webp 20x12 light.jxl 20x12"
+
+# Raw YUV: a .yuv is offered to the queue by its extension, refused with no size, and read
+# at the size the settings give (cwebp's -s). Odd, so the chroma planes round up.
+"$PY" - "$scratch/raw.yuv" <<'YUV'
+import sys
+w, h = 21, 13
+uv = ((w + 1) // 2) * ((h + 1) // 2)
+open(sys.argv[1], 'wb').write(bytes((x * 9 + y * 5) % 220 + 16 for y in range(h) for x in range(w)) + bytes(128 for _ in range(2 * uv)))
+YUV
+check "reads raw YUV input at the size given" \
+	"const I=window.__TAURI_INTERNALS__;
+	 const input='$(app_path "$scratch/raw.yuv")', out='$(app_path "$scratch/from-netpbm")';
+	 const found=await I.invoke('inspect_dropped_paths', { paths: [input] });
+	 const s=await I.invoke('default_settings');
+	 const unsized=await I.invoke('convert_image', { settings: s, input, outputDirectory: out }).then(() => 'converted', () => 'refused');
+	 s.yuvSize={ width: 21, height: 13 };
+	 const w=await I.invoke('convert_image', { settings: s, input, outputDirectory: out });
+	 s.format='avif';
+	 const a=await I.invoke('convert_image', { settings: s, input, outputDirectory: out });
+	 return found[0].format + ' ' + unsized + ' ' + [w, a].map(r => r.outputPath.split(/[\\\\/]/).pop() + ' ' + r.width + 'x' + r.height).join(' ')" "YUV refused raw.webp 21x13 raw.avif 21x13"
+
 echo
 if [ "$failures" -gt 0 ]; then
 	echo "$failures check(s) failed."

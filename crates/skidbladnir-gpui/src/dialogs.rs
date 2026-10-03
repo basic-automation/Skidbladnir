@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 
 /// The extensions the old dialog accepts.
-pub const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "jpe", "jif", "jfif", "jfi", "tif", "tiff", "webp", "avif", "jxl", "heic", "heif", "gif", "pnm", "pgm", "ppm", "pam", "pfm", "pgx", "y4m", "svg", "svgz"];
+pub const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "jpe", "jif", "jfif", "jfi", "tif", "tiff", "webp", "avif", "jxl", "heic", "heif", "gif", "pnm", "pgm", "ppm", "pam", "pfm", "pgx", "y4m", "svg", "svgz", "exr", "yuv"];
 
 /// Ask for one or more images. `None` when the dialog was cancelled or failed.
 #[cfg(target_os = "linux")]

@@ -6,7 +6,7 @@
 // set the config on the command line: the Rust core applies them, so their values are
 // libwebp's own rather than a copy here.
 import { computed, ref } from 'vue'
-import type { AlphaFiltering, FilterType, ImageHint, Preset, WebpSettings } from '~/composables/useSettings'
+import type { AlphaFiltering, FilterType, FrameChange, ImageHint, Preset, WebpSettings } from '~/composables/useSettings'
 import { invokeCommand } from '~/composables/useTauri'
 
 const model = defineModel<WebpSettings>({ required: true })
@@ -25,6 +25,17 @@ const FILTER_TYPES: { label: string, value: FilterType }[] = [{ label: 'Strong',
 const ALPHA_FILTERS: { label: string, value: AlphaFiltering }[] = [{ label: 'None', value: 'off' }, { label: 'Fast', value: 'fast' }, { label: 'Best', value: 'best' }]
 const HINTS: { label: string, value: ImageHint }[] = [{ label: 'None', value: 'default' }, { label: 'Photo', value: 'photo' }, { label: 'Picture', value: 'picture' }, { label: 'Graph', value: 'graph' }]
 const TARGETS = [{ label: 'Quality', value: 'none' }, { label: 'File size', value: 'size' }, { label: 'PSNR', value: 'psnr' }]
+
+// A frame change's lossy/lossless and exact switches: left as they were, or set either way.
+const CHANGE_MODES = [{ label: 'Unchanged', value: 'keep' }, { label: 'Lossy', value: 'lossy' }, { label: 'Lossless', value: 'lossless' }]
+const CHANGE_EXACT = [{ label: 'Unchanged', value: 'keep' }, { label: 'Exact', value: 'on' }, { label: 'Not exact', value: 'off' }]
+const switchOf = (value: boolean | null, on: string, off: string) => value === null ? 'keep' : value ? on : off
+const switchFrom = (choice: string, on: string) => choice === 'keep' ? null : choice === on
+
+function addFrameChange() {
+	const change: FrameChange = { fromFrame: 2, lossless: null, quality: null, method: null, exact: null, duration: null }
+	s.value.animation.frameChanges.push(change)
+}
 
 const preset = ref<Preset>('photo')
 const losslessLevel = ref(6)
@@ -206,6 +217,35 @@ const alphaCompression = computed({
 				<ControlOptional v-model="s.animation.frameDuration" label="Set every frame's duration" :fallback="100" unset="-d · not given: each frame keeps its own timing">
 					<ControlNumber v-model="s.animation.frameDuration" label="Milliseconds per frame" :min="1" :max="2147483647" unit="ms" help="-d · frame duration, given once for every frame" />
 				</ControlOptional>
+			</div>
+			<p class="px-2.5 text-xs text-paleday-dim">
+				img2webp's frame options · a change holds from its frame on, until a later one sets the same option again; -lossy and -lossless do nothing with -mixed. GIF input has no such options in gif2webp, so there they apply on top.
+			</p>
+			<div v-for="(change, index) in s.animation.frameChanges" :key="index" class="flex flex-col gap-3">
+				<div class="flex items-end gap-2">
+					<div class="grid flex-1 grid-cols-3 gap-4">
+						<ControlNumber v-model="change.fromFrame" :label="`Change ${index + 1}: from frame`" :min="1" :max="4294967295" help="the first frame it applies to, counting from 1" />
+						<ControlChoice :model-value="switchOf(change.lossless, 'lossless', 'lossy')" :label="`Change ${index + 1}: lossy or lossless`" :items="CHANGE_MODES" help="-lossy / -lossless" @update:model-value="(choice: string) => { change.lossless = switchFrom(choice, 'lossless') }" />
+						<ControlChoice :model-value="switchOf(change.exact, 'on', 'off')" :label="`Change ${index + 1}: exact`" :items="CHANGE_EXACT" help="-exact / -noexact · keep the colour under transparent pixels" @update:model-value="(choice: string) => { change.exact = switchFrom(choice, 'on') }" />
+					</div>
+					<UButton color="neutral" variant="ghost" icon="i-lucide-x" :aria-label="`Remove change ${index + 1}`" class="mb-2" @click="s.animation.frameChanges.splice(index, 1)" />
+				</div>
+				<div class="grid grid-cols-3 gap-4 pr-10">
+					<ControlOptional v-model="change.quality" :label="`Change ${index + 1}: quality`" :fallback="75" unset="-q · not given: unchanged">
+						<ControlNumber v-model="change.quality" :label="`Change ${index + 1}: quality factor`" :min="0" :max="100" :decimals="2" help="-q · quality factor (0:small..100:big)" />
+					</ControlOptional>
+					<ControlOptional v-model="change.method" :label="`Change ${index + 1}: method`" :fallback="4" unset="-m · not given: unchanged">
+						<ControlNumber v-model="change.method" :label="`Change ${index + 1}: compression method`" :min="0" :max="6" help="-m · compression method (0=fast, 6=slowest)" />
+					</ControlOptional>
+					<ControlOptional v-model="change.duration" :label="`Change ${index + 1}: duration`" :fallback="100" unset="-d · not given: unchanged">
+						<ControlNumber v-model="change.duration" :label="`Change ${index + 1}: milliseconds per frame`" :min="1" :max="2147483647" unit="ms" help="-d · frame duration" />
+					</ControlOptional>
+				</div>
+			</div>
+			<div class="px-2.5">
+				<UButton size="sm" color="neutral" variant="soft" icon="i-material-symbols-add" @click="addFrameChange">
+					Add a change from a frame
+				</UButton>
 			</div>
 		</ControlDisclosure>
 

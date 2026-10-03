@@ -68,8 +68,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny
+          # cargo-about pinned: another version may word the same licences differently.
+          tool: cargo-deny,cargo-about@0.9.2
       - run: cargo deny check
+      - name: Rust crates' notices are current
+        # LICENSES/third-party/rust-crates.md is cargo-about's listing of the crates compiled
+        # into the app (about.toml); a Cargo.lock change without regenerating it fails here.
+        run: |
+          cargo about generate --locked --fail about.hbs -o "$RUNNER_TEMP/rust-crates.md"
+          diff -u LICENSES/third-party/rust-crates.md "$RUNNER_TEMP/rust-crates.md" > "$RUNNER_TEMP/rust-crates.diff" || { head -n 50 "$RUNNER_TEMP/rust-crates.diff"; echo "::error::LICENSES/third-party/rust-crates.md is stale: run cargo about generate --locked --fail about.hbs -o LICENSES/third-party/rust-crates.md, then scripts/third-party-notices.py"; exit 1; }
       - name: Third-party notices are current
         # THIRD-PARTY-NOTICES.md and THIRD-PARTY-NOTICES-GPL.md are generated from the
         # licence files of the exact native sources that are built; bumping one without
@@ -140,6 +147,15 @@ jobs:
         run: |
           npm --prefix frontend ci
           npm --prefix frontend run generate
+
+      - name: The JavaScript packages' notices are current
+        # LICENSES/third-party/javascript.md lists the npm packages whose code the bundle just
+        # built carries (frontend/tools/javascript-notices.ts); a lockfile or import change
+        # without regenerating it fails here. One leg is enough: the bundle is the same on all.
+        if: matrix.os == 'ubuntu-latest' && matrix.edition == 'standard'
+        run: |
+          SKIDBLADNIR_JS_NOTICES="$RUNNER_TEMP/javascript.md" npm --prefix frontend run generate
+          diff -u LICENSES/third-party/javascript.md "$RUNNER_TEMP/javascript.md" || { echo "::error::LICENSES/third-party/javascript.md is stale: run SKIDBLADNIR_JS_NOTICES=../LICENSES/third-party/javascript.md npm run generate in frontend/, then scripts/third-party-notices.py"; exit 1; }
 
       - name: Install nasm
         # libaom, libjpeg-turbo and the AV1 decoder (rav1d) assemble their SIMD with nasm;
@@ -229,18 +245,18 @@ jobs:
           submodules: true
 
       - name: Install the reference tools' development files, and the decoders
-        # libtiff is cwebp's TIFF reader; giflib is for gif2webp, the reference for GIF input.
-        # avifdec, djxl and heif-info are the metadata gate's readers for AVIF, JPEG XL and
+        # libtiff is cwebp's TIFF reader; giflib is for gif2webp, the reference for GIF input;
+        # OpenEXR is cjxl's EXR reader. avifdec, djxl and heif-info are the metadata gate's readers for AVIF, JPEG XL and
         # HEIC output (tests/metadata.rs), which has no byte-for-byte reference there.
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libpng-dev libtiff-dev libgif-dev zlib1g-dev libavif-bin libjxl-tools libheif-examples libheif-plugin-libde265
+          sudo apt-get install --no-install-recommends -y libpng-dev libtiff-dev libgif-dev libopenexr-dev zlib1g-dev libavif-bin libjxl-tools libheif-examples libheif-plugin-libde265
 
       - name: Install the reference tools' development files, and the decoders (macOS)
         # The same, from Homebrew; zlib is the system's.
         if: runner.os == 'macOS'
-        run: brew install libpng libtiff giflib libavif jpeg-xl libheif
+        run: brew install libpng libtiff giflib openexr libavif jpeg-xl libheif
 
       - name: Install nasm
         # For x86 SIMD; Linux on ARM uses the system assembler.
@@ -307,7 +323,7 @@ jobs:
           sudo apt-get install --no-install-recommends -y \
             libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev \
             libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libwayland-dev libfontconfig-dev libfreetype-dev \
-            webkit2gtk-driver xvfb
+            webkit2gtk-driver xvfb mesa-vulkan-drivers libvulkan1
 
       - uses: actions/setup-node@v7
         with:
@@ -356,6 +372,12 @@ jobs:
         # backend, which is what WebKitWebDriver needs.
         run: xvfb-run -a scripts/smoke-test.sh --edition ${{ matrix.edition }}
 
+      - name: Smoke test the gpui window
+        # The default window since 1.3.0, which WebDriver cannot drive: scripts/gpui-smoke.sh
+        # opens it with its debug variables and checks a conversion to each format on disk.
+        # The runner has no GPU, so Vulkan is Mesa's lavapipe, on Xvfb's X11 display.
+        run: xvfb-run -a env -u WAYLAND_DISPLAY scripts/gpui-smoke.sh --edition ${{ matrix.edition }}
+
       - name: Accessibility audit
         # At every severity, "minor" included: at the default ("serious") an <h1> outside
         # any landmark went unnoticed in every state from the Nanna redesign until 1.2.
@@ -374,6 +396,149 @@ jobs:
           name: screenshots
           path: screenshots/*.png
           if-no-files-found: error
+
+  # A first slice of byte parity on Windows: cwebp built there with CMake and MSVC, against
+  # the libwebp this crate builds there. cwebp would read PNG, JPEG and TIFF through WIC on
+  # Windows, a different decoder from the ones the other gates match, so WIC is switched
+  # off and only the gates that never hand cwebp those formats run: the PAM control
+  # surface, the cwebp-defaults reset, WebP, PNM and raw YUV sources, and img2webp's and
+  # webpmux's animation gates (ROADMAP.md, Phase 8).
+  parity-windows:
+    name: parity with cwebp, img2webp, webpmux / windows
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: Install nasm
+        uses: ilammy/setup-nasm@v1
+
+      - name: Build libheif (standard edition)
+        uses: ./.github/actions/libheif
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the reference cwebp, img2webp and webpmux, without WIC
+        run: |
+          cmake -S third_party/libwebp -B "$RUNNER_TEMP/libwebp" -DBUILD_SHARED_LIBS=OFF -DHAVE_WINCODEC_H=0 -DWEBP_BUILD_CWEBP=ON -DWEBP_BUILD_DWEBP=OFF -DWEBP_BUILD_GIF2WEBP=OFF -DWEBP_BUILD_IMG2WEBP=ON -DWEBP_BUILD_VWEBP=OFF -DWEBP_BUILD_WEBPINFO=OFF -DWEBP_BUILD_WEBPMUX=ON -DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_EXTRAS=OFF
+          cmake --build "$RUNNER_TEMP/libwebp" --config Release --target cwebp img2webp webpmux
+          for tool in cwebp img2webp webpmux; do
+            path=$(find "$RUNNER_TEMP/libwebp" -iname "$tool.exe" | head -1)
+            "$path" -version
+            echo "SKIDBLADNIR_REFERENCE_$(echo "$tool" | tr a-z A-Z)=$(cygpath -m "$path")" >> "$GITHUB_ENV"
+          done
+          echo "SKIDBLADNIR_REQUIRE_PARITY=1" >> "$GITHUB_ENV"
+
+      - name: byte parity with cwebp, img2webp and webpmux, for what they read without WIC
+        # tests/parity.rs's PAM, WebP and raw YUV gates and tests/pnm.rs's cwebp ones (never a
+        # PNG, JPEG or TIFF), and every tests/animation.rs gate (PAM frames).
+        run: cargo test --release --package skidbladnir-encode --test parity --test pnm --test animation -- matches_reference_cwebp_across_the_whole_control_surface cwebps_defaults_are_a_bare_cwebp matches_reference_cwebp_through_a_webp_file matches_reference_cwebp_through_raw_yuv matches_cwebp_reading_pnm refuses_what_cwebp_refuses matches_reference_img2webp keeps_an_animations_metadata_as_webpmux_sets_it frame_changes_apply lossless_round_trip lossy_round_trip a_reference_animation a_still_webp resize_applies never_enlarge progress_and_cancel controls_without --nocapture
+
+  # The next slice: cwebp, img2webp, gif2webp and webpmux on Windows with the image
+  # libraries the Linux references use rather than WIC — libjpeg-turbo from our own
+  # submodule (the version the app links), libpng, libtiff and giflib from vcpkg, all on the
+  # static C runtime — so every tests/parity.rs, tests/animation.rs and tests/gif.rs gate can
+  # run there (ROADMAP.md, Phase 8).
+  parity-windows-images:
+    name: parity with libwebp's tools and image readers / windows
+    runs-on: windows-2022
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: Install nasm
+        uses: ilammy/setup-nasm@v1
+
+      - name: Build libheif (standard edition)
+        uses: ./.github/actions/libheif
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the reference tools with libjpeg-turbo, libpng, libtiff and giflib
+        run: |
+          vcpkg="$(cygpath -u "$VCPKG_INSTALLATION_ROOT")"
+          "$vcpkg/vcpkg.exe" install --triplet x64-windows-static libpng "tiff[core]" giflib
+          jpeg="$RUNNER_TEMP/jpeg-install"
+          cmake -S third_party/libjpeg-turbo -B "$RUNNER_TEMP/jpeg" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DENABLE_SHARED=OFF -DENABLE_STATIC=ON -DWITH_JPEG8=ON -DWITH_TURBOJPEG=OFF -DWITH_TOOLS=OFF -DWITH_TESTS=OFF "-DCMAKE_INSTALL_PREFIX=$jpeg"
+          cmake --build "$RUNNER_TEMP/jpeg" --config Release
+          cmake --install "$RUNNER_TEMP/jpeg" --config Release
+          jpeglib=$(find "$jpeg" -iname 'jpeg-static.lib' | head -1)
+          cmake -S third_party/libwebp -B "$RUNNER_TEMP/libwebp" "-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DBUILD_SHARED_LIBS=OFF -DWEBP_LINK_STATIC=OFF -DHAVE_WINCODEC_H=0 "-DJPEG_LIBRARY=$(cygpath -m "$jpeglib")" "-DJPEG_INCLUDE_DIR=$(cygpath -m "$jpeg/include")" -DWEBP_BUILD_CWEBP=ON -DWEBP_BUILD_DWEBP=OFF -DWEBP_BUILD_GIF2WEBP=ON -DWEBP_BUILD_IMG2WEBP=ON -DWEBP_BUILD_VWEBP=OFF -DWEBP_BUILD_WEBPINFO=OFF -DWEBP_BUILD_WEBPMUX=ON -DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_EXTRAS=OFF
+          cmake --build "$RUNNER_TEMP/libwebp" --config Release --target cwebp img2webp gif2webp webpmux
+          for tool in cwebp img2webp gif2webp webpmux; do
+            path=$(find "$RUNNER_TEMP/libwebp" -iname "$tool.exe" | head -1)
+            "$path" -version
+            echo "SKIDBLADNIR_REFERENCE_$(echo "$tool" | tr a-z A-Z)=$(cygpath -m "$path")" >> "$GITHUB_ENV"
+          done
+          echo "SKIDBLADNIR_REQUIRE_PARITY=1" >> "$GITHUB_ENV"
+
+      - name: byte parity with cwebp, img2webp, gif2webp and webpmux
+        run: |
+          cargo test --release --no-fail-fast --package skidbladnir-encode --test parity --test animation --test gif -- --skip matches_cjxl_reading_a_still_gif --nocapture
+          cargo test --release --package skidbladnir-encode --test pnm -- matches_cwebp_reading_pnm refuses_what_cwebp_refuses --nocapture
+
+  # cjxl on Windows, the same way: libjxl's own tools built with MSVC (the jpegxl-src crate
+  # already builds the library so for the app), reading JPEG through our libjpeg-turbo and
+  # PNG and GIF through vcpkg's libpng and giflib. libjxl finds OpenEXR only through
+  # pkg-config, which Windows lacks, so the EXR gate and the JPEG XL-source one (one of whose
+  # sources is an EXR) are left out (ROADMAP.md, Phase 8).
+  parity-windows-jxl:
+    name: parity with cjxl / windows
+    runs-on: windows-2022
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: Install nasm
+        uses: ilammy/setup-nasm@v1
+
+      - name: Build libheif (standard edition)
+        uses: ./.github/actions/libheif
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the reference cjxl
+        run: |
+          vcpkg="$(cygpath -u "$VCPKG_INSTALLATION_ROOT")"
+          "$vcpkg/vcpkg.exe" install --triplet x64-windows-static libpng giflib
+          jpeg="$RUNNER_TEMP/jpeg-install"
+          cmake -S third_party/libjpeg-turbo -B "$RUNNER_TEMP/jpeg" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DENABLE_SHARED=OFF -DENABLE_STATIC=ON -DWITH_JPEG8=ON -DWITH_TURBOJPEG=OFF -DWITH_TOOLS=OFF -DWITH_TESTS=OFF "-DCMAKE_INSTALL_PREFIX=$jpeg"
+          cmake --build "$RUNNER_TEMP/jpeg" --config Release
+          cmake --install "$RUNNER_TEMP/jpeg" --config Release
+          jpeglib=$(find "$jpeg" -iname 'jpeg-static.lib' | head -1)
+          libjxl=$(cargo metadata --format-version 1 | python -c 'import json, os, sys; print(os.path.join(os.path.dirname([p for p in json.load(sys.stdin)["packages"] if p["name"] == "jpegxl-src"][0]["manifest_path"]), "libjxl"))')
+          cmake -S "$libjxl" -B "$RUNNER_TEMP/libjxl" "-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF -DJPEGXL_ENABLE_TOOLS=ON -DJPEGXL_ENABLE_DOXYGEN=OFF -DJPEGXL_ENABLE_MANPAGES=OFF -DJPEGXL_ENABLE_BENCHMARK=OFF -DJPEGXL_ENABLE_EXAMPLES=OFF -DJPEGXL_ENABLE_JNI=OFF -DJPEGXL_ENABLE_SJPEG=OFF -DJPEGXL_ENABLE_OPENEXR=OFF -DJPEGXL_BUNDLE_LIBPNG=OFF -DJPEGXL_ENABLE_PLUGINS=OFF "-DJPEG_LIBRARY=$(cygpath -m "$jpeglib")" "-DJPEG_INCLUDE_DIR=$(cygpath -m "$jpeg/include")"
+          cmake --build "$RUNNER_TEMP/libjxl" --config Release --target cjxl
+          cjxl=$(find "$RUNNER_TEMP/libjxl" -iname cjxl.exe | head -1)
+          "$cjxl" --version
+          echo "SKIDBLADNIR_REFERENCE_CJXL=$(cygpath -m "$cjxl")" >> "$GITHUB_ENV"
+          echo "SKIDBLADNIR_REQUIRE_PARITY=1" >> "$GITHUB_ENV"
+
+      - name: byte parity with cjxl
+        run: |
+          cargo test --release --no-fail-fast --package skidbladnir-encode --test jxl_parity -- --skip matches_cjxl_through_exr --skip matches_cjxl_from_jpeg_xl --nocapture
+          cargo test --release --no-fail-fast --package skidbladnir-encode --test pnm -- matches_cjxl_reading_pnm matches_cjxl_reading_pfm matches_cjxl_reading_pgx --nocapture
 
   # The same smoke test, on Windows. This is the only place the Windows build is
   # LAUNCHED rather than just compiled: the dev host cannot run it, and nobody had
@@ -471,3 +636,8 @@ jobs:
 
       - name: Smoke test the installed app
         run: scripts/smoke-test.sh --app "$INSTALLED_APP"
+
+      - name: Smoke test the gpui window of the installed app
+        # The default window, which WebDriver cannot drive; Direct3D falls back to WARP on a
+        # runner with no GPU.
+        run: scripts/gpui-smoke.sh --app "$INSTALLED_APP"

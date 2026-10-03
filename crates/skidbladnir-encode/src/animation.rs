@@ -35,7 +35,7 @@
 
 use std::ffi::c_int;
 
-use libwebp_sys::{WEBP_CSP_MODE, WEBP_DEMUX_ABI_VERSION, WEBP_MUX_ABI_VERSION, WebPAnimDecoder, WebPAnimDecoderDelete, WebPAnimDecoderGetInfo, WebPAnimDecoderGetNext, WebPAnimDecoderHasMoreFrames, WebPAnimDecoderNewInternal, WebPAnimDecoderOptions, WebPAnimDecoderOptionsInitInternal, WebPAnimEncoder, WebPAnimEncoderAdd, WebPAnimEncoderAssemble, WebPAnimEncoderDelete, WebPAnimEncoderNewInternal, WebPAnimEncoderOptions, WebPAnimEncoderOptionsInitInternal, WebPAnimInfo, WebPData, WebPDataClear, WebPMux, WebPMuxAssemble, WebPMuxCreateInternal, WebPMuxDelete, WebPMuxError, WebPMuxSetChunk};
+use libwebp_sys::{WEBP_CSP_MODE, WEBP_DEMUX_ABI_VERSION, WEBP_MUX_ABI_VERSION, WebPAnimDecoder, WebPAnimDecoderDelete, WebPAnimDecoderGetInfo, WebPAnimDecoderGetNext, WebPAnimDecoderHasMoreFrames, WebPAnimDecoderNewInternal, WebPAnimDecoderOptions, WebPAnimDecoderOptionsInitInternal, WebPAnimEncoder, WebPAnimEncoderAdd, WebPAnimEncoderAssemble, WebPAnimEncoderDelete, WebPAnimEncoderNewInternal, WebPAnimEncoderOptions, WebPAnimEncoderOptionsInitInternal, WebPAnimInfo, WebPConfig, WebPData, WebPDataClear, WebPMux, WebPMuxAssemble, WebPMuxCreateInternal, WebPMuxDelete, WebPMuxError, WebPMuxSetChunk};
 
 use crate::{
 	encoder::{EncodeError, RgbaImage, argb_picture, build_config, resize_picture}, settings::{Resize, WebpAnimation, WebpSettings}
@@ -226,7 +226,7 @@ pub enum Keyframes {
 /// As [`encode`].
 pub fn encode_with(settings: &WebpSettings, resize: Resize, animation: &Animation, keyframes: Keyframes, on_progress: &mut dyn FnMut(u32) -> bool) -> Result<Vec<u8>, EncodeError> {
 	let mut config = build_config(settings)?;
-	let options = settings.animation;
+	let options = &settings.animation;
 	// `-mixed` lets the encoder pick lossy or lossless per frame, but each tool also leaves
 	// the config's own `lossless` somewhere, which the encoder still reads: `gif2webp -mixed`
 	// sets it to lossy, and `img2webp -mixed` ignores `-lossy` and `-lossless`, so it stays
@@ -269,11 +269,12 @@ pub fn encode_with(settings: &WebpSettings, resize: Resize, animation: &Animatio
 			return Err(EncodeError::Libwebp("WebPAnimEncoderAdd: frame size changed after resize"));
 		}
 
+		let (frame_config, duration) = for_frame(&config, options, index, options.frame_duration.unwrap_or(frame.duration_ms));
 		// SAFETY: the picture and config are live locals; the encoder copies what it keeps.
-		if unsafe { WebPAnimEncoderAdd(encoder.0, &raw mut picture.0, timestamp, &raw const config) } == 0 {
+		if unsafe { WebPAnimEncoderAdd(encoder.0, &raw mut picture.0, timestamp, &raw const frame_config) } == 0 {
 			return Err(EncodeError::Libwebp("WebPAnimEncoderAdd"));
 		}
-		timestamp = timestamp.saturating_add(c_int::try_from(options.frame_duration.unwrap_or(frame.duration_ms)).unwrap_or(c_int::MAX));
+		timestamp = timestamp.saturating_add(c_int::try_from(duration).unwrap_or(c_int::MAX));
 
 		let done = u32::try_from((index + 1) * 100 / frame_count).unwrap_or(100);
 		if !on_progress(done) {
@@ -296,11 +297,42 @@ pub fn encode_with(settings: &WebpSettings, resize: Resize, animation: &Animatio
 	}
 }
 
+/// The config and duration of frame `index` (from 0): `config` and `duration` with every
+/// [`WebpAnimation::frame_changes`] entry up to that frame applied in frame order, as
+/// `img2webp` carries its frame options from the frame they precede to every later one.
+/// `-lossy` and `-lossless` do nothing under `-mixed`, as in `img2webp`.
+fn for_frame(config: &WebPConfig, options: &WebpAnimation, index: usize, duration: u32) -> (WebPConfig, u32) {
+	let mut config = *config;
+	let mut duration = duration;
+	let mut changes: Vec<&crate::settings::FrameChange> = options.frame_changes.iter().filter(|change| usize::try_from(change.from_frame).is_ok_and(|from| from >= 1 && from - 1 <= index)).collect();
+	changes.sort_by_key(|change| change.from_frame);
+	for change in changes {
+		if let Some(lossless) = change.lossless
+			&& !options.allow_mixed
+		{
+			config.lossless = c_int::from(lossless);
+		}
+		if let Some(quality) = change.quality {
+			config.quality = quality;
+		}
+		if let Some(method) = change.method {
+			config.method = c_int::from(method);
+		}
+		if let Some(exact) = change.exact {
+			config.exact = c_int::from(exact);
+		}
+		if let Some(frame) = change.duration {
+			duration = frame;
+		}
+	}
+	(config, duration)
+}
+
 /// Create an animation encoder for a `width` x `height` canvas with this loop count and the
 /// source's background colour, the keyframe spacing given as `(kmin, kmax)` (`None` leaves
 /// libwebp's default), and the minimise-size and mixed options. Every other option is
 /// libwebp's default, which is also what `img2webp` and `gif2webp` use.
-fn new_encoder(width: c_int, height: c_int, animation: &Animation, loop_count: u32, spacing: (Option<i32>, Option<i32>), options_wanted: WebpAnimation) -> Result<Encoder, EncodeError> {
+fn new_encoder(width: c_int, height: c_int, animation: &Animation, loop_count: u32, spacing: (Option<i32>, Option<i32>), options_wanted: &WebpAnimation) -> Result<Encoder, EncodeError> {
 	// SAFETY: `options` is a live local for both calls; the encoder is owned by a guard.
 	unsafe {
 		let mut options = std::mem::zeroed::<WebPAnimEncoderOptions>();

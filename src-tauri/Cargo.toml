@@ -3,12 +3,14 @@
 name = "skidbladnir"
 # The product version — the only copy. tauri.conf.json deliberately omits `version` so it
 # reads this one; the root package.json that used to be a second copy left with Electron.
-version = "1.3.0"
+version = "1.4.0"
 description = "Convert images to next-generation formats, with the whole encoder exposed."
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+# Not published to crates.io; the app ships as installers (and is left out of the notices).
+publish = false
 
 [lib]
 # The logic lives in a library, with the binary a thin wrapper, which is what makes it

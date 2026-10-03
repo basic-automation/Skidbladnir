@@ -68,7 +68,7 @@ pub fn preview(settings: &EncodeJob, input: &Path) -> Result<Preview, String> {
 	{
 		return preview_animation(settings, input, source_bytes, &source);
 	}
-	let image = source::decode(input, bytes).map_err(|error| error.to_string())?;
+	let image = source::decode_with(input, bytes, settings.yuv_size).map_err(|error| error.to_string())?;
 
 	if let Some(refusal) = too_large_to_preview(image.width, image.height) {
 		return Err(refusal);

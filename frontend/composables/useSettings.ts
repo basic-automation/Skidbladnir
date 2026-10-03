@@ -33,6 +33,14 @@ export interface EncodeJob {
 	heic: HeicSettings
 	/** Read a TIFF's alpha as cwebp (WebP) or heif-enc (HEIC) does, rather than correctly. */
 	tiffAlphaLikeReference: boolean
+	/** The size a `.yuv` input (raw I420) is read at, as cwebp's -s; null when none is given. */
+	yuvSize: RawSize | null
+}
+
+/** A width and height in pixels. */
+export interface RawSize {
+	width: number
+	height: number
 }
 
 /**
@@ -96,6 +104,18 @@ export interface WebpAnimation {
 	loopCount: number | null
 	loopCompatibility: boolean
 	frameDuration: number | null
+	/** img2webp's frame options: each holds from its frame (counting from 1) on. */
+	frameChanges: FrameChange[]
+}
+
+/** What changes from one frame on; `null` leaves an option as it was. */
+export interface FrameChange {
+	fromFrame: number
+	lossless: boolean | null
+	quality: number | null
+	method: number | null
+	exact: boolean | null
+	duration: number | null
 }
 
 // ---- AVIF: avifenc ----------------------------------------------------------------------

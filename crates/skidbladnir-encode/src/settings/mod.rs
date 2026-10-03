@@ -28,7 +28,7 @@ pub use heic::{ChromaDownsampling, ColorProfile, HEIC_X265, HeicAqMode, HeicBitD
 pub use jxl::{JxlColorSpace, JxlSettings, JxlTarget, MetadataSource, Primaries, RenderingIntent, TransferFunction, Tristate, WhitePoint};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-pub use webp::{AlphaFiltering, FilterType, ImageHint, Preset, TargetMetric, WebpAnimation, WebpMetadata, WebpSettings};
+pub use webp::{AlphaFiltering, FilterType, FrameChange, ImageHint, Preset, TargetMetric, WebpAnimation, WebpMetadata, WebpSettings};
 
 /// Which format to write.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -168,6 +168,18 @@ impl Crop {
 	}
 }
 
+/// The size of a raw YUV input (`cwebp -s`): a `.yuv` file is bare 8-bit I420 planes — Y,
+/// then U and V at half the width and height, rounded up — with no header to say how big
+/// it is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RawSize {
+	/// Width in pixels.
+	pub width: u32,
+	/// Height in pixels.
+	pub height: u32,
+}
+
 /// A complete encode job: the output format, the shared crop and resize, and each
 /// format's own settings.
 ///
@@ -200,6 +212,9 @@ pub struct EncodeJob {
 	/// for its format, byte for byte; `avifenc` and `cjxl` do not read TIFF, so AVIF and
 	/// JPEG XL are unaffected. See [`crate::source::tiff_like_reference`].
 	pub tiff_alpha_like_reference: bool,
+	/// The size of a `.yuv` input, read as raw I420 (`cwebp -s`), or `None` when no size is
+	/// given, in which case a `.yuv` file cannot be read. Every other input ignores it.
+	pub yuv_size: Option<RawSize>,
 }
 
 impl From<WebpSettings> for EncodeJob {
@@ -232,6 +247,8 @@ impl<'de> Deserialize<'de> for EncodeJob {
 			heic: HeicSettings,
 			#[serde(default)]
 			tiff_alpha_like_reference: bool,
+			#[serde(default)]
+			yuv_size: Option<RawSize>,
 			/// 0.12 and 0.13 kept metadata job-wide, off by default.
 			metadata: Option<legacy::KeepMetadata>,
 			#[serde(flatten)]
@@ -240,7 +257,7 @@ impl<'de> Deserialize<'de> for EncodeJob {
 
 		let wire = Wire::deserialize(deserializer)?;
 		let webp = wire.webp.unwrap_or_else(|| if wire.flat.is_empty() { WebpSettings::default() } else { wire.flat.into_settings() });
-		let mut job = Self { format: wire.format, crop: wire.crop, resize: wire.resize, webp, avif: wire.avif, jxl: wire.jxl, heic: wire.heic, tiff_alpha_like_reference: wire.tiff_alpha_like_reference };
+		let mut job = Self { format: wire.format, crop: wire.crop, resize: wire.resize, webp, avif: wire.avif, jxl: wire.jxl, heic: wire.heic, tiff_alpha_like_reference: wire.tiff_alpha_like_reference, yuv_size: wire.yuv_size };
 		if let Some(keep) = wire.metadata {
 			keep.apply(&mut job);
 		}

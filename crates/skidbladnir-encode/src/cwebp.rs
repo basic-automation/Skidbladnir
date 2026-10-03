@@ -96,6 +96,12 @@ pub fn cwebp_args(job: &EncodeJob, input: &Path, output: &Path) -> Vec<OsString>
 		}
 	}
 
+	// A `.yuv` input is raw planes, which cwebp reads only with their size.
+	if let Some(size) = job.yuv_size
+		&& input.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| extension.eq_ignore_ascii_case("yuv"))
+	{
+		flag("-s", &[size.width.to_string(), size.height.to_string()]);
+	}
 	let mut args: Vec<OsString> = args.into_iter().map(OsString::from).collect();
 	args.push(input.as_os_str().to_os_string());
 	args.push(OsString::from("-o"));

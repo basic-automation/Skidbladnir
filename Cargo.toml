@@ -26,6 +26,9 @@ repository = "https://github.com/basic-automation/Skidbladnir"
 # none of the advanced controls, which is why libwebp-sys does the encoding. Default
 # features are off so the binary carries the four formats the app accepts and no more.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tiff"] }
+# EXR input, read as cjxl reads it (src/exr_input.rs). Pure Rust; already in the tree
+# through the image crate.
+exr = { version = "1.74", default-features = false }
 # SVG input. Raster images inside an SVG are drawn only from embedded data (src/svg.rs).
 resvg = { version = "0.48", default-features = false, features = ["svgz", "text", "system-fonts", "memmap-fonts", "raster-images"] }
 base64 = "0.23"

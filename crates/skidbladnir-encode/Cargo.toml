@@ -6,6 +6,8 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+# Not published: an internal library of the app (and so left out of the notices, about.toml).
+publish = false
 
 [features]
 # HEIC through x265 instead of Kvazaar: lossless, 4:4:4 and 10-bit output, and x265's own
@@ -24,6 +26,7 @@ avif-decode = { workspace = true }
 jxl-oxide = { workspace = true }
 png = { workspace = true }
 resvg = { workspace = true }
+exr = { workspace = true }
 tiff = { workspace = true }
 flate2 = { workspace = true }
 serde = { workspace = true }

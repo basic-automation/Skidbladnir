@@ -11,7 +11,7 @@ use std::{
 
 use serde::Deserialize;
 
-/// The largest document read: the notices are about 170 KB, and anything far beyond that
+/// The largest document read: the notices are about 750 KB, and anything far beyond that
 /// is not one of ours.
 const MAX_BYTES: u64 = 4 * 1024 * 1024;
 

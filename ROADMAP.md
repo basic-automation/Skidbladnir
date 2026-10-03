@@ -760,7 +760,8 @@ prettier subset.
       (`glibc-floor.py` reads rpm payloads itself), offered by the updater
       (`linux-x86_64-rpm`), and installed with dnf on `fedora:latest` by `release.yml`'s
       `rpm-install` job.
-- [ ] More platforms: a Linux ARM64 leg (`ubuntu-22.04-arm`) and a universal `.dmg`.
+- [ ] More platforms: a universal `.dmg`. (The Linux ARM64 leg, `ubuntu-22.04-arm`, shipped
+      in 1.2.0: `.deb`, `.rpm` and AppImage for both editions.)
 
 ## Phase 6 — Retire Electron
 
@@ -821,6 +822,9 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       files open in Safari, and in Firefox and Chrome as each enables it" gap to what is
       actually shipped, and re-check Firefox's status the same way.
       <https://jpegxl.com/news/>
+      Re-checked 2026-10-02: jpegxl.com's newest news is still that 25 September post;
+      Chrome's stable channel is 154, and Chromium's schedule puts 155 stable on 6 October
+      2026. <https://chromiumdash.appspot.com/fetch_milestone_schedule?mstone=155>
 - [x] **JPEG XL is close to its trigger — prepare, do not build yet.** *Superseded:* the
       owner asked for JPEG XL ahead of Chrome, and it shipped in 0.10.0 on libjxl (see
       "JPEG XL output and input" below), with `cjxl`'s whole surface since 0.14.0. Mozilla announced
@@ -1379,9 +1383,75 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       **Gate:** `matches_cjxl_reading_pgx` 16 of 16 (8- and 16-bit, both byte orders, CRLF,
       the optional space; four settings), the 12-bit file checked to be read right and to
       differ from `cjxl`, and both refusals. Mutation: the generic route fails 16 of 16.
-- [ ] More input formats the tools read: animated GIF and APNG into `cjxl` (with the
-      multi-image work below), EXR (`cjxl`, needs OpenEXR), and raw pixels
-      (`heif-enc --raw`, `cwebp -s`, which need the size given in the window).
+- [x] Raw YUV input, as `cwebp -s` reads it (2026-10-02): a `.yuv` file (known by its
+      extension; raw planes have no signature) is 8-bit I420 at `EncodeJob::yuv_size`,
+      set under "Raw YUV input" in both windows. Into WebP the planes go straight into a
+      YUV picture, as `ReadYUV` puts them, and through libwebp's own YUV-to-ARGB on the
+      paths that need it; the other formats get that RGB. Parity gate
+      `matches_reference_cwebp_through_raw_yuv`: 138 of 138 settings byte for byte on a
+      67x49 fixture (odd, so the chroma planes round up); with the planes sent through
+      RGB instead, 77 diverge. A wrong length and a missing size are refused, as `cwebp`
+      refuses them.
+- [x] `heif-enc --raw` has no result to reproduce in this build (checked 2026-10-02): its
+      reader (`heifio/decoder_raw.cc`) makes one typed component in a custom colour space,
+      which only libheif's uncompressed codec can write, and the libheif Skidbladnir ships
+      and the reference `heif-enc` are built with HEVC encoders only. Run here:
+      `heif-enc --raw-width 8 --raw-height 8 --raw-type uint8 m.raw -o m.heic` fails with
+      "Unsupported feature: Unsupported color conversion", and this `heif-enc` has no `-U`.
+      Revisit only if uncompressed HEIF output is ever added.
+- [x] EXR input, as `cjxl` reads it (2026-10-02): `src/exr_input.rs` reads with the `exr`
+      crate (BSD-3-Clause, pure Rust, already in the tree through `image`) and picks what
+      libjxl's `exr.cc` picks — R/G/B or the first layer's triple, else the first channel as
+      gray, that prefix's alpha (premultiplied), the display window with the data window
+      placed in it, linear light with sRGB primaries or the file's chromaticities, white
+      luminance as the intensity target, and its refusals (`UINT`, subsampled, mixed
+      types). JPEG XL gets the samples as stored (half or float), alpha flagged
+      premultiplied unless `--premultiply` says otherwise; the other formats get the sRGB
+      curve, clipped at white. The reference `cjxl` is now built with OpenEXR
+      (`build-reference-tools.sh` fails if it is missing; CI installs `libopenexr-dev` and
+      Homebrew's `openexr`). Gate `matches_cjxl_through_exr`: 134 cases over 10 files (half
+      and float, RGB/RGBA/gray, a named layer, data windows inside and past the display
+      window, P3 chromaticities with 203 nits, uncompressed, RLE, ZIP, PIZ, PXR24, B44,
+      DWAA and DWAB), 126 byte for byte and 8 that `cjxl` and Skidbladnir both refuse (libjxl 0.12.0 fails
+      `JxlEncoderProcessOutput` on half-float alpha at `-d 25`, `-q 0` and resampling 2-8).
+      Dropping the premultiplied flag fails 84, and declaring halves as floats 114, of the
+      first 124 (before the DWA files were added).
+- [x] EXR channels beyond colour and alpha (2026-10-02): written as `cjxl` writes them, each
+      a named optional extra channel after the alpha, with a value-initialised info (not
+      `JxlEncoderInitExtraChannelInfo`'s) at its own half/float depth, and its buffer after
+      the frame. 15 more cases in `matches_cjxl_through_exr` (RGBA with a float depth and a
+      half mask, gray with a depth, two layers with the second as extras), 149 in all;
+      leaving out the names, or the channels, fails all 15.
+- [x] JPEG XL to JPEG XL, as `cjxl` converts it (2026-10-02): `cjxl` decodes a `.jxl`
+      input with libjxl (`DecodeImageJXL`, `coalescing=false`), and so does Skidbladnir now
+      (`jxl::decode_like_cjxl`, the decoder already linked): float samples at the
+      codestream's depth through an image callback (as `use_image_callback` has it), alpha
+      kept premultiplied or not as coded, orientation undone and the Exif box's offset
+      stripped and orientation reset (`ResetExifOrientation`), XMP and JUMBF, the data's
+      colour as an encoding or else ICC, every extra channel past the first alpha with its
+      own description and name, and the decoder's basic info and frame header (with its
+      name) handed to the encoder as `cjxl` hands `ppf.info` over. Gate
+      `matches_cjxl_from_jpeg_xl`: 126 cases over six sources `cjxl` wrote (lossless and
+      lossy RGBA, 16-bit gray, Exif orientation 6 with XMP, float from PFM, EXR with extra
+      channels; the option surface and every hint on the first), 124 byte for byte and 2
+      that both refuse (124 in a debug build; see below). Mutations: no orientation reset fails 6; ICC for every colour, 20.
+- [x] A lossy JPEG XL made lossless matches too, in an optimised build (2026-10-02). In a
+      debug build it differed in 2 of 9,216 samples by one level: the `cmake` crate builds
+      libjxl at the Cargo profile's optimisation, so a debug test links an unoptimised
+      decoder whose float maths round differently from the reference's Release build. Not
+      a SIMD target: both builds carry AVX2, SSE4 and SSE2 only (`nm`). `cargo test
+      --release` (CI's parity job, and what ships) matches all 126; the gate leaves the two
+      out only under `debug_assertions`.
+- [x] A JPEG XL's IPTC and `jhgm` boxes (2026-10-02): read as `cjxl` reads them and written
+      back as it writes them (IPTC as an `xml ` box after the XMP and JUMBF, then `jhgm`;
+      `--container=0` strips them with the rest). 6 more cases, from `cjxl`'s own container
+      with the two boxes appended: 132 in all, release build; dropping the boxes fails 5
+      (the sixth is `--container=0`).
+- [ ] JPEG XL to JPEG XL, not matched yet: several frames or layers (animation, deferred with
+      the multi-image work) and a cropped layer — each converted from its pixels instead.
+- [ ] HTJ2K-compressed EXR: the `exr` crate cannot decompress it (`compression/mod.rs`
+      returns "yet unimplemented compression method").
+- [ ] Animated GIF and APNG into `cjxl` (with the multi-image work below).
 - [x] Animated WebP's own options as controls (2026-10-01): `-mixed`, `-min_size`,
       `-kmin`/`-kmax`, `img2webp -loop` and `gif2webp -loop_compatibility`
       (`WebpAnimation`). Found on the way: under `-mixed` the encoder still reads the
@@ -1392,9 +1462,17 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
 - [x] `img2webp -d` given once for every frame (2026-10-01): `WebpAnimation::frame_duration`,
       "Set every frame's duration". **Gate:** two cases in `matches_reference_img2webp`
       (46 of 46 now); ignoring it fails 4.
-- [ ] `img2webp`'s options for each frame on its own (a different `-d`, `-lossy`/`-lossless`,
-      `-q`, `-m` or `-exact` per frame): they need per-frame settings in the window, which
-      re-encoding one source does not have yet.
+- [x] `img2webp`'s frame options (2026-10-02): `WebpAnimation::frame_changes`, each "from
+      frame N on: lossy or lossless, quality, method, exact, duration", applied per frame in
+      frame order as `img2webp` carries an option from the frame it precedes to every later
+      one (`animation::for_frame`; `-lossy`/`-lossless` ignored under `-mixed`, as there).
+      In both windows' Animation section as a list of changes (the gpui window gained
+      `SKID_EXPAND` to open a disclosure for a check). Gate: 10 cases at two loop counts in
+      `matches_reference_img2webp` (66 in all), the harness putting each change's flags
+      before its frame; ignoring the changes fails 18, applying them out of order 4. GIF
+      input has no such options in `gif2webp`, so there they apply on top, with no
+      reference. Smoke test 43/43; axe clean with a change added in every
+      "every control showing" state.
 - [x] GPL edition: `heif-enc`'s `-p x265:<param>` beyond the fixed set of x265 controls
       (2026-10-01): `HeicSettings::x265_parameters`, a list of `KEY=VALUE` passed after the
       controls (so one overrides them), refused in the standard edition and dropped when a
@@ -1409,7 +1487,25 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       parallel tests shared and deleted one directory; a counter replaced it. Every gate
       then passed on macOS in CI run 36956355147.
 - [ ] Parity on Windows: the reference tools would have to build there (`makefile.unix`
-      does not; CMake might).
+      does not; CMake might). A first slice, sized 2026-10-02 from libwebp's sources:
+      libwebp's CMake builds `cwebp` with MSVC, but on Windows it reads PNG, JPEG and TIFF
+      through WIC whenever `wincodec.h` is found (`cmake/deps.cmake`, `HAVE_WINCODEC_H`), a
+      different decoder from the libpng/libjpeg-turbo/libtiff the gates match. So: configure
+      with `-DHAVE_WINCODEC_H=0` (the check is skipped when the variable is set) and run only
+      the gates that never hand cwebp a PNG, JPEG or TIFF — the PAM control surface, the
+      cwebp-defaults reset, WebP and PNM sources, raw YUV — as a Windows parity leg.
+      **First slice done (2026-10-02):** CI's `parity-windows` job runs the four
+      `tests/parity.rs` gates of that kind, and on its first run every case matched with MSVC
+      builds of both sides — 138 control-surface settings, 552 WebP-to-WebP conversions, 138
+      raw YUV conversions and the defaults reset (run 37092442114). Then, all passing on
+      their first runs (37094421926) and now gates: `img2webp`, `gif2webp` and `webpmux` too,
+      and the image readers the Linux references use (libjpeg-turbo from our submodule;
+      libpng, libtiff and giflib from vcpkg; static runtime, no WIC) — every
+      `tests/parity.rs`, `tests/animation.rs` and `tests/gif.rs` gate and `tests/pnm.rs`'s
+      cwebp ones on Windows; and `cjxl` from libjxl's CMake with MSVC — every JPEG XL gate
+      but EXR's and the JPEG XL-source one (libjxl finds OpenEXR only through pkg-config),
+      and `tests/pnm.rs`'s PNM, PFM and PGX ones. **Next:** OpenEXR for that `cjxl`
+      (pkg-config from vcpkg), then avifenc and heif-enc.
 
 **Multi-image features the tools have, deferred by the owner (2026-09-28):**
 
@@ -1437,8 +1533,13 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       enlargement to lossless WebP (fails without it).
 - [x] `.svgz` input (2026-10-01): `resvg`'s `svgz` feature, and the sniff looks inside the
       gzip stream, from the start of the file alone.
-- [ ] SVG input: drawing at the crop's size when a crop and a resize are both set (a crop
-      today keeps the raster route).
+- [x] SVG drawn at the crop's size (2026-10-02): with a crop and a resize both set, only
+      the crop's rectangle (in the drawing's own pixels) is drawn, straight at the resized
+      size (`svg::rasterise_region`), the missing dimension derived from the crop as
+      libwebp's rescaler derives it. A crop alone still keeps the raster's own pixels.
+      Tested: sizes match libwebp's crop-then-rescale for four crops, a crop outside the
+      drawing is refused, and a hard edge survives an 8x enlargement of a crop to lossless
+      WebP (fails with the old raster route).
 - [ ] **SVG output** (owner request, 2026-09-28) — needs the owner's answer to the question
       below first. The original notes, input included: *Input* means rasterising:
       `resvg` is the obvious renderer (pure Rust, no C toolchain); it needs a size — the
@@ -1451,6 +1552,30 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
 
 ## Cross-cutting
 
+- [x] **The gpui window is the default** (1.3.0, PR #67, an owner-requested session rather
+      than a routine run): `crates/skidbladnir-gpui`, opened by `src-tauri` through the
+      default `gpui` feature, with the Nuxt webview kept as a fallback (`SKIDBLADNIR_UI=webview`,
+      or automatically when gpui cannot open a window). Every UI change goes into both.
+      <https://github.com/basic-automation/Skidbladnir/pull/67>
+- [x] Something automated opens the gpui window (2026-10-02): `scripts/gpui-smoke.sh` launches
+      it with its debug variables (`SKID_FORMAT`, `SKID_INPUTS`, `SKID_CONVERT`) and a scratch
+      configuration, has it convert a PNG to WebP, AVIF, JPEG XL and HEIC and a raw `.yuv` at
+      the size its settings give, and checks each file's header on disk and that the process
+      it started is still the one running (the webview fallback relaunches and exits). 5 of 5
+      on the dev host (Hyprland); forced onto the webview window, every one fails.
+- [x] `scripts/gpui-smoke.sh` is a CI gate (2026-10-02): on Linux in the window job, both
+      editions, with Mesa's lavapipe on Xvfb, and on Windows against the installed app
+      (Direct3D, WARP on the GPU-less runner; the script writes the real `%APPDATA%`
+      configuration there, which it allows only under `CI=true`). Both passed 5 of 5 on
+      their first run (37092442114), the first time anything automated opened the gpui
+      window on Windows. macOS is covered by the release workflow, which launches the app
+      and screenshots its window.
+- [ ] Accessibility of the gpui window: no screen reader has been run against it (PR #67's
+      "not tested"), and the axe audit (`a11y-audit.sh`) covers only the webview window.
+- [ ] Dragging files onto the gpui window has not been tested (PR #67); `SKID_INPUTS` takes
+      the drop path in code, not a real drag.
+- [ ] The gpui window on macOS and Windows has not been opened by a person (CI builds and
+      tests it; the Windows installer smoke runs the webview window).
 - [x] The saving percentage is computed **once**, in Rust. `savingOf()` is gone from
       `pages/index.vue`; the conversion report and the preview both carry the core's
       `saving_percent`, and the window only formats it (commit 235dbc0 — this box was left
@@ -1502,15 +1627,52 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       editions' notices (2026-10-01). Texts the packages lack are in
       `LICENSES/third-party/` with their sources; the generator refuses to run if
       `frontend/package.json`'s icon collections differ from the ones it describes.
-- [ ] Notices for the rest of what the installers carry: the Rust crates (`cargo-about`),
-      the JavaScript libraries in the frontend bundle (Vue, Nuxt, Nuxt UI, Reka UI and
-      their dependencies, mostly MIT), and the Ubuntu libraries inside the AppImage. Check
-      them in CI beside `third-party-notices.py --check`.
+- [x] Notices for the Rust crates (2026-10-02): `cargo-about` 0.9.2 (`about.toml`,
+      `about.hbs`) lists the 700-odd crates compiled into the app on any of the five
+      platforms it is built for (no build or dev dependencies, not Skidbladnir's own),
+      grouped by licence text, into `LICENSES/third-party/rust-crates.md`, which
+      `third-party-notices.py` appends to both editions' notices. CI's `deny` job installs
+      the same cargo-about and fails if the listing is stale. MIT is preferred where a
+      crate offers a choice: Apache-2.0 first came out larger (918 KB against 550 KB),
+      because crates' copies of the Apache text differ in their whitespace.
+- [x] Notices for the JavaScript packages in the webview window's bundle (2026-10-02): a
+      Vite plugin (`frontend/tools/javascript-notices.ts`, active only when
+      `SKIDBLADNIR_JS_NOTICES` names a file) lists every npm package with a module that kept
+      code in the client bundle after tree-shaking — 35 packages (Vue, Nuxt, Nuxt UI, Reka
+      UI, Floating UI, VueUse, the Tauri API…), every one with a licence file — grouped by
+      licence text into `LICENSES/third-party/javascript.md`, appended to both editions'
+      notices. CI's Linux rust leg rebuilds it and fails if it is stale. A clean rebuild is
+      byte-identical.
+- [x] Notices for the Ubuntu libraries inside the AppImage (2026-10-02). linuxdeploy copies
+      most bundled packages' Debian copyright files into the image
+      (`usr/share/doc/<package>/copyright`), **but not all**: the new check found 10 of the
+      110 packages behind its 172 libraries without theirs, on every Linux leg and edition —
+      dconf-gsettings-backend, glib-networking, libbz2-1.0, libcap2, libdbus-1-3 and others
+      the GTK plugin pulls in — so every AppImage to date shipped those libraries without
+      their licences. `scripts/appimage-notices.py` maps each bundled library to its runtime
+      package (`dpkg -S`, through symlinks), release.yml bundles the AppImage again with the
+      missing files (`tauri bundle --bundles appimage --config <fragment>`, re-signed), and
+      the check fails the release if any are still missing. Both editions' notices say
+      where the files are and that the sources are Ubuntu 22.04's (jammy). Release dry run
+      37092442062: 110 of 110 on all four Linux legs, installs and updater manifests green.
+- [ ] Dependabot's cargo and npm PRs now fail CI's notices checks until someone
+      regenerates `LICENSES/third-party/rust-crates.md` or `javascript.md`, and the
+      notices, on the PR branch (that check is the point: a new package's licence must
+      reach the notices). A workflow
+      that regenerates and pushes them for Dependabot's branches would save the manual
+      step; it needs a token that can push to them, so it is a security decision.
 - [ ] Two Dependabot alerts with no clean fix (2026-10-01): `glib` 0.18 (unsound
       `VariantStrIter`, fixed in 0.20) comes with Tauri 2's GTK 3 bindings, and `esbuild`
       0.27 (a Windows dev-server file read, fixed in 0.28.1) is pinned `^0.27` by
       `fontless` under `@nuxt/fonts`. Neither is in what ships; take each fix when its
       parent allows it.
+      Re-checked 2026-10-02: both still open (`glib` 0.18.5 in `Cargo.lock`; `fontless` 1.2.1
+      is the newest). A third, alert #45, high: `node-forge` 1.4.0 (RSA PKCS#1 v1.5
+      signatures accepting extra nested `DigestAlgorithm` elements, CVE-2026-85393, no fixed
+      release) comes through `nuxt` → `@nuxt/cli` → `listhen`, the dev server's certificate
+      helper, in development scope only; the bundle listing
+      (`LICENSES/third-party/javascript.md`) confirms it is not in what ships. Take a fix
+      when `listhen` or `node-forge` has one. <https://github.com/advisories/GHSA-86w9-cpqp-85rv>
 - [x] README: an acknowledgements and non-affiliation section (2026-10-01).
 - [x] README: a dated "How it compares" table (2026-10-01): Squoosh, XnConvert,
       Converseen and the raw CLIs, each from its own page

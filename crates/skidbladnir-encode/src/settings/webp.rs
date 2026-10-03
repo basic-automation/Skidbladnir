@@ -190,7 +190,7 @@ impl WebpMetadata {
 ///
 /// Every option left at its default is the tool's own default, so an untouched job still
 /// matches `img2webp` (animated WebP) and `gif2webp` (GIF) exactly.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct WebpAnimation {
 	/// Search harder for the smallest file; slower, and spaces no keyframes (`-min_size`).
@@ -212,6 +212,58 @@ pub struct WebpAnimation {
 	/// Show every frame for this many milliseconds, at least 1 (`img2webp -d`, given once
 	/// before every frame); `None` keeps each frame's own timing.
 	pub frame_duration: Option<u32>,
+	/// Settings changed from a given frame on, as `img2webp`'s frame options change them
+	/// when given before a frame: each holds for that frame and every one after it, until a
+	/// later change sets the same option again.
+	pub frame_changes: Vec<FrameChange>,
+}
+
+/// `img2webp`'s frame options, given before one frame: what changes from that frame on.
+/// `None` leaves an option as it was.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct FrameChange {
+	/// The first frame it applies to, counting from 1.
+	pub from_frame: u32,
+	/// Lossless (`-lossless`) or lossy (`-lossy`); `-mixed` makes `img2webp` ignore both.
+	pub lossless: Option<bool>,
+	/// Quality, `0..=100` (`-q`).
+	pub quality: Option<f32>,
+	/// Compression method, `0..=6` (`-m`).
+	pub method: Option<u8>,
+	/// Keep the colour under transparent pixels (`-exact`) or not (`-noexact`).
+	pub exact: Option<bool>,
+	/// Frame duration in milliseconds, at least 1 (`-d`).
+	pub duration: Option<u32>,
+}
+
+impl FrameChange {
+	/// The `img2webp` options this change puts before its frame, in the order `img2webp`
+	/// reads them (each is independent of the others).
+	#[must_use]
+	pub fn img2webp_args(&self) -> Vec<String> {
+		let mut args = Vec::new();
+		match self.lossless {
+			Some(true) => args.push("-lossless".to_owned()),
+			Some(false) => args.push("-lossy".to_owned()),
+			None => {}
+		}
+		if let Some(quality) = self.quality {
+			args.extend(["-q".to_owned(), quality.to_string()]);
+		}
+		if let Some(method) = self.method {
+			args.extend(["-m".to_owned(), method.to_string()]);
+		}
+		match self.exact {
+			Some(true) => args.push("-exact".to_owned()),
+			Some(false) => args.push("-noexact".to_owned()),
+			None => {}
+		}
+		if let Some(duration) = self.duration {
+			args.extend(["-d".to_owned(), duration.to_string()]);
+		}
+		args
+	}
 }
 
 /// Every WebP control: the `cwebp` surface less the crop and resize, which belong to the
@@ -305,7 +357,7 @@ impl WebpSettings {
 	/// what `cwebp` encodes when given nothing but `-q 75`.
 	#[must_use]
 	pub const fn libwebp_defaults() -> Self {
-		Self { lossless: false, near_lossless: 100, exact: false, quality: 75.0, alpha_quality: 100, alpha_compression: true, alpha_filtering: AlphaFiltering::Fast, method: 4, image_hint: ImageHint::Default, target: None, segments: 4, sns: 50, filter_strength: 60, filter_sharpness: 0, filter_type: FilterType::Strong, autofilter: false, passes: 1, qmin: 0, qmax: 100, preprocessing: 0, partition_limit: 0, jpeg_like: false, sharp_yuv: false, low_memory: false, multi_threading: false, keep_alpha: true, blend_alpha: None, metadata: WebpMetadata { exif: false, icc: false, xmp: false }, animation: WebpAnimation { minimize_size: false, allow_mixed: false, kmin: None, kmax: None, loop_count: None, loop_compatibility: false, frame_duration: None } }
+		Self { lossless: false, near_lossless: 100, exact: false, quality: 75.0, alpha_quality: 100, alpha_compression: true, alpha_filtering: AlphaFiltering::Fast, method: 4, image_hint: ImageHint::Default, target: None, segments: 4, sns: 50, filter_strength: 60, filter_sharpness: 0, filter_type: FilterType::Strong, autofilter: false, passes: 1, qmin: 0, qmax: 100, preprocessing: 0, partition_limit: 0, jpeg_like: false, sharp_yuv: false, low_memory: false, multi_threading: false, keep_alpha: true, blend_alpha: None, metadata: WebpMetadata { exif: false, icc: false, xmp: false }, animation: WebpAnimation { minimize_size: false, allow_mixed: false, kmin: None, kmax: None, loop_count: None, loop_compatibility: false, frame_duration: None, frame_changes: Vec::new() } }
 	}
 
 	/// Start again from what `cwebp` encodes when given no options at all —
@@ -316,7 +368,7 @@ impl WebpSettings {
 	}
 
 	/// The Electron app's choices on top of libwebp's defaults.
-	const fn with_app_defaults(self) -> Self {
+	fn with_app_defaults(self) -> Self {
 		Self { autofilter: true, multi_threading: true, alpha_filtering: AlphaFiltering::Best, passes: 6, ..self }
 	}
 
@@ -326,7 +378,7 @@ impl WebpSettings {
 	/// encoder config and are left alone, as is multi-threading, which changes how fast the file is written but not a
 	/// byte of it.
 	pub fn apply_preset(&mut self, preset: Preset) {
-		let kept = (self.quality, self.multi_threading, self.keep_alpha, self.blend_alpha, self.metadata, self.animation);
+		let kept = (self.quality, self.multi_threading, self.keep_alpha, self.blend_alpha, self.metadata, std::mem::take(&mut self.animation));
 		*self = Self::libwebp_defaults();
 		(self.quality, self.multi_threading, self.keep_alpha, self.blend_alpha, self.metadata, self.animation) = kept;
 		// config_enc.c, WebPConfigInitInternal's preset switch.
@@ -399,6 +451,26 @@ impl WebpSettings {
 			&& !(1..=i32::MAX.unsigned_abs()).contains(&duration)
 		{
 			return Err(ValidationError::OutOfRange { field: "animation.frame_duration", value: duration, min: 1, max: i32::MAX.unsigned_abs() });
+		}
+		for change in &self.animation.frame_changes {
+			if change.from_frame == 0 {
+				return Err(ValidationError::OutOfRange { field: "animation.frame_changes.from_frame", value: 0, min: 1, max: u32::MAX });
+			}
+			if let Some(quality) = change.quality
+				&& !(0.0..=100.0).contains(&quality)
+			{
+				return Err(ValidationError::OutOfRangeFloat { field: "animation.frame_changes.quality", value: quality, min: 0.0, max: 100.0 });
+			}
+			if let Some(method) = change.method
+				&& method > 6
+			{
+				return Err(ValidationError::OutOfRange { field: "animation.frame_changes.method", value: u32::from(method), min: 0, max: 6 });
+			}
+			if let Some(duration) = change.duration
+				&& !(1..=i32::MAX.unsigned_abs()).contains(&duration)
+			{
+				return Err(ValidationError::OutOfRange { field: "animation.frame_changes.duration", value: duration, min: 1, max: i32::MAX.unsigned_abs() });
+			}
 		}
 		if let Some(colour) = self.blend_alpha
 			&& colour > 0x00ff_ffff

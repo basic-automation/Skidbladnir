@@ -1,0 +1,44 @@
+# cargo-about's configuration, for the Rust crates' section of the third-party notices.
+#
+#   cargo about generate --locked --fail about.hbs -o LICENSES/third-party/rust-crates.md
+#
+# then scripts/third-party-notices.py, which copies that file into both editions' notices.
+# CI fails if either is stale.
+
+# Every licence `deny.toml` allows, in the order a crate offering a choice is listed under:
+# MIT first: most crates offer it beside Apache-2.0, and although each crate's MIT text
+# carries its own copyright line, Apache-2.0 first came out larger (918 KB against 550 KB),
+# because crates' copies of the Apache text differ in their whitespace.
+accepted = [
+	"MIT",
+	"Apache-2.0",
+	"Apache-2.0 WITH LLVM-exception",
+	"BSD-2-Clause",
+	"BSD-3-Clause",
+	"ISC",
+	"Zlib",
+	"0BSD",
+	"MIT-0",
+	"Unlicense",
+	"CC0-1.0",
+	"Unicode-3.0",
+	"MPL-2.0",
+	"bzip2-1.0.6",
+	"CDLA-Permissive-2.0",
+]
+# The platforms the installers are built for (deny.toml checks the same graph).
+targets = [
+	"x86_64-unknown-linux-gnu",
+	"aarch64-unknown-linux-gnu",
+	"x86_64-pc-windows-msvc",
+	"x86_64-apple-darwin",
+	"aarch64-apple-darwin",
+]
+# Only what is compiled into the app: not the tests' or the build scripts' crates.
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+# Skidbladnir's own crates are covered by LICENSE.
+private = { ignore = true }
+# cargo-about's built-in clarifications for crates whose packages misstate their licence
+# files: ring and rustls, both in the updater's TLS.
+workarounds = ["ring", "rustls"]

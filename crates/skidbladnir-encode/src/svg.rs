@@ -54,7 +54,7 @@ pub fn sniff(bytes: &[u8]) -> bool {
 /// A description of the failure: not an SVG `resvg` can parse, a size of zero, or more than
 /// [`MAX_PIXELS`].
 pub fn rasterise(bytes: &[u8]) -> Result<Raster, String> {
-	draw(bytes, None)
+	draw(bytes, None, None)
 }
 
 /// Rasterise an SVG document straight at `width` x `height`, either of them `0` to keep the
@@ -66,10 +66,23 @@ pub fn rasterise(bytes: &[u8]) -> Result<Raster, String> {
 ///
 /// As [`rasterise`].
 pub fn rasterise_at(bytes: &[u8], width: u32, height: u32) -> Result<Raster, String> {
-	draw(bytes, Some((width, height)))
+	draw(bytes, None, Some((width, height)))
 }
 
-fn draw(bytes: &[u8], size: Option<(u32, u32)>) -> Result<Raster, String> {
+/// Rasterise only a rectangle of an SVG document — `x`, `y`, `crop_width` x `crop_height`,
+/// in the pixels of the drawing at its own size, as a crop is given — straight at `width` x
+/// `height`, either of them `0` to keep the crop's aspect ratio as [`rasterise_at`] keeps
+/// the drawing's. This is a crop followed by a resize, drawn in one step, so the edges stay
+/// sharp at the new size.
+///
+/// # Errors
+///
+/// As [`rasterise`], or if the rectangle is empty or does not lie inside the drawing.
+pub fn rasterise_region(bytes: &[u8], x: u32, y: u32, crop_width: u32, crop_height: u32, width: u32, height: u32) -> Result<Raster, String> {
+	draw(bytes, Some((x, y, crop_width, crop_height)), Some((width, height)))
+}
+
+fn draw(bytes: &[u8], region: Option<(u32, u32, u32, u32)>, size: Option<(u32, u32)>) -> Result<Raster, String> {
 	let mut fonts = resvg::usvg::fontdb::Database::new();
 	fonts.load_system_fonts();
 	// Only images embedded in the file itself; no path or URL is ever opened.
@@ -77,7 +90,11 @@ fn draw(bytes: &[u8], size: Option<(u32, u32)>) -> Result<Raster, String> {
 
 	let tree = resvg::usvg::Tree::from_data(bytes, &options).map_err(|error| format!("not an SVG resvg can read: {error}"))?;
 	let own = tree.size().to_int_size();
-	let (own_width, own_height) = (own.width(), own.height());
+	let (left, top, own_width, own_height) = match region {
+		None => (0, 0, own.width(), own.height()),
+		Some((x, y, width, height)) if width > 0 && height > 0 && x < own.width() && y < own.height() && width <= own.width() - x && height <= own.height() - y => (x, y, width, height),
+		Some((x, y, width, height)) => return Err(format!("a {width}x{height} crop at {x},{y} does not fit an SVG of {}x{}", own.width(), own.height())),
+	};
 	let (width, height) = match size {
 		None | Some((0, 0)) => (own_width, own_height),
 		// WebPRescalerGetScaledDimensions.
@@ -90,8 +107,11 @@ fn draw(bytes: &[u8], size: Option<(u32, u32)>) -> Result<Raster, String> {
 	}
 	let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height).ok_or_else(|| format!("cannot draw an SVG of {width}x{height}"))?;
 	#[expect(clippy::cast_precision_loss, reason = "a scale factor; sizes are far below f32's exact-integer range")]
-	let scale = resvg::tiny_skia::Transform::from_scale(width as f32 / own_width as f32, height as f32 / own_height as f32);
-	resvg::render(&tree, scale, &mut pixmap.as_mut());
+	let (scale_x, scale_y) = (width as f32 / own_width as f32, height as f32 / own_height as f32);
+	// The region's top left corner moves to the origin, then the region is scaled to fill.
+	#[expect(clippy::cast_precision_loss, reason = "a pixel offset; sizes are far below f32's exact-integer range")]
+	let transform = resvg::tiny_skia::Transform::from_row(scale_x, 0.0, 0.0, scale_y, -(left as f32) * scale_x, -(top as f32) * scale_y);
+	resvg::render(&tree, transform, &mut pixmap.as_mut());
 	// tiny-skia keeps premultiplied colour; every encoder here takes straight.
 	let pixels = pixmap.pixels().iter().flat_map(|pixel| {
 		let straight = pixel.demultiply();
@@ -167,6 +187,29 @@ mod tests {
 			let pixels = vec![0_u8; 10 * 4 * 4];
 			let (w, h, _) = crate::encoder::rescale_rgba(&crate::encoder::RgbaImage { width: 10, height: 4, pixels: &pixels }, crate::settings::Resize::to(asked.0, asked.1)).expect("libwebp rescales");
 			assert_eq!(((drawn.width, drawn.height), (w, h)), (expected, expected), "{asked:?}");
+		}
+	}
+
+	/// A crop and a resize together: only the rectangle is drawn, at the new size, with its
+	/// edges sharp, and with the size libwebp's rescaler gives the cropped raster.
+	#[test]
+	fn draws_a_crop_at_the_size_asked_for() {
+		// Four 5x4 columns: red, green, blue, white.
+		let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="4"><rect width="5" height="4" fill="#ff0000"/><rect x="5" width="5" height="4" fill="#00ff00"/><rect x="10" width="5" height="4" fill="#0000ff"/><rect x="15" width="5" height="4" fill="#ffffff"/></svg>"##;
+		// The green and blue columns, ten times as large.
+		let big = super::rasterise_region(svg, 5, 0, 10, 4, 100, 40).expect("rasterise");
+		assert_eq!((big.width, big.height), (100, 40));
+		let at = |x: usize, y: usize| &big.pixels[(y * 100 + x) * 4..(y * 100 + x) * 4 + 4];
+		assert_eq!((at(0, 0), at(49, 39), at(50, 0), at(99, 39)), (&[0, 255, 0, 255][..], &[0, 255, 0, 255][..], &[0, 0, 255, 255][..], &[0, 0, 255, 255][..]), "only the crop, edge sharp");
+		let pixels = vec![0_u8; 20 * 4 * 4];
+		let source = crate::encoder::RgbaImage { width: 20, height: 4, pixels: &pixels };
+		for (crop, asked) in [((5, 0, 10, 4), (25, 0)), ((3, 1, 7, 3), (0, 10)), ((0, 0, 20, 4), (7, 0)), ((1, 1, 3, 3), (9, 9))] {
+			let drawn = super::rasterise_region(svg, crop.0, crop.1, crop.2, crop.3, asked.0, asked.1).expect("rasterise");
+			let (w, h, _) = crate::encoder::crop_and_rescale_rgba(&source, Some(crate::settings::Crop { x: crop.0, y: crop.1, width: crop.2, height: crop.3 }), crate::settings::Resize::to(asked.0, asked.1)).expect("libwebp rescales");
+			assert_eq!((drawn.width, drawn.height), (w, h), "{crop:?} to {asked:?}");
+		}
+		for crop in [(0, 0, 0, 4), (16, 0, 5, 4), (0, 4, 1, 1), (0, 0, 21, 4)] {
+			assert!(super::rasterise_region(svg, crop.0, crop.1, crop.2, crop.3, 10, 0).expect_err("outside").contains("does not fit"), "{crop:?}");
 		}
 	}
 
