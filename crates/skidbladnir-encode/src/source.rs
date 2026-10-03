@@ -1016,7 +1016,7 @@ mod tests {
 	};
 
 	use super::{Conversion, ConvertError, OutputCollision, SourceFormat, encode_file, encode_file_with_options, load, output_collisions, output_path_in};
-	use crate::settings::{AvifSettings, EncodeJob, OutputFormat, Resize, WebpSettings};
+	use crate::settings::{AvifSettings, Crop, EncodeJob, OutputFormat, Resize, WebpSettings};
 
 	/// A scratch directory that cleans itself up. Every test in this module writes only
 	/// inside one of these — nothing here touches a path outside the temp directory.
@@ -1212,6 +1212,14 @@ mod tests {
 		let big = load(&output).expect("decode");
 		let alpha = |x: usize| big.pixels[x * 4 + 3];
 		assert_eq!((alpha(29), alpha(30)), (255, 0), "a hard edge at the rectangle's side, not a scaled blur");
+		// Cropped as well, only the crop is drawn at the new size, and the edge stays hard.
+		let output = scratch.join("drawing-crop.webp");
+		let job = EncodeJob { crop: Some(Crop { x: 10, y: 5, width: 10, height: 10 }), resize: Resize::to(80, 0), ..job };
+		let conversion = encode_file(&job, &input, &output).expect("convert");
+		assert_eq!((conversion.width, conversion.height), (80, 80));
+		let cropped = load(&output).expect("decode");
+		let alpha = |x: usize| cropped.pixels[x * 4 + 3];
+		assert_eq!((alpha(39), alpha(40)), (255, 0), "the crop's edge, drawn at eight times, still hard");
 	}
 
 	/// A failed encode must not damage a file that is already there.

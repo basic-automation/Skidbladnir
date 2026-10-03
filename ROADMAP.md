@@ -1437,8 +1437,13 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       enlargement to lossless WebP (fails without it).
 - [x] `.svgz` input (2026-10-01): `resvg`'s `svgz` feature, and the sniff looks inside the
       gzip stream, from the start of the file alone.
-- [ ] SVG input: drawing at the crop's size when a crop and a resize are both set (a crop
-      today keeps the raster route).
+- [x] SVG drawn at the crop's size (2026-10-02): with a crop and a resize both set, only
+      the crop's rectangle (in the drawing's own pixels) is drawn, straight at the resized
+      size (`svg::rasterise_region`), the missing dimension derived from the crop as
+      libwebp's rescaler derives it. A crop alone still keeps the raster's own pixels.
+      Tested: sizes match libwebp's crop-then-rescale for four crops, a crop outside the
+      drawing is refused, and a hard edge survives an 8x enlargement of a crop to lossless
+      WebP (fails with the old raster route).
 - [ ] **SVG output** (owner request, 2026-09-28) — needs the owner's answer to the question
       below first. The original notes, input included: *Input* means rasterising:
       `resvg` is the obvious renderer (pure Rust, no C toolchain); it needs a size — the

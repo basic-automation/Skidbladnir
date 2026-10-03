@@ -351,8 +351,9 @@ pub fn encode_source_with_progress(job: &EncodeJob, source: &SourceImage, on_pro
 	}
 	let reread = job.tiff_alpha_like_reference.then(|| crate::source::tiff_like_reference(source, job.format)).flatten();
 	let source = reread.as_ref().unwrap_or(source);
-	// An SVG with a resize and no crop is drawn again at the new size, which keeps its edges
-	// sharp where scaling the raster would blur them, and is then encoded as it is.
+	// An SVG with a resize is drawn again at the new size, only the crop's rectangle of it if
+	// there is one, which keeps its edges sharp where scaling the raster would blur them, and
+	// is then encoded as it is.
 	let redrawn = svg_at_resize(job, source);
 	let (job, source) = match &redrawn {
 		Some((job, source)) => (job, source),
@@ -366,18 +367,24 @@ pub fn encode_source_with_progress(job: &EncodeJob, source: &SourceImage, on_pro
 	}
 }
 
-/// An SVG source drawn at the job's resize, and the job with nothing left to resize; `None`
-/// for any other source, a crop (which is in the drawing's own pixels), or no resize.
+/// An SVG source drawn at the job's resize — only the crop's rectangle, given in the
+/// drawing's own pixels, when there is a crop — and the job with nothing left to crop or
+/// resize; `None` for any other source, or no resize (a crop alone keeps the raster's own
+/// pixels exactly).
 fn svg_at_resize(job: &EncodeJob, source: &SourceImage) -> Option<(EncodeJob, SourceImage)> {
-	if source.format != SourceFormat::Svg || source.bytes.is_empty() || job.crop.is_some() {
+	if source.format != SourceFormat::Svg || source.bytes.is_empty() {
 		return None;
 	}
-	let resize = job.resize.for_source(source.width, source.height);
+	let resize = job.resize.for_source(job.crop.map_or(source.width, |c| c.width), job.crop.map_or(source.height, |c| c.height));
 	if resize.is_noop() {
 		return None;
 	}
-	let raster = crate::svg::rasterise_at(&source.bytes, resize.width, resize.height).ok()?;
-	Some((EncodeJob { resize: Resize::default(), ..job.clone() }, SourceImage { width: raster.width, height: raster.height, pixels: raster.pixels, deep: None, gray: false, has_alpha: source.has_alpha, format: source.format, bytes: source.bytes.clone() }))
+	let raster = match job.crop {
+		None => crate::svg::rasterise_at(&source.bytes, resize.width, resize.height),
+		Some(crop) => crate::svg::rasterise_region(&source.bytes, crop.x, crop.y, crop.width, crop.height, resize.width, resize.height),
+	}
+	.ok()?;
+	Some((EncodeJob { crop: None, resize: Resize::default(), ..job.clone() }, SourceImage { width: raster.width, height: raster.height, pixels: raster.pixels, deep: None, gray: false, has_alpha: source.has_alpha, format: source.format, bytes: source.bytes.clone() }))
 }
 
 /// The source after the job's crop and resize, with every sample depth it carries.
