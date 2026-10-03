@@ -2,7 +2,7 @@
 //! per flag, with cwebp's own help text.
 
 use gpui::{AnyElement, Context, IntoElement, ParentElement, Styled, Window, div, px};
-use skidbladnir_encode::settings::{AlphaFiltering, FilterType, ImageHint, Preset, TargetMetric};
+use skidbladnir_encode::settings::{AlphaFiltering, FilterType, FrameChange, ImageHint, Preset, TargetMetric};
 
 use crate::{
 	app::Skid, controls::{Press, Ring, button_soft, field, field_label, help}, theme::{ERROR, Type, c}
@@ -236,7 +236,24 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 			let loops = this.optional("webp-loop", "Set the loop count", None, Some("-loop · not given: the source's own loop count is kept"), animation.loop_count.is_some(), |t, on| t.job().webp.animation.loop_count = on.then_some(0), loop_body, window, cx);
 			let duration_body = animation.frame_duration.map(|value| this.number("webp-duration-value", "Milliseconds per frame", Some("-d · frame duration, given once for every frame"), f64::from(value), 1., 2_147_483_647., 0, Some("ms"), false, |t, v| t.job().webp.animation.frame_duration = Some(to_u32(v)), cx));
 			let duration = this.optional("webp-duration", "Set every frame's duration", None, Some("-d · not given: each frame keeps its own timing"), animation.frame_duration.is_some(), |t, on| t.job().webp.animation.frame_duration = on.then_some(100), duration_body, window, cx);
-			vec![note, Skid::grid(3, 16., vec![min_size, mixed, loop_compat]).into_any_element(), Skid::grid(3, 16., vec![kmin, kmax, loops]).into_any_element(), Skid::grid(3, 16., vec![duration]).into_any_element()]
+			let mut rows = vec![note, Skid::grid(3, 16., vec![min_size, mixed, loop_compat]).into_any_element(), Skid::grid(3, 16., vec![kmin, kmax, loops]).into_any_element(), Skid::grid(3, 16., vec![duration]).into_any_element()];
+			rows.push(help("img2webp's frame options · a change holds from its frame on, until a later one sets the same option again; -lossy and -lossless do nothing with -mixed. GIF input has no such options in gif2webp, so there they apply on top.").px(px(10.)).into_any_element());
+			for (index, change) in animation.frame_changes.iter().enumerate() {
+				rows.push(frame_change(this, index, change, window, cx));
+			}
+			let add = crate::controls::add_button(
+				this,
+				"webp-frame-change-add",
+				"Add a change from a frame",
+				|t, _, cx| {
+					t.job().webp.animation.frame_changes.push(FrameChange { from_frame: 2, ..FrameChange::default() });
+					t.changed(cx);
+				},
+				window,
+				cx,
+			);
+			rows.push(div().flex().px(px(10.)).child(add).into_any_element());
+			rows
 		},
 		window,
 		cx,
@@ -263,4 +280,75 @@ pub fn to_i32(value: f64) -> i32 {
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn to_u32(value: f64) -> u32 {
 	value.round().clamp(0., f64::from(u32::MAX)) as u32
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn to_f32(value: f64) -> f32 {
+	value as f32
+}
+
+/// A frame change's lossy/lossless or exact switch: left as it was, or set either way.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Switch {
+	Keep,
+	On,
+	Off,
+}
+
+impl Switch {
+	const fn of(value: Option<bool>) -> Self {
+		match value {
+			None => Self::Keep,
+			Some(true) => Self::On,
+			Some(false) => Self::Off,
+		}
+	}
+
+	const fn value(self) -> Option<bool> {
+		match self {
+			Self::Keep => None,
+			Self::On => Some(true),
+			Self::Off => Some(false),
+		}
+	}
+}
+
+/// `WebpSettingsPanel.vue`'s frame change block: from which frame, lossy or lossless, exact,
+/// and the optional quality, method and duration, with its remove button.
+fn frame_change(this: &mut Skid, index: usize, change: &FrameChange, window: &mut Window, cx: &mut Context<Skid>) -> AnyElement {
+	let n = index + 1;
+	let id = |what: &str| format!("webp-frame-change-{index}-{what}");
+	let from = this.number(&id("from"), &format!("Change {n}: from frame"), Some("the first frame it applies to, counting from 1"), f64::from(change.from_frame), 1., f64::from(u32::MAX), 0, None, false, move |t, v| set_change(t, index, |c| c.from_frame = to_u32(v).max(1)), cx);
+	let mode = this.choice(&id("lossless"), &format!("Change {n}: lossy or lossless"), Some("-lossy / -lossless"), &[(Switch::Keep, "Unchanged", None), (Switch::Off, "Lossy", None), (Switch::On, "Lossless", None)], Switch::of(change.lossless), false, false, false, move |t, v: Switch| set_change(t, index, |c| c.lossless = v.value()), window, cx);
+	let exact = this.choice(&id("exact"), &format!("Change {n}: exact"), Some("-exact / -noexact · keep the colour under transparent pixels"), &[(Switch::Keep, "Unchanged", None), (Switch::On, "Exact", None), (Switch::Off, "Not exact", None)], Switch::of(change.exact), false, false, false, move |t, v: Switch| set_change(t, index, |c| c.exact = v.value()), window, cx);
+	let remove = crate::controls::icon_button(
+		this,
+		&id("remove"),
+		"lucide--x",
+		&format!("Remove change {n}"),
+		move |t, _, cx| {
+			let changes = &mut t.job().webp.animation.frame_changes;
+			if index < changes.len() {
+				changes.remove(index);
+			}
+			t.changed(cx);
+		},
+		window,
+		cx,
+	);
+	let quality_body = change.quality.map(|value| this.number(&id("quality-value"), &format!("Change {n}: quality factor"), Some("-q · quality factor (0:small..100:big)"), f64::from(value), 0., 100., 2, None, false, move |t, v| set_change(t, index, |c| c.quality = Some(to_f32(v))), cx));
+	let quality = this.optional(&id("quality"), &format!("Change {n}: quality"), None, Some("-q · not given: unchanged"), change.quality.is_some(), move |t, on| set_change(t, index, |c| c.quality = on.then_some(75.0)), quality_body, window, cx);
+	let method_body = change.method.map(|value| this.number(&id("method-value"), &format!("Change {n}: compression method"), Some("-m · compression method (0=fast, 6=slowest)"), f64::from(value), 0., 6., 0, None, false, move |t, v| set_change(t, index, |c| c.method = Some(u8::try_from(to_u32(v).min(6)).unwrap_or(6))), cx));
+	let method = this.optional(&id("method"), &format!("Change {n}: method"), None, Some("-m · not given: unchanged"), change.method.is_some(), move |t, on| set_change(t, index, |c| c.method = on.then_some(4)), method_body, window, cx);
+	let duration_body = change.duration.map(|value| this.number(&id("duration-value"), &format!("Change {n}: milliseconds per frame"), Some("-d · frame duration"), f64::from(value), 1., 2_147_483_647., 0, Some("ms"), false, move |t, v| set_change(t, index, |c| c.duration = Some(to_u32(v).max(1))), cx));
+	let duration = this.optional(&id("duration"), &format!("Change {n}: duration"), None, Some("-d · not given: unchanged"), change.duration.is_some(), move |t, on| set_change(t, index, |c| c.duration = on.then_some(100)), duration_body, window, cx);
+	let first = div().flex().items_end().gap(px(8.)).child(div().flex_1().min_w_0().child(Skid::grid(3, 16., vec![from, mode, exact]))).child(div().mb(px(8.)).child(remove));
+	let second = div().pr(px(40.)).child(Skid::grid(3, 16., vec![quality, method, duration]));
+	div().flex().flex_col().gap(px(12.)).child(first).child(second).into_any_element()
+}
+
+fn set_change(this: &mut Skid, index: usize, edit: impl FnOnce(&mut FrameChange)) {
+	if let Some(change) = this.job().webp.animation.frame_changes.get_mut(index) {
+		edit(change);
+	}
 }

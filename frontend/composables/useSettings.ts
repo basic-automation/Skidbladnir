@@ -104,6 +104,18 @@ export interface WebpAnimation {
 	loopCount: number | null
 	loopCompatibility: boolean
 	frameDuration: number | null
+	/** img2webp's frame options: each holds from its frame (counting from 1) on. */
+	frameChanges: FrameChange[]
+}
+
+/** What changes from one frame on; `null` leaves an option as it was. */
+export interface FrameChange {
+	fromFrame: number
+	lossless: boolean | null
+	quality: number | null
+	method: number | null
+	exact: boolean | null
+	duration: number | null
 }
 
 // ---- AVIF: avifenc ----------------------------------------------------------------------

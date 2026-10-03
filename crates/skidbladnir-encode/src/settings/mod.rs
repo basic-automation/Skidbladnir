@@ -28,7 +28,7 @@ pub use heic::{ChromaDownsampling, ColorProfile, HEIC_X265, HeicAqMode, HeicBitD
 pub use jxl::{JxlColorSpace, JxlSettings, JxlTarget, MetadataSource, Primaries, RenderingIntent, TransferFunction, Tristate, WhitePoint};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-pub use webp::{AlphaFiltering, FilterType, ImageHint, Preset, TargetMetric, WebpAnimation, WebpMetadata, WebpSettings};
+pub use webp::{AlphaFiltering, FilterType, FrameChange, ImageHint, Preset, TargetMetric, WebpAnimation, WebpMetadata, WebpSettings};
 
 /// Which format to write.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

@@ -1461,9 +1461,17 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
 - [x] `img2webp -d` given once for every frame (2026-10-01): `WebpAnimation::frame_duration`,
       "Set every frame's duration". **Gate:** two cases in `matches_reference_img2webp`
       (46 of 46 now); ignoring it fails 4.
-- [ ] `img2webp`'s options for each frame on its own (a different `-d`, `-lossy`/`-lossless`,
-      `-q`, `-m` or `-exact` per frame): they need per-frame settings in the window, which
-      re-encoding one source does not have yet.
+- [x] `img2webp`'s frame options (2026-10-02): `WebpAnimation::frame_changes`, each "from
+      frame N on: lossy or lossless, quality, method, exact, duration", applied per frame in
+      frame order as `img2webp` carries an option from the frame it precedes to every later
+      one (`animation::for_frame`; `-lossy`/`-lossless` ignored under `-mixed`, as there).
+      In both windows' Animation section as a list of changes (the gpui window gained
+      `SKID_EXPAND` to open a disclosure for a check). Gate: 10 cases at two loop counts in
+      `matches_reference_img2webp` (66 in all), the harness putting each change's flags
+      before its frame; ignoring the changes fails 18, applying them out of order 4. GIF
+      input has no such options in `gif2webp`, so there they apply on top, with no
+      reference. Smoke test 43/43; axe clean with a change added in every
+      "every control showing" state.
 - [x] GPL edition: `heif-enc`'s `-p x265:<param>` beyond the fixed set of x265 controls
       (2026-10-01): `HeicSettings::x265_parameters`, a list of `KEY=VALUE` passed after the
       controls (so one overrides them), refused in the standard edition and dropped when a

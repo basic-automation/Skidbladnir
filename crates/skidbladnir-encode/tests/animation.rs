@@ -32,7 +32,7 @@ use std::{
 };
 
 use skidbladnir_encode::{
-	animation::{self, Animation, Frame}, settings::{FilterType, Resize, ResizeMode, WebpAnimation, WebpSettings}
+	animation::{self, Animation, Frame}, settings::{FilterType, FrameChange, Resize, ResizeMode, WebpAnimation, WebpSettings}
 };
 
 const WIDTH: u32 = 48;
@@ -265,6 +265,20 @@ fn cases() -> Vec<(&'static str, WebpSettings, Vec<&'static str>)> {
 	// -d given once, before every frame: every frame shown that long.
 	add("-d 40 for every frame", with(&lossless, WebpAnimation { frame_duration: Some(40), ..a() }), vec!["-lossless", "-exact", "-q", "75", "-m", "4", "-d", "40"]);
 	add("-d 250, lossy", with(&lossy, WebpAnimation { frame_duration: Some(250), ..a() }), vec!["-lossy", "-q", "75", "-m", "4", "-d", "250"]);
+	// img2webp's frame options, given before a frame and holding from there on
+	// (`WebpAnimation::frame_changes`); the harness puts each before its frame.
+	let change = |from_frame: u32| FrameChange { from_frame, ..FrameChange::default() };
+	let changes = |base: &WebpSettings, frame_changes: Vec<FrameChange>| WebpSettings { animation: WebpAnimation { frame_changes, ..a() }, ..base.clone() };
+	add("lossy from frame 3", changes(&lossless, vec![FrameChange { lossless: Some(false), ..change(3) }]), vec!["-lossless", "-exact", "-q", "75", "-m", "4"]);
+	add("lossless from frame 2", changes(&lossy, vec![FrameChange { lossless: Some(true), ..change(2) }]), vec!["-lossy", "-q", "75", "-m", "4"]);
+	add("-q 30 from frame 2, -q 90 from 4", changes(&lossy, vec![FrameChange { quality: Some(30.0), ..change(2) }, FrameChange { quality: Some(90.0), ..change(4) }]), vec!["-lossy", "-q", "75", "-m", "4"]);
+	add("-m 6 from frame 1", changes(&lossy, vec![FrameChange { method: Some(6), ..change(1) }]), vec!["-lossy", "-q", "75", "-m", "4"]);
+	add("-noexact from frame 2, lossless", changes(&lossless, vec![FrameChange { exact: Some(false), ..change(2) }]), vec!["-lossless", "-exact", "-q", "75", "-m", "4"]);
+	add("-exact from frame 3, lossy", changes(&lossy, vec![FrameChange { exact: Some(true), ..change(3) }]), vec!["-lossy", "-q", "75", "-m", "4"]);
+	add("-d 300 from frame 2", changes(&lossless, vec![FrameChange { duration: Some(300), ..change(2) }]), vec!["-lossless", "-exact", "-q", "75", "-m", "4"]);
+	add("everything from frame 2, then lossless from 4", changes(&lossy, vec![FrameChange { lossless: Some(false), quality: Some(55.5), method: Some(2), exact: Some(true), duration: Some(45), ..change(2) }, FrameChange { lossless: Some(true), ..change(4) }]), vec!["-lossy", "-q", "75", "-m", "4"]);
+	add("two changes at one frame, in order", changes(&lossy, vec![FrameChange { quality: Some(20.0), ..change(3) }, FrameChange { quality: Some(80.0), ..change(3) }]), vec!["-lossy", "-q", "75", "-m", "4"]);
+	add("-lossless from frame 2 under -mixed", with(&lossy, WebpAnimation { allow_mixed: true, frame_changes: vec![FrameChange { lossless: Some(true), quality: Some(40.0), ..change(2) }], ..a() }), vec!["-mixed", "-q", "75", "-m", "4"]);
 	cases
 }
 
@@ -311,9 +325,16 @@ fn matches_reference_img2webp() {
 			// Frame options go before the frame they apply to; the encoder flags are
 			// repeated for none of them because they carry over from frame to frame.
 			// A case that sets the duration once gives the frames alone.
+			// Each frame change goes before its frame; once one has set a duration, the
+			// frames after it are given no duration of their own, so it holds.
 			let one_duration = flags.contains(&"-d");
-			for (flag, value, path) in &frame_args {
-				if !one_duration {
+			let mut duration_set = false;
+			for (index, (flag, value, path)) in frame_args.iter().enumerate() {
+				for change in settings.animation.frame_changes.iter().filter(|change| change.from_frame as usize == index + 1) {
+					command.args(change.img2webp_args());
+					duration_set |= change.duration.is_some();
+				}
+				if !one_duration && !duration_set {
 					command.arg(flag).arg(value);
 				}
 				command.arg(path);

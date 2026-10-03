@@ -170,8 +170,14 @@ impl Skid {
 	/// output format (not saved), `SKID_INPUTS` queues files as a drop would, `SKID_PREVIEW`
 	/// runs the preview, `SKID_CHOOSE` opens Choose images…, `SKID_OPEN` opens a pop-up (`settings`, `queue`,
 	/// `preset-form`, or a select's id such as `select-webp-preset`), `SKID_SCROLL` scrolls
-	/// the settings column to that many pixels.
+	/// the settings column to that many pixels, `SKID_EXPAND` opens the disclosures it names
+	/// (comma-separated ids, such as `webp-animation`).
 	fn debug_state(mut self, cx: &mut Context<Self>) -> Self {
+		if let Ok(ids) = std::env::var("SKID_EXPAND") {
+			for id in ids.split(',').filter(|id| !id.is_empty()) {
+				self.disclosures.insert(SharedString::from(id.to_owned()), true);
+			}
+		}
 		if let Ok(format) = std::env::var("SKID_FORMAT") {
 			self.job().format = match format.as_str() {
 				"avif" => OutputFormat::Avif,

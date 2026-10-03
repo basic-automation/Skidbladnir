@@ -130,11 +130,12 @@ print(f"no violations at or above {os.environ["THRESHOLD"]}.")
 audit "as it opens (WebP)" ""
 audit "with AVIF selected" \
 	'[...document.querySelectorAll("[aria-label=\"Output format\"] [role=radio]")][1].click(); await sleep(300); return "ok"'
-# Each format with everything showing: every folded section open and every optional
-# control switched on, so the controls those reveal are audited too. HEIC's panel differs
+# Each format with everything showing: every folded section open, a WebP frame change added,
+# and every optional control switched on, so the controls those reveal are audited too. HEIC's panel differs
 # by edition (x265's controls are the GPL edition's), so audit each edition's build.
 everything='const open = () => [...document.querySelectorAll("button[data-disclosure][aria-expanded=false]")].forEach(b => b.click());
 	open(); await sleep(300);
+	[...document.querySelectorAll("main button")].filter(b => b.textContent.includes("Add a change from a frame")).forEach(b => b.click()); await sleep(300);
 	[...document.querySelectorAll("main [role=checkbox][data-state=unchecked]")].forEach(c => c.click()); await sleep(300);
 	open(); await sleep(300); return "ok"'
 for format in 0:WebP 1:AVIF 2:"JPEG XL" 3:HEIC; do
