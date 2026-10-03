@@ -18,22 +18,31 @@
 #
 # USAGE
 #   cargo build --release -p skidbladnir      # or cargo tauri build --no-bundle
-#   scripts/gpui-smoke.sh [--app <binary>]
+#   scripts/gpui-smoke.sh [--app <binary>] [--edition standard|gpl]
 #
-# Needs a display (Wayland or X11) and a GPU driver gpui can use. A bare binary built outside
-# a bundle needs libheif beside it (build/libheif/lib/libheif.so.1), as the installers ship it.
+# Needs a display (Wayland or X11) and a Vulkan driver gpui can use (on a machine with no GPU,
+# Mesa's lavapipe). A bare binary built outside a bundle needs libheif: beside it, as the
+# installers ship it, or else this script points the loader at build/libheif (build/libheif-gpl
+# for --edition gpl).
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 app="$root/target/release/skidbladnir"
+edition=standard
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--app) app="$2"; shift 2;;
+		--edition) edition="$2"; shift 2;;
 		*) echo "unknown argument: $1" >&2; exit 2;;
 	esac
 done
 [ -x "$app" ] || { echo "no app at $app: build it first, or pass --app" >&2; exit 2; }
 app=$(cd "$(dirname "$app")" && pwd)/$(basename "$app")
+libheif="$root/build/libheif/lib"
+[ "$edition" = gpl ] && libheif="$root/build/libheif-gpl/lib"
+if [ ! -e "$(dirname "$app")/libheif.so.1" ] && [ -e "$libheif/libheif.so.1" ]; then
+	export LD_LIBRARY_PATH="$libheif${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
 
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/skidbladnir-gpui-smoke.XXXXXX")
 pid=
