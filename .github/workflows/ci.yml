@@ -441,6 +441,57 @@ jobs:
         # PNG, JPEG or TIFF), and every tests/animation.rs gate (PAM frames).
         run: cargo test --release --package skidbladnir-encode --test parity --test pnm --test animation -- matches_reference_cwebp_across_the_whole_control_surface cwebps_defaults_are_a_bare_cwebp matches_reference_cwebp_through_a_webp_file matches_reference_cwebp_through_raw_yuv matches_cwebp_reading_pnm refuses_what_cwebp_refuses matches_reference_img2webp keeps_an_animations_metadata_as_webpmux_sets_it frame_changes_apply lossless_round_trip lossy_round_trip a_reference_animation a_still_webp resize_applies never_enlarge progress_and_cancel controls_without --nocapture
 
+  # The next slice: cwebp, img2webp, gif2webp and webpmux on Windows with the image
+  # libraries the Linux references use rather than WIC — libjpeg-turbo from our own
+  # submodule (the version the app links), libpng, libtiff and giflib from vcpkg, all on the
+  # static C runtime — so every tests/parity.rs, tests/animation.rs and tests/gif.rs gate can
+  # run there. Not yet a gate: it has not been seen to pass (ROADMAP.md, Phase 8).
+  parity-windows-images:
+    name: parity with libwebp's tools and image readers / windows (trial)
+    runs-on: windows-2022
+    timeout-minutes: 75
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: Install nasm
+        uses: ilammy/setup-nasm@v1
+
+      - name: Build libheif (standard edition)
+        uses: ./.github/actions/libheif
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the reference tools with libjpeg-turbo, libpng, libtiff and giflib
+        run: |
+          vcpkg="$(cygpath -u "$VCPKG_INSTALLATION_ROOT")"
+          "$vcpkg/vcpkg.exe" install --triplet x64-windows-static libpng "tiff[core]" giflib
+          jpeg="$RUNNER_TEMP/jpeg-install"
+          cmake -S third_party/libjpeg-turbo -B "$RUNNER_TEMP/jpeg" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DENABLE_SHARED=OFF -DENABLE_STATIC=ON -DWITH_JPEG8=ON -DWITH_TURBOJPEG=OFF -DWITH_TOOLS=OFF -DWITH_TESTS=OFF "-DCMAKE_INSTALL_PREFIX=$jpeg"
+          cmake --build "$RUNNER_TEMP/jpeg" --config Release
+          cmake --install "$RUNNER_TEMP/jpeg" --config Release
+          jpeglib=$(find "$jpeg" -iname 'jpeg-static.lib' | head -1)
+          cmake -S third_party/libwebp -B "$RUNNER_TEMP/libwebp" "-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DBUILD_SHARED_LIBS=OFF -DWEBP_LINK_STATIC=OFF -DHAVE_WINCODEC_H=0 "-DJPEG_LIBRARY=$(cygpath -m "$jpeglib")" "-DJPEG_INCLUDE_DIR=$(cygpath -m "$jpeg/include")" -DWEBP_BUILD_CWEBP=ON -DWEBP_BUILD_DWEBP=OFF -DWEBP_BUILD_GIF2WEBP=ON -DWEBP_BUILD_IMG2WEBP=ON -DWEBP_BUILD_VWEBP=OFF -DWEBP_BUILD_WEBPINFO=OFF -DWEBP_BUILD_WEBPMUX=ON -DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_EXTRAS=OFF
+          cmake --build "$RUNNER_TEMP/libwebp" --config Release --target cwebp img2webp gif2webp webpmux
+          for tool in cwebp img2webp gif2webp webpmux; do
+            path=$(find "$RUNNER_TEMP/libwebp" -iname "$tool.exe" | head -1)
+            "$path" -version
+            echo "SKIDBLADNIR_REFERENCE_$(echo "$tool" | tr a-z A-Z)=$(cygpath -m "$path")" >> "$GITHUB_ENV"
+          done
+          echo "SKIDBLADNIR_REQUIRE_PARITY=1" >> "$GITHUB_ENV"
+
+      - name: byte parity with cwebp, img2webp, gif2webp and webpmux
+        run: |
+          cargo test --release --no-fail-fast --package skidbladnir-encode --test parity --test animation --test gif -- --skip matches_cjxl_reading_a_still_gif --nocapture
+          cargo test --release --package skidbladnir-encode --test pnm -- matches_cwebp_reading_pnm refuses_what_cwebp_refuses --nocapture
+
   # The same smoke test, on Windows. This is the only place the Windows build is
   # LAUNCHED rather than just compiled: the dev host cannot run it, and nobody had
   # opened a Windows build before this job existed. The Electron app is Windows-only,
