@@ -1621,6 +1621,13 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       0.27 (a Windows dev-server file read, fixed in 0.28.1) is pinned `^0.27` by
       `fontless` under `@nuxt/fonts`. Neither is in what ships; take each fix when its
       parent allows it.
+      Re-checked 2026-10-02: both still open (`glib` 0.18.5 in `Cargo.lock`; `fontless` 1.2.1
+      is the newest). A third, alert #45, high: `node-forge` 1.4.0 (RSA PKCS#1 v1.5
+      signatures accepting extra nested `DigestAlgorithm` elements, CVE-2026-85393, no fixed
+      release) comes through `nuxt` → `@nuxt/cli` → `listhen`, the dev server's certificate
+      helper, in development scope only; the bundle listing
+      (`LICENSES/third-party/javascript.md`) confirms it is not in what ships. Take a fix
+      when `listhen` or `node-forge` has one. <https://github.com/advisories/GHSA-86w9-cpqp-85rv>
 - [x] README: an acknowledgements and non-affiliation section (2026-10-01).
 - [x] README: a dated "How it compares" table (2026-10-01): Squoosh, XnConvert,
       Converseen and the raw CLIs, each from its own page
