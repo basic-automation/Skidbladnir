@@ -1430,18 +1430,20 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       colour as an encoding or else ICC, every extra channel past the first alpha with its
       own description and name, and the decoder's basic info and frame header (with its
       name) handed to the encoder as `cjxl` hands `ppf.info` over. Gate
-      `matches_cjxl_from_jpeg_xl`: 124 cases over six sources `cjxl` wrote (lossless and
+      `matches_cjxl_from_jpeg_xl`: 126 cases over six sources `cjxl` wrote (lossless and
       lossy RGBA, 16-bit gray, Exif orientation 6 with XMP, float from PFM, EXR with extra
-      channels; the option surface and every hint on the first), 122 byte for byte and 2
-      that both refuse. Mutations: no orientation reset fails 6; ICC for every colour, 20.
-- [ ] JPEG XL to JPEG XL, the rest: a **lossy source made lossless** differs from `cjxl`'s in
-      2 of 9,216 samples by one level (seen on the dev host; the decoded floats round the
-      other way). The decode path is the same, so the likely cause is libjxl's float maths on
-      a different SIMD target in the two builds (the reference `cjxl` reports AVX2), not
-      verified; check whether CI's runners, or building the reference with the same
-      Highway targets, make it match. Also not matched yet: several frames or layers
-      (animation, deferred with the multi-image work), a cropped layer, IPTC and `jhgm`
-      boxes — each converted from its pixels instead.
+      channels; the option surface and every hint on the first), 124 byte for byte and 2
+      that both refuse (124 in a debug build; see below). Mutations: no orientation reset fails 6; ICC for every colour, 20.
+- [x] A lossy JPEG XL made lossless matches too, in an optimised build (2026-10-02). In a
+      debug build it differed in 2 of 9,216 samples by one level: the `cmake` crate builds
+      libjxl at the Cargo profile's optimisation, so a debug test links an unoptimised
+      decoder whose float maths round differently from the reference's Release build. Not
+      a SIMD target: both builds carry AVX2, SSE4 and SSE2 only (`nm`). `cargo test
+      --release` (CI's parity job, and what ships) matches all 126; the gate leaves the two
+      out only under `debug_assertions`.
+- [ ] JPEG XL to JPEG XL, not matched yet: several frames or layers (animation, deferred with
+      the multi-image work), a cropped layer, IPTC and `jhgm` boxes — each converted from its
+      pixels instead.
 - [ ] HTJ2K-compressed EXR: the `exr` crate cannot decompress it (`compression/mod.rs`
       returns "yet unimplemented compression method").
 - [ ] Animated GIF and APNG into `cjxl` (with the multi-image work below).

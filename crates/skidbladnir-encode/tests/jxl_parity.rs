@@ -403,10 +403,11 @@ fn matches_cjxl_from_jpeg_xl() {
 		} else {
 			for (case, settings) in &few {
 				let lossless = matches!(settings.target, JxlTarget::Distance(d) if d == 0.0);
-				// A lossy source made lossless: libjxl's decoder can land a float sample on the
-				// other side of a rounding boundary from the reference's (2 of 9,216 samples, by
-				// one level, on the dev host), so those two are left out; see ROADMAP.md.
-				if lossless && *name == "lossy RGBA" {
+				// A lossy source made lossless, in a debug build: the `cmake` crate then builds
+				// libjxl unoptimised, and its decoder lands 2 of 9,216 float samples on the
+				// other side of a rounding boundary from the optimised reference's. Built with
+				// optimisations, as CI's parity job and every release are, they match.
+				if cfg!(debug_assertions) && lossless && *name == "lossy RGBA" {
 					continue;
 				}
 				// libjxl 0.12.0 fails these inside `JxlEncoderProcessOutput`, for cjxl and for us.
