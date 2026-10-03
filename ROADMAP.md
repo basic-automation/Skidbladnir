@@ -1634,21 +1634,18 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       licence text into `LICENSES/third-party/javascript.md`, appended to both editions'
       notices. CI's Linux rust leg rebuilds it and fails if it is stale. A clean rebuild is
       byte-identical.
-- [ ] Notices for the Ubuntu libraries inside the AppImage. linuxdeploy copies most bundled
-      packages' Debian copyright files into the image (`usr/share/doc/<package>/copyright`;
-      100 directories in the 1.3.0 GPL AppImage, extracted here), and both editions'
-      notices now say where those are and that the sources are Ubuntu 22.04's (jammy) source
-      packages. **But not all of them** (found 2026-10-02 by the new check in the 1.4.0
-      release dry run, x64): no copyright inside for 13 packages — dconf-gsettings-backend,
-      glib-networking, libbz2-1.0, libcap2, libdbus-1-3, libkeyutils1, liblzma5, libpcre3,
-      librsvg2-common, libselinux1 and others the GTK plugin pulls in — so every AppImage
-      to date has shipped those libraries without their licences. Now
-      `scripts/appimage-notices.py` maps every bundled library to its runtime package
-      (`dpkg -S`, through symlinks, so an unversioned name is not taken for the -dev
-      package), release.yml bundles the AppImage again with the missing files added
-      (`tauri bundle --bundles appimage --config <fragment>`), and the check fails the
-      release if any are still missing. *Tick once a dry run has the check green on both
-      Linux legs, both editions.*
+- [x] Notices for the Ubuntu libraries inside the AppImage (2026-10-02). linuxdeploy copies
+      most bundled packages' Debian copyright files into the image
+      (`usr/share/doc/<package>/copyright`), **but not all**: the new check found 10 of the
+      110 packages behind its 172 libraries without theirs, on every Linux leg and edition —
+      dconf-gsettings-backend, glib-networking, libbz2-1.0, libcap2, libdbus-1-3 and others
+      the GTK plugin pulls in — so every AppImage to date shipped those libraries without
+      their licences. `scripts/appimage-notices.py` maps each bundled library to its runtime
+      package (`dpkg -S`, through symlinks), release.yml bundles the AppImage again with the
+      missing files (`tauri bundle --bundles appimage --config <fragment>`, re-signed), and
+      the check fails the release if any are still missing. Both editions' notices say
+      where the files are and that the sources are Ubuntu 22.04's (jammy). Release dry run
+      37092442062: 110 of 110 on all four Linux legs, installs and updater manifests green.
 - [ ] Dependabot's cargo and npm PRs now fail CI's notices checks until someone
       regenerates `LICENSES/third-party/rust-crates.md` or `javascript.md`, and the
       notices, on the PR branch (that check is the point: a new package's licence must

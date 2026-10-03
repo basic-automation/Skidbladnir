@@ -8,7 +8,7 @@ WebKitGTK, GLib and the rest, most of them LGPL), so it runs where they are miss
 linuxdeploy, which tauri-bundler uses to build it, copies most packages' Debian copyright
 files into the image as usr/share/doc/<package>/copyright, but not all: the libraries its
 GTK plugin adds (GIO modules, the SVG pixbuf loader, the GSettings backend) and some of
-their dependencies arrive without theirs (found by the 1.4.0 release dry run: 13 packages,
+their dependencies arrive without theirs (found by the 1.4.0 release dry run: 10 packages,
 from libbz2 to libselinux). This makes the licences a checked fact: every bundled library
 is looked up with `dpkg -S` on the build machine — through its symlinks, so an unversioned
 name counts as the runtime package that holds the library, not the -dev package that holds
