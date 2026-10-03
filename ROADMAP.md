@@ -760,7 +760,8 @@ prettier subset.
       (`glibc-floor.py` reads rpm payloads itself), offered by the updater
       (`linux-x86_64-rpm`), and installed with dnf on `fedora:latest` by `release.yml`'s
       `rpm-install` job.
-- [ ] More platforms: a Linux ARM64 leg (`ubuntu-22.04-arm`) and a universal `.dmg`.
+- [ ] More platforms: a universal `.dmg`. (The Linux ARM64 leg, `ubuntu-22.04-arm`, shipped
+      in 1.2.0: `.deb`, `.rpm` and AppImage for both editions.)
 
 ## Phase 6 — Retire Electron
 
@@ -1502,7 +1503,10 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       (`parity-windows-images`, `continue-on-error`): cwebp, img2webp, gif2webp and webpmux
       with libjpeg-turbo from our submodule and libpng, libtiff and giflib from vcpkg,
       static runtime, running every `tests/parity.rs`, `tests/animation.rs` and
-      `tests/gif.rs` gate but `cjxl`'s. Then avifenc, cjxl and heif-enc.
+      `tests/gif.rs` gate but `cjxl`'s. A fourth, also a trial (`parity-windows-jxl`): `cjxl`
+      from libjxl's own CMake with MSVC, our libjpeg-turbo and vcpkg's libpng and giflib,
+      running the JPEG XL gates but EXR's and the JPEG XL-source one (libjxl finds OpenEXR
+      only through pkg-config). Then avifenc and heif-enc.
 
 **Multi-image features the tools have, deferred by the owner (2026-09-28):**
 

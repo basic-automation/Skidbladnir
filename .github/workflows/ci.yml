@@ -492,6 +492,56 @@ jobs:
           cargo test --release --no-fail-fast --package skidbladnir-encode --test parity --test animation --test gif -- --skip matches_cjxl_reading_a_still_gif --nocapture
           cargo test --release --package skidbladnir-encode --test pnm -- matches_cwebp_reading_pnm refuses_what_cwebp_refuses --nocapture
 
+  # cjxl on Windows, the same way: libjxl's own tools built with MSVC (the jpegxl-src crate
+  # already builds the library so for the app), reading JPEG through our libjpeg-turbo and
+  # PNG and GIF through vcpkg's libpng and giflib. libjxl finds OpenEXR only through
+  # pkg-config, which Windows lacks, so the EXR gate and the JPEG XL-source one (one of whose
+  # sources is an EXR) are left out. Not yet a gate (ROADMAP.md, Phase 8).
+  parity-windows-jxl:
+    name: parity with cjxl / windows (trial)
+    runs-on: windows-2022
+    timeout-minutes: 75
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: Install nasm
+        uses: ilammy/setup-nasm@v1
+
+      - name: Build libheif (standard edition)
+        uses: ./.github/actions/libheif
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the reference cjxl
+        run: |
+          vcpkg="$(cygpath -u "$VCPKG_INSTALLATION_ROOT")"
+          "$vcpkg/vcpkg.exe" install --triplet x64-windows-static libpng giflib
+          jpeg="$RUNNER_TEMP/jpeg-install"
+          cmake -S third_party/libjpeg-turbo -B "$RUNNER_TEMP/jpeg" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DENABLE_SHARED=OFF -DENABLE_STATIC=ON -DWITH_JPEG8=ON -DWITH_TURBOJPEG=OFF -DWITH_TOOLS=OFF -DWITH_TESTS=OFF "-DCMAKE_INSTALL_PREFIX=$jpeg"
+          cmake --build "$RUNNER_TEMP/jpeg" --config Release
+          cmake --install "$RUNNER_TEMP/jpeg" --config Release
+          jpeglib=$(find "$jpeg" -iname 'jpeg-static.lib' | head -1)
+          libjxl=$(cargo metadata --format-version 1 | python -c 'import json, os, sys; print(os.path.join(os.path.dirname([p for p in json.load(sys.stdin)["packages"] if p["name"] == "jpegxl-src"][0]["manifest_path"]), "libjxl"))')
+          cmake -S "$libjxl" -B "$RUNNER_TEMP/libjxl" "-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF -DJPEGXL_ENABLE_TOOLS=ON -DJPEGXL_ENABLE_DOXYGEN=OFF -DJPEGXL_ENABLE_MANPAGES=OFF -DJPEGXL_ENABLE_BENCHMARK=OFF -DJPEGXL_ENABLE_EXAMPLES=OFF -DJPEGXL_ENABLE_JNI=OFF -DJPEGXL_ENABLE_SJPEG=OFF -DJPEGXL_ENABLE_OPENEXR=OFF -DJPEGXL_BUNDLE_LIBPNG=OFF -DJPEGXL_ENABLE_PLUGINS=OFF "-DJPEG_LIBRARY=$(cygpath -m "$jpeglib")" "-DJPEG_INCLUDE_DIR=$(cygpath -m "$jpeg/include")"
+          cmake --build "$RUNNER_TEMP/libjxl" --config Release --target cjxl
+          cjxl=$(find "$RUNNER_TEMP/libjxl" -iname cjxl.exe | head -1)
+          "$cjxl" --version
+          echo "SKIDBLADNIR_REFERENCE_CJXL=$(cygpath -m "$cjxl")" >> "$GITHUB_ENV"
+          echo "SKIDBLADNIR_REQUIRE_PARITY=1" >> "$GITHUB_ENV"
+
+      - name: byte parity with cjxl
+        run: |
+          cargo test --release --no-fail-fast --package skidbladnir-encode --test jxl_parity -- --skip matches_cjxl_through_exr --skip matches_cjxl_from_jpeg_xl --nocapture
+          cargo test --release --no-fail-fast --package skidbladnir-encode --test pnm -- matches_cjxl_reading_pnm matches_cjxl_reading_pfm matches_cjxl_reading_pgx --nocapture
+
   # The same smoke test, on Windows. This is the only place the Windows build is
   # LAUNCHED rather than just compiled: the dev host cannot run it, and nobody had
   # opened a Windows build before this job existed. The Electron app is Windows-only,
