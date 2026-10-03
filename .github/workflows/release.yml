@@ -169,6 +169,15 @@ jobs:
           fi
           cd src-tauri
           "../$cli" build "${args[@]}"
+          # linuxdeploy leaves some bundled libraries' copyright files out of the AppImage
+          # (those its GTK plugin adds, and a few of their dependencies). Find them, and
+          # bundle the AppImage again with them added; the next step checks the result.
+          if [[ "${{ matrix.platform }}" == linux* ]]; then
+            python3 ../scripts/appimage-notices.py --missing-config "$RUNNER_TEMP/appimage-docs.json" ../target/release/bundle/appimage/*.AppImage
+            if [ -s "$RUNNER_TEMP/appimage-docs.json" ]; then
+              "../$cli" bundle --bundles appimage "${args[@]}" --config "$RUNNER_TEMP/appimage-docs.json"
+            fi
+          fi
 
       - name: The Linux installers need nothing newer than Ubuntu 22.04 has
         # Reads what the binary and every library in the .deb, the .rpm and the AppImage need from
@@ -182,10 +191,11 @@ jobs:
           python3 scripts/glibc-floor.py --glibc 2.35 --glibcxx 3.4.30 --cxxabi 1.3.13 "$bundle"/deb/*.deb "$bundle"/rpm/*.rpm "$bundle"/appimage/*.AppImage
 
       - name: The AppImage carries the licence of every library it bundles
-        # The AppImage bundles Ubuntu 22.04's GTK, WebKitGTK, GLib and the rest, mostly LGPL;
-        # linuxdeploy copies each package's Debian copyright file into it. This checks that
-        # every bundled library's package (`dpkg -S` on this runner) has its file inside, so a
-        # library that arrives without its licence fails the release instead of shipping.
+        # The AppImage bundles Ubuntu 22.04's GTK, WebKitGTK, GLib and the rest, mostly LGPL.
+        # linuxdeploy copies most packages' Debian copyright files into it, and the Bundle
+        # step adds the ones it leaves out; this checks that every bundled library's package
+        # (`dpkg -S` on this runner) now has its file inside, so a library that arrives without
+        # its licence fails the release instead of shipping.
         if: startsWith(matrix.platform, 'linux')
         run: python3 scripts/appimage-notices.py target/release/bundle/appimage/*.AppImage
 
