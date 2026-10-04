@@ -161,7 +161,10 @@ cmake -S "$(native "$root/third_party/libwebp")" -B "$(native "$work/libwebp")" 
 	-DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_CWEBP=OFF -DWEBP_BUILD_DWEBP=OFF -DWEBP_BUILD_GIF2WEBP=OFF -DWEBP_BUILD_IMG2WEBP=OFF \
 	-DWEBP_BUILD_VWEBP=OFF -DWEBP_BUILD_WEBPINFO=OFF -DWEBP_BUILD_WEBPMUX=OFF -DWEBP_BUILD_EXTRAS=OFF
 cmake --build "$(native "$work/libwebp")" --config Release --parallel "$jobs" --target sharpyuv
-sharpyuv=$(find "$work/libwebp" -maxdepth 2 \( -name libsharpyuv.a -o -name sharpyuv.lib \) | head -1)
+# MSVC builds it as libsharpyuv.lib. Without it libheif quietly leaves sharp YUV out, as
+# every Windows libheif did until 1.5.0: fail rather than ship that again.
+sharpyuv=$(find "$work/libwebp" -maxdepth 2 \( -name libsharpyuv.a -o -name libsharpyuv.lib -o -name sharpyuv.lib \) | head -1)
+[ -n "$sharpyuv" ] || { echo "libsharpyuv was not built in $work/libwebp" >&2; exit 1; }
 
 off=()
 for codec in X264 OpenH264_DECODER AOM_DECODER AOM_ENCODER DAV1D RAV1E SvtEnc JPEG_DECODER JPEG_ENCODER OpenJPEG_DECODER OpenJPEG_ENCODER OPENJPH_ENCODER FFMPEG_DECODER UVG266 VVDEC VVENC; do

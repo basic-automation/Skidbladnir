@@ -301,7 +301,9 @@ fn matches_heif_enc_across_heic_inputs() {
 		let png_path = run.dir.join("source.png");
 		fs::write(&png_path, &bytes).expect("write the PNG");
 		let heic = run.dir.join(format!("{}.heic", name.replace(' ', "_")));
-		let made = Command::new(&run.heif_enc).args(["-e", "kvazaar", "-q", "70"]).arg(&png_path).arg("-o").arg(&heic).env("LD_LIBRARY_PATH", &run.lib).env("DYLD_LIBRARY_PATH", &run.lib).output().expect("run heif-enc");
+		// Options before the input: libheif's own getopt, which heif-enc uses on Windows, stops
+		// at the first operand rather than reordering as GNU's does.
+		let made = Command::new(&run.heif_enc).args(["-e", "kvazaar", "-q", "70"]).arg("-o").arg(&heic).arg(&png_path).env("LD_LIBRARY_PATH", &run.lib).env("DYLD_LIBRARY_PATH", &run.lib).output().expect("run heif-enc");
 		assert!(made.status.success(), "heif-enc could not make the {name} source: {}", String::from_utf8_lossy(&made.stderr));
 		run.compare(&format!("{name}, defaults"), &heic, &d());
 		run.compare(&format!("{name}, -q 30 --color-profile auto"), &heic, &HeicSettings { quality: 30, color_profile: ColorProfile::Auto, ..d() });
