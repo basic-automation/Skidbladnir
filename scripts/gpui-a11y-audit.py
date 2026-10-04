@@ -334,7 +334,20 @@ class UiaReader:
 						value = (pattern.CurrentValue, pattern.CurrentMinimum, pattern.CurrentMaximum)
 					except Exception:  # noqa: BLE001 — no RangeValue pattern
 						value = None
-				yield Node(kind, info.name, kind="control", value=value, enabled=element.is_enabled())
+				node = Node(kind, info.name, kind="control", value=value, enabled=element.is_enabled())
+				if kind == "ComboBox":
+					# Reported, not yet checked: what UI Automation says a select holds, by its
+					# Value pattern or its selected item (ROADMAP.md).
+					held = None
+					try:
+						held = element.iface_value.CurrentValue
+					except Exception:  # noqa: BLE001 — no Value pattern
+						try:
+							held = ", ".join(item.window_text() for item in element.get_selection())
+						except Exception:  # noqa: BLE001 — no Selection pattern either
+							held = None
+					node.description = f"holds {held!r}"
+				yield node
 			elif kind == "Image":
 				yield Node(kind, info.name, kind="image")
 
@@ -364,6 +377,8 @@ def audit(nodes, fields, queued=False):
 		if node.kind not in ("control", "field"):
 			continue
 		entry = {"role": node.role, "name": node.name}
+		if node.role == "ComboBox" and node.description:
+			print(f"     select {node.name!r} {node.description} (UI Automation)")
 		if not node.name:
 			problems.append(f"{node.role} with no name" + (f" (description: {node.description!r})" if node.description else ""))
 		if node.role.lower() == "slider":
