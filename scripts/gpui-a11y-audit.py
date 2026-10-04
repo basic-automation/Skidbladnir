@@ -117,8 +117,9 @@ def first(paths):
 	return next((path for path in paths if os.path.exists(path)), None)
 
 
-def in_private_session(args):
-	"""Re-run this script with these arguments inside a fresh D-Bus session bus of its own."""
+def in_private_session(args, script=__file__):
+	"""Re-run this script (or another that uses it) with these arguments inside a fresh D-Bus
+	session bus of its own."""
 	if shutil.which("dbus-run-session") is None or shutil.which("dbus-daemon") is None:
 		sys.exit("no dbus-run-session or dbus-daemon: install dbus")
 	if first(ACCESSIBILITY_CONF) is None or first(REGISTRIES) is None:
@@ -127,7 +128,7 @@ def in_private_session(args):
 		conf.write(SESSION_CONF)
 	try:
 		env = dict(os.environ, SKIDBLADNIR_A11Y_AUDIT_SESSION="1")
-		return subprocess.call(["dbus-run-session", f"--config-file={conf.name}", "--", sys.executable, os.path.abspath(__file__), *args], env=env)
+		return subprocess.call(["dbus-run-session", f"--config-file={conf.name}", "--", sys.executable, os.path.abspath(script), *args], env=env)
 	finally:
 		os.unlink(conf.name)
 
@@ -180,7 +181,7 @@ def enable_accessibility():
 class Node:
 	"""One accessible element, as either platform's accessibility API reports it."""
 
-	def __init__(self, role, name, description="", kind="other", value=None, text=None, focus=None):
+	def __init__(self, role, name, description="", kind="other", value=None, text=None, focus=None, enabled=None):
 		self.role = role  # the platform's own name for the role, for the report
 		self.name = (name or "").strip()
 		self.description = (description or "").strip()
@@ -188,6 +189,7 @@ class Node:
 		self.value = value  # a slider's (current, minimum, maximum), or None for no value interface
 		self.text = text  # a field's text, or None when it exposes none
 		self.focus = focus  # for a field: asks the window to focus it; true if it then reports focused
+		self.enabled = enabled  # whether the platform reports it enabled, where that is told (UIA)
 
 
 class AtspiReader:
@@ -325,7 +327,7 @@ class UiaReader:
 						value = (pattern.CurrentValue, pattern.CurrentMinimum, pattern.CurrentMaximum)
 					except Exception:  # noqa: BLE001 — no RangeValue pattern
 						value = None
-				yield Node(kind, info.name, kind="control", value=value)
+				yield Node(kind, info.name, kind="control", value=value, enabled=element.is_enabled())
 			elif kind == "Image":
 				yield Node(kind, info.name, kind="image")
 
@@ -342,7 +344,7 @@ class UiaReader:
 		return False
 
 
-def audit(nodes, fields):
+def audit(nodes, fields, queued=False):
 	"""Every control, the number of images, and what is wrong."""
 	controls, problems, entries = [], [], []
 	images = 0
@@ -376,6 +378,10 @@ def audit(nodes, fields):
 	problems += [f"no text field named {field!r}" for field in fields if field not in names]
 	buttons = [control["name"] for control in controls if control["role"].lower() in ("button", "push button") and control["name"]]
 	problems += [f"{buttons.count(name)} buttons are all named {name!r}: a screen reader cannot tell them apart" for name in sorted(set(buttons)) if buttons.count(name) > 1]
+	# With nothing queued Convert does nothing, so it must say it is disabled, where the
+	# platform can tell (UI Automation; AccessKit reports every button enabled on AT-SPI).
+	if not queued:
+		problems += [f"{node.name!r} is reported enabled with nothing queued" for node in nodes if node.name == "Convert" and node.enabled]
 	# Ask the window to focus a field, as a screen reader's user would: its keyboard focus
 	# and its accessibility focus must be the same element.
 	if entries and not entries[0].focus():
@@ -426,7 +432,7 @@ def run(args):
 							break
 						time.sleep(1)
 					time.sleep(2)
-					controls, images, problems = audit(list(reader.nodes(app)), fields)
+					controls, images, problems = audit(list(reader.nodes(app)), fields, queued)
 					if images < min_images:
 						problems.append(f"{images} images, not {min_images}")
 					report[label] = controls

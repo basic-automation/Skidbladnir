@@ -324,7 +324,7 @@ jobs:
             libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev \
             libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libwayland-dev libfontconfig-dev libfreetype-dev \
             webkit2gtk-driver xvfb mesa-vulkan-drivers libvulkan1 \
-            dbus at-spi2-core python3-gi gir1.2-atspi-2.0 xdotool
+            dbus at-spi2-core python3-gi gir1.2-atspi-2.0 xdotool python3-xlib
 
       - uses: actions/setup-node@v7
         with:
@@ -384,6 +384,11 @@ jobs:
         # session: every control named, no two buttons alike, every text field present and
         # readable and focusable (scripts/gpui-a11y-audit.py). The system Python, for its gi.
         run: xvfb-run -a env -u WAYLAND_DISPLAY /usr/bin/python3 scripts/gpui-a11y-audit.py --edition ${{ matrix.edition }}
+
+      - name: Drop a file onto the gpui window
+        # A real XDND drop, as a file manager makes it, then Convert pressed through the
+        # accessibility tree and the WebP checked on disk (scripts/gpui-drop-test.py).
+        run: xvfb-run -a env -u WAYLAND_DISPLAY /usr/bin/python3 scripts/gpui-drop-test.py --edition ${{ matrix.edition }}
 
       - name: Accessibility audit
         # At every severity, "minor" included: at the default ("serious") an <h1> outside
