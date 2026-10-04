@@ -2,13 +2,14 @@
 # Build the libheif Skidbladnir ships: one shared library with an HEVC encoder and the
 # libde265 HEVC decoder (LGPL-3.0) built into it, and nothing else.
 #
-#   scripts/build-libheif.sh [--edition standard|gpl] [--prefix <dir>] [--with-heif-enc] [--jpeg <prefix>]
+#   scripts/build-libheif.sh [--edition standard|gpl] [--prefix <dir>] [--with-heif-enc] [--jpeg <prefix>] [--cmake-arg <arg>]...
 #
 # --with-heif-enc also builds libheif's heif-enc, linked to this same libheif: the reference
 # tests/heic_parity.rs compares against (it needs the libpng and libjpeg development files).
 # --jpeg points its JPEG reader at a libjpeg installed under <prefix> rather than the
 # system's (see scripts/build-reference-tools.sh). Never ship that build; the app's libheif
-# is the one without them.
+# is the one without them. Each --cmake-arg goes to libheif's own configure step: on Windows
+# that is how heif-enc finds vcpkg's libpng, libtiff and zlib (.github/workflows/ci.yml).
 #
 # The edition decides the encoder, and with it the licence of the app that ships it:
 # - standard (the default): Kvazaar (BSD-3-Clause). The app stays ISC.
@@ -45,12 +46,14 @@ prefix="${SKIDBLADNIR_LIBHEIF_DIR:-}"
 edition="${SKIDBLADNIR_EDITION:-standard}"
 examples=OFF
 jpeg=""
+heif_extra=()
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--prefix) prefix="$2"; shift 2;;
 		--edition) edition="$2"; shift 2;;
 		--with-heif-enc) examples=ON; shift;;
 		--jpeg) jpeg="$2"; shift 2;;
+		--cmake-arg) heif_extra+=("$2"); shift 2;;
 		*) echo "unknown argument: $1" >&2; exit 2;;
 	esac
 done
@@ -179,7 +182,7 @@ build libheif "$root/third_party/libheif" "$prefix" \
 	-DBUILD_DOCUMENTATION=OFF \
 	"-DCMAKE_PREFIX_PATH=$(native "$deps")${jpeg:+;$(native "$jpeg")}" \
 	"-DCMAKE_C_FLAGS=$static_defines" "-DCMAKE_CXX_FLAGS=$static_defines" \
-	"${extra[@]}"
+	${extra[@]+"${extra[@]}"} ${heif_extra[@]+"${heif_extra[@]}"}
 
 echo "$edition" > "$prefix/EDITION"
 echo "libheif ($edition edition, $encoder) installed in $prefix:"
