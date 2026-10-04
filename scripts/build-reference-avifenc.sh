@@ -42,8 +42,9 @@ work="$prefix/.work"
 jobs=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 # Each step's output goes to a log, shown only if the step fails.
 quiet() { "$@" > "$work/step.log" 2>&1 || { tail -n 60 "$work/step.log" >&2; exit 1; }; }
-# The libraries as each toolchain names them: libfoo.a, or foo.lib with MSVC.
-library() { find "$1" \( -name "lib$2.a" -o -name "$2.lib" \) | head -1; }
+# The libraries as each toolchain names them: libfoo.a, or with MSVC foo.lib (libaom) or
+# libfoo.lib (libwebp's).
+library() { find "$1" \( -name "lib$2.a" -o -name "$2.lib" -o -name "lib$2.lib" \) | head -1; }
 
 echo "==> libsharpyuv"
 quiet cmake -S "$(native "$root/third_party/libwebp")" -B "$(native "$work/libwebp")" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_CWEBP=OFF -DWEBP_BUILD_DWEBP=OFF -DWEBP_BUILD_GIF2WEBP=OFF -DWEBP_BUILD_IMG2WEBP=OFF -DWEBP_BUILD_VWEBP=OFF -DWEBP_BUILD_WEBPINFO=OFF -DWEBP_BUILD_WEBPMUX=OFF -DWEBP_BUILD_EXTRAS=OFF ${extra[@]+"${extra[@]}"}

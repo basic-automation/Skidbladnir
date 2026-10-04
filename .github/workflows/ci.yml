@@ -539,7 +539,10 @@ jobs:
           cmake --install "$RUNNER_TEMP/jpeg" --config Release
           jpeglib=$(find "$jpeg" -iname 'jpeg-static.lib' | head -1)
           libjxl=$(cargo metadata --format-version 1 | python -c 'import json, os, sys; print(os.path.join(os.path.dirname([p for p in json.load(sys.stdin)["packages"] if p["name"] == "jpegxl-src"][0]["manifest_path"]), "libjxl"))')
-          cmake -S "$libjxl" -B "$RUNNER_TEMP/libjxl" "-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF -DJPEGXL_ENABLE_TOOLS=ON -DJPEGXL_ENABLE_DOXYGEN=OFF -DJPEGXL_ENABLE_MANPAGES=OFF -DJPEGXL_ENABLE_BENCHMARK=OFF -DJPEGXL_ENABLE_EXAMPLES=OFF -DJPEGXL_ENABLE_JNI=OFF -DJPEGXL_ENABLE_SJPEG=OFF -DJPEGXL_ENABLE_OPENEXR=ON -DJPEGXL_BUNDLE_LIBPNG=OFF -DJPEGXL_ENABLE_PLUGINS=OFF "-DPKG_CONFIG_EXECUTABLE=$pkgconf" "-DJPEG_LIBRARY=$(cygpath -m "$jpeglib")" "-DJPEG_INCLUDE_DIR=$(cygpath -m "$jpeg/include")"
+          # /Zc:lambda: libjxl 0.12.0's exr.cc has a lambda use a constexpr local without
+          # capturing it, valid C++ that MSVC's legacy lambda parser refuses (C3493). The
+          # conforming parser takes it; it changes how lambdas parse, not the code generated.
+          CXXFLAGS=/Zc:lambda cmake -S "$libjxl" -B "$RUNNER_TEMP/libjxl" "-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF -DJPEGXL_ENABLE_TOOLS=ON -DJPEGXL_ENABLE_DOXYGEN=OFF -DJPEGXL_ENABLE_MANPAGES=OFF -DJPEGXL_ENABLE_BENCHMARK=OFF -DJPEGXL_ENABLE_EXAMPLES=OFF -DJPEGXL_ENABLE_JNI=OFF -DJPEGXL_ENABLE_SJPEG=OFF -DJPEGXL_ENABLE_OPENEXR=ON -DJPEGXL_BUNDLE_LIBPNG=OFF -DJPEGXL_ENABLE_PLUGINS=OFF "-DPKG_CONFIG_EXECUTABLE=$pkgconf" "-DJPEG_LIBRARY=$(cygpath -m "$jpeglib")" "-DJPEG_INCLUDE_DIR=$(cygpath -m "$jpeg/include")"
           # libjxl leaves EXR out quietly when it cannot find OpenEXR; the EXR gate needs it in.
           grep -q '^OpenEXR_FOUND:INTERNAL=1' "$RUNNER_TEMP/libjxl/CMakeCache.txt" || { echo "::error::cjxl would be built without EXR"; exit 1; }
           cmake --build "$RUNNER_TEMP/libjxl" --config Release --target cjxl
