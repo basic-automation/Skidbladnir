@@ -32,7 +32,7 @@ USAGE
 
 Linux: needs a display, dbus, at-spi2-core (the accessibility bus's configuration and
 at-spi2-registryd) and the GObject bindings for libatspi (python3-gi, gir1.2-atspi-2.0);
-it re-executes itself under dbus-run-session. Windows: needs pywinauto.
+it re-executes itself under dbus-run-session, once per state. Windows: needs pywinauto.
 """
 
 import argparse
@@ -118,7 +118,7 @@ def first(paths):
 
 
 def in_private_session(args):
-	"""Re-run this script inside a fresh D-Bus session bus of its own."""
+	"""Re-run this script with these arguments inside a fresh D-Bus session bus of its own."""
 	if shutil.which("dbus-run-session") is None or shutil.which("dbus-daemon") is None:
 		sys.exit("no dbus-run-session or dbus-daemon: install dbus")
 	if first(ACCESSIBILITY_CONF) is None or first(REGISTRIES) is None:
@@ -385,7 +385,9 @@ def run(args):
 	failures = 0
 	report = {}
 	try:
-		for label, variables, fields, queued, *rest in STATES:
+		for index, (label, variables, fields, queued, *rest) in enumerate(STATES):
+			if args.state is not None and index != args.state:
+				continue
 			min_images = rest[0] if rest else 0
 			with tempfile.TemporaryDirectory(prefix="skidbladnir-gpui-a11y.") as scratch:
 				# On Windows the configuration folder cannot be redirected: main() runs this
@@ -441,8 +443,29 @@ def run(args):
 	if args.report:
 		with open(args.report, "w") as out:
 			json.dump(report, out, indent=1)
-	print(f"{len(STATES) - sum(1 for state in STATES if state[0] not in report)} of {len(STATES)} states read; {failures} problem(s)")
+	if args.state is None:
+		print(f"{len(report)} of {len(STATES)} states read; {failures} problem(s)")
 	return 1 if failures else 0
+
+
+def each_in_its_own_session(args):
+	"""Linux: every state in a private session of its own. In one session, once the first
+	window had gone, AT-SPI found none of the next windows' trees on CI's Xvfb (seen on one
+	of two runs), so no state can be left to inherit another's registry."""
+	report, failed = {}, 0
+	with tempfile.TemporaryDirectory(prefix="skidbladnir-gpui-a11y-report.") as scratch:
+		for index in range(len(STATES)):
+			part = os.path.join(scratch, f"{index}.json")
+			command = ["--app", args.app, "--edition", args.edition, "--state", str(index), "--report", part]
+			failed += 1 if in_private_session(command) else 0
+			if os.path.exists(part):
+				with open(part) as source:
+					report.update(json.load(source))
+	if args.report:
+		with open(args.report, "w") as out:
+			json.dump(report, out, indent=1)
+	print(f"{len(report)} of {len(STATES)} states read; {failed} with problems")
+	return 1 if failed else 0
 
 
 def main():
@@ -450,6 +473,7 @@ def main():
 	parser.add_argument("--app", default=os.path.join(ROOT, "target", "release", "skidbladnir.exe" if sys.platform == "win32" else "skidbladnir"))
 	parser.add_argument("--edition", choices=["standard", "gpl"], default="standard")
 	parser.add_argument("--report", help="write every control's role, name and value as JSON here")
+	parser.add_argument("--state", type=int, help=argparse.SUPPRESS)
 	args = parser.parse_args()
 	if not os.access(args.app, os.X_OK):
 		sys.exit(f"no app at {args.app}: build it first, or pass --app")
@@ -458,7 +482,7 @@ def main():
 			sys.exit("on Windows the app's configuration folder cannot be redirected, so this runs only in CI (CI=true)")
 		return run(args)
 	if "SKIDBLADNIR_A11Y_AUDIT_SESSION" not in os.environ:
-		return in_private_session(sys.argv[1:])
+		return each_in_its_own_session(args)
 	return run(args)
 
 
