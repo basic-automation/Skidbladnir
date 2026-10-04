@@ -297,8 +297,18 @@ class UiaReader:
 			time.sleep(0.5)
 		return None
 
+	def walk(self, element):
+		"""The window's own elements: not the title bar Windows adds to every top-level
+		window's tree (its Minimise, Maximise and Close and its system menu), which a
+		screen reader presents as the title bar, apart from the window's own controls."""
+		for child in element.children():
+			if child.element_info.control_type in ("TitleBar", "MenuBar"):
+				continue
+			yield child
+			yield from self.walk(child)
+
 	def nodes(self, window):
-		for element in window.descendants():
+		for element in self.walk(window):
 			info = element.element_info
 			kind = info.control_type
 			if kind == "Edit":
