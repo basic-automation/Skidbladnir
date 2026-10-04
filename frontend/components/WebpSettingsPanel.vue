@@ -102,7 +102,7 @@ const alphaCompression = computed({
 					<span class="font-semibold text-paleday-fg">libwebp preset</span>
 					<div class="flex items-center gap-2">
 						<USelect v-model="preset" :items="PRESETS" variant="soft" size="sm" aria-label="libwebp preset" class="min-w-0 flex-1" :ui="{ base: 'bg-paleday-field text-paleday-bright' }" />
-						<UButton size="sm" color="neutral" variant="soft" @click="applyPreset">
+						<UButton size="sm" color="neutral" variant="soft" aria-label="Apply the libwebp preset" @click="applyPreset">
 							Apply
 						</UButton>
 					</div>
@@ -114,7 +114,7 @@ const alphaCompression = computed({
 					<span class="font-semibold text-paleday-fg">Lossless level</span>
 					<div class="flex items-center gap-2">
 						<USelect v-model="losslessLevel" :items="LOSSLESS_LEVELS" variant="soft" size="sm" aria-label="Lossless level" class="min-w-0 flex-1" :ui="{ base: 'bg-paleday-field text-paleday-bright' }" />
-						<UButton size="sm" color="neutral" variant="soft" @click="applyLosslessLevel">
+						<UButton size="sm" color="neutral" variant="soft" aria-label="Apply the lossless level" @click="applyLosslessLevel">
 							Apply
 						</UButton>
 					</div>

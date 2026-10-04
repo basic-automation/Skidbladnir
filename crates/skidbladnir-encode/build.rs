@@ -102,7 +102,7 @@ impl Libjpeg {
 			return Self { includes: library.include_paths.clone(), static_dir: None, system: Some(library) };
 		}
 		// The static library alone; SIMD when NASM is there, which only changes the speed.
-		let built = static_crt_on_msvc(&mut cmake::Config::new(&source)).profile("Release").define("ENABLE_SHARED", "OFF").define("ENABLE_STATIC", "ON").define("WITH_JPEG8", "ON").define("WITH_TURBOJPEG", "OFF").define("WITH_TOOLS", "OFF").define("WITH_TESTS", "OFF").define("CMAKE_POSITION_INDEPENDENT_CODE", "ON").define("CMAKE_INSTALL_LIBDIR", "lib").build();
+		let built = msvc_release_build(&mut cmake::Config::new(&source)).profile("Release").define("ENABLE_SHARED", "OFF").define("ENABLE_STATIC", "ON").define("WITH_JPEG8", "ON").define("WITH_TURBOJPEG", "OFF").define("WITH_TOOLS", "OFF").define("WITH_TESTS", "OFF").define("CMAKE_POSITION_INDEPENDENT_CODE", "ON").define("CMAKE_INSTALL_LIBDIR", "lib").build();
 		Self { includes: vec![built.join("include")], static_dir: Some(built.join("lib")), system: None }
 	}
 
@@ -162,7 +162,7 @@ fn link_libavif(jpeg: &Libjpeg) {
 	// libaom: static, no tools, tests, docs or examples. The decoder is built too, because
 	// `avifenc -d 12,8` reconstructs the primary image to encode the residual beside it.
 	let mut aom_config = cmake::Config::new(third_party.join("aom"));
-	static_crt_on_msvc(&mut aom_config);
+	msvc_release_build(&mut aom_config);
 	if let Some(arch) = apple_cross(&mut aom_config) {
 		aom_config.define("AOM_TARGET_CPU", arch);
 	}
@@ -176,7 +176,7 @@ fn link_libavif(jpeg: &Libjpeg) {
 	let placeholder = PathBuf::from(env::var("OUT_DIR").expect("cargo sets OUT_DIR")).join(if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") { "sharpyuv.lib" } else { "libsharpyuv.a" });
 	std::fs::write(&placeholder, b"").expect("write the sharpyuv placeholder");
 	let mut avif_config = cmake::Config::new(third_party.join("libavif"));
-	static_crt_on_msvc(&mut avif_config);
+	msvc_release_build(&mut avif_config);
 	apple_cross(&mut avif_config);
 	let avif = avif_config
 		.profile("Release")
@@ -281,16 +281,29 @@ fn link_libheif(jpeg: &Libjpeg) {
 	}
 }
 
-/// On MSVC with `+crt-static` (`.cargo/config.toml`), build a library made with `cmake`
-/// against the static C runtime too. The default there is the dynamic one
-/// (`CMAKE_MSVC_RUNTIME_LIBRARY`, policy `CMP0091`) whatever flags `cmake-rs` passes, so it
-/// is set explicitly.
-fn static_crt_on_msvc(config: &mut cmake::Config) -> &mut cmake::Config {
-	let static_crt = env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") && env::var("CARGO_CFG_TARGET_FEATURE").is_ok_and(|features| features.split(',').any(|feature| feature == "crt-static"));
+/// On MSVC, build a library made with `cmake` (always with `.profile("Release")`) as a
+/// release build, against the C runtime Rust links.
+///
+/// With Visual Studio's generator, `cmake-rs` replaces `CMAKE_<LANG>_FLAGS_RELEASE` with the
+/// compiler's base flags, its `/O` flags filtered out, to pass the runtime library on. That
+/// drops `CMake`'s `/O2 /Ob2 /DNDEBUG`: until 1.4.1 libaom, libavif and libjpeg-turbo were
+/// built unoptimised with their assertions on in every Windows build, and one of libaom's
+/// fired on a superres setting `avifenc` takes (found by CI's Windows `avifenc` parity job),
+/// ending the process. Defining the flags here keeps `cmake-rs` from replacing them.
+///
+/// With `+crt-static` (`.cargo/config.toml`) that runtime is the static one: it is named both
+/// in the flags and through `CMAKE_MSVC_RUNTIME_LIBRARY` (policy `CMP0091`), so a project that
+/// sets the policy either way gets it.
+fn msvc_release_build(config: &mut cmake::Config) -> &mut cmake::Config {
+	if env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok("msvc") {
+		return config;
+	}
+	let static_crt = env::var("CARGO_CFG_TARGET_FEATURE").is_ok_and(|features| features.split(',').any(|feature| feature == "crt-static"));
 	if static_crt {
 		config.static_crt(true).define("CMAKE_MSVC_RUNTIME_LIBRARY", "MultiThreaded");
 	}
-	config
+	let flags = format!("{} /O2 /Ob2 /DNDEBUG", if static_crt { "/MT" } else { "/MD" });
+	config.define("CMAKE_C_FLAGS_RELEASE", &flags).define("CMAKE_CXX_FLAGS_RELEASE", &flags)
 }
 
 fn link_libjxl() {

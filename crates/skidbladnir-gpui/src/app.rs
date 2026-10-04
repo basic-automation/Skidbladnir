@@ -9,7 +9,7 @@ use std::{
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use gpui::{AnyElement, AppContext, Bounds, ClickEvent, Context, Entity, ExternalPaths, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement, PathPromptOptions, Pixels, Render, RenderImage, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, StyledImage, Subscription, Window, canvas, div, img, point, prelude::FluentBuilder, px, size, svg};
-use gpuikit::{elements::input::input, input::InputState};
+use gpuikit::input::InputState;
 use skidbladnir_encode::{
 	EncodeJob, OutputFormat, settings::HEIC_X265, source::{self, Conversion, FoundImage, PathInspection}
 };
@@ -930,7 +930,7 @@ impl Skid {
 		}
 		let name_empty = self.preset_name.read(cx).content().trim().is_empty();
 		let add = self.bounds_of("preset-add").unwrap_or_default();
-		let preset_form = preset_open.then(|| crate::controls::place(gpui::Anchor::TopLeft, point(add.right() + px(8.), add.top()), crate::controls::popup_panel("preset-form", None, div().flex().w(px(256.)).gap(px(8.)).p(px(8.)).child(input(&self.preset_name, cx).flex_1().h(px(28.)).px(px(10.)).py(px(6.)).rounded(px(9.)).bg(c(BG)).border_1().border_color(c(RULE)).xs().text_color(c(FG))).child(primary_button("preset-save", "Save", name_empty).press(self, "preset-save", "Save", Ring::Primary, 9., |this, _, cx| this.save_preset(cx), window, cx)), cx)));
+		let preset_form = preset_open.then(|| crate::controls::place(gpui::Anchor::TopLeft, point(add.right() + px(8.), add.top()), crate::controls::popup_panel("preset-form", None, div().flex().w(px(256.)).gap(px(8.)).p(px(8.)).child(crate::controls::named_input(&self.preset_name, "preset-name", "Preset name", None, cx).flex_1().h(px(28.)).px(px(10.)).py(px(6.)).rounded(px(9.)).bg(c(BG)).border_1().border_color(c(RULE)).xs().text_color(c(FG))).child(primary_button("preset-save", "Save", name_empty).press(self, "preset-save", "Save", Ring::Primary, 9., |this, _, cx| this.save_preset(cx), window, cx)), cx)));
 		div().id("sidebar")
 			.role(gpui::Role::Complementary)
 			.aria_label("Queue and presets")
@@ -943,7 +943,7 @@ impl Skid {
 			.child(div().id("collapse-row").flex().justify_end().on_mouse_down(MouseButton::Left, |event, window, _| drag_window(event, window)).child(link_button("collapse", "Collapse", 90.).press(
 				self,
 				"collapse",
-				"Collapse",
+				"Collapse the sidebar",
 				Ring::Neutral,
 				9.,
 				|this, _, cx| {
@@ -1086,7 +1086,7 @@ impl Skid {
 				bar.child(link_button("expand", "Expand", -90.).press(
 					self,
 					"expand",
-					"Expand",
+					"Expand the sidebar",
 					Ring::Neutral,
 					9.,
 					|this, _, cx| {
@@ -1127,20 +1127,38 @@ impl Skid {
 				cx,
 			)
 		} else {
-			div().id("convert").flex().flex_none().items_center().gap(px(8.)).px(px(16.)).py(px(10.)).rounded(px(6.)).bg(if enabled { c(VIOLET) } else { ca(VIOLET, 0.6) }).when(enabled, |button| button.fade_bg("convert", c(VIOLET), ca(VIOLET, 0.9))).sm().semibold().text_color(c(ON_VIOLET)).child(icon("codicon--debug-start", 16., c(ON_VIOLET))).child(format!("Convert {}", if self.input_paths.is_empty() { String::new() } else { self.file_count() }).trim_end().to_owned()).press(
-				self,
-				"convert",
-				"Convert",
-				Ring::Primary,
-				6.,
-				move |this, _, cx| {
-					if enabled {
-						this.convert(cx);
-					}
-				},
-				window,
-				cx,
-			)
+			// Named as drawn, "Convert 2 files", so a screen reader says what will be converted.
+			let label = format!("Convert {}", if self.input_paths.is_empty() { String::new() } else { self.file_count() }).trim_end().to_owned();
+			div().id("convert")
+				.flex()
+				.flex_none()
+				.items_center()
+				.gap(px(8.))
+				.px(px(16.))
+				.py(px(10.))
+				.rounded(px(6.))
+				.bg(if enabled { c(VIOLET) } else { ca(VIOLET, 0.6) })
+				.when(enabled, |button| button.fade_bg("convert", c(VIOLET), ca(VIOLET, 0.9)))
+				.sm()
+				.semibold()
+				.text_color(c(ON_VIOLET))
+				.child(icon("codicon--debug-start", 16., c(ON_VIOLET)))
+				.child(label.clone())
+				.press(
+					self,
+					"convert",
+					&label,
+					Ring::Primary,
+					6.,
+					move |this, _, cx| {
+						if enabled {
+							this.convert(cx);
+						}
+					},
+					window,
+					cx,
+				)
+				.when(!enabled, disabled_for_assistive_technology)
 		};
 		div().flex().items_center().justify_end().gap(px(12.)).pr(px(10.)).child(div().relative().child(crate::controls::probe("p header")).min_w_0().truncate().xs().text_color(c(DIM)).child(text)).child(action.relative().child(crate::controls::probe("button Convert"))).into_any_element()
 	}
@@ -1605,7 +1623,14 @@ fn sidebar_button(id: &str, icon_name: &str, title: &str, subtitle: &str, badge:
 }
 
 fn primary_button(id: &str, label: &str, disabled: bool) -> gpui::Stateful<gpui::Div> {
-	div().id(SharedString::from(id.to_owned())).flex().flex_none().items_center().px(px(10.)).py(px(6.)).rounded(px(9.)).bg(c(ACCENT)).when(disabled, |button| button.opacity(0.75)).when(!disabled, |button| button.fade_bg(id.to_owned(), c(ACCENT), ca(ACCENT, 0.75))).xs().medium().text_color(c(BG)).child(label.to_owned())
+	div().id(SharedString::from(id.to_owned())).flex().flex_none().items_center().px(px(10.)).py(px(6.)).rounded(px(9.)).bg(c(ACCENT)).when(disabled, |button| disabled_for_assistive_technology(button.opacity(0.75))).when(!disabled, |button| button.fade_bg(id.to_owned(), c(ACCENT), ca(ACCENT, 0.75))).xs().medium().text_color(c(BG)).child(label.to_owned())
+}
+
+/// Tell assistive technology a control is disabled, as `disabled` does in HTML: gpui has
+/// no `aria_disabled`, so it is set on the control's own node as its children are built.
+/// Without it a screen reader announced a dimmed Convert, which does nothing, as available.
+fn disabled_for_assistive_technology(button: gpui::Stateful<gpui::Div>) -> gpui::Stateful<gpui::Div> {
+	button.a11y_synthetic_children(|builder| builder.parent_node().set_disabled())
 }
 
 /// Nuxt UI's soft `UAlert`.

@@ -323,7 +323,8 @@ jobs:
           sudo apt-get install --no-install-recommends -y \
             libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev \
             libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libwayland-dev libfontconfig-dev libfreetype-dev \
-            webkit2gtk-driver xvfb mesa-vulkan-drivers libvulkan1
+            webkit2gtk-driver xvfb mesa-vulkan-drivers libvulkan1 \
+            dbus at-spi2-core python3-gi gir1.2-atspi-2.0 xdotool python3-xlib
 
       - uses: actions/setup-node@v7
         with:
@@ -377,6 +378,22 @@ jobs:
         # opens it with its debug variables and checks a conversion to each format on disk.
         # The runner has no GPU, so Vulkan is Mesa's lavapipe, on Xvfb's X11 display.
         run: xvfb-run -a env -u WAYLAND_DISPLAY scripts/gpui-smoke.sh --edition ${{ matrix.edition }}
+
+      - name: Accessibility audit of the gpui window
+        # What a screen reader reads from the default window, over AT-SPI, in a private D-Bus
+        # session: every control named, no two buttons alike, every text field present and
+        # readable and focusable (scripts/gpui-a11y-audit.py). The system Python, for its gi.
+        run: xvfb-run -a env -u WAYLAND_DISPLAY /usr/bin/python3 scripts/gpui-a11y-audit.py --edition ${{ matrix.edition }}
+
+      - name: Drop a file onto the gpui window
+        # A real XDND drop, as a file manager makes it, then Convert pressed through the
+        # accessibility tree and the WebP checked on disk (scripts/gpui-drop-test.py).
+        run: xvfb-run -a env -u WAYLAND_DISPLAY /usr/bin/python3 scripts/gpui-drop-test.py --edition ${{ matrix.edition }}
+
+      - name: Tab through the gpui window
+        # Every control and radio group reached by Tab, in a cycle Shift+Tab walks back
+        # (scripts/gpui-keyboard-test.py).
+        run: xvfb-run -a env -u WAYLAND_DISPLAY /usr/bin/python3 scripts/gpui-keyboard-test.py --edition ${{ matrix.edition }}
 
       - name: Accessibility audit
         # At every severity, "minor" included: at the default ("serious") an <h1> outside
@@ -493,9 +510,10 @@ jobs:
 
   # cjxl on Windows, the same way: libjxl's own tools built with MSVC (the jpegxl-src crate
   # already builds the library so for the app), reading JPEG through our libjpeg-turbo and
-  # PNG and GIF through vcpkg's libpng and giflib. libjxl finds OpenEXR only through
-  # pkg-config, which Windows lacks, so the EXR gate and the JPEG XL-source one (one of whose
-  # sources is an EXR) are left out (ROADMAP.md, Phase 8).
+  # PNG, GIF and EXR through vcpkg's libpng, giflib and OpenEXR. libjxl finds OpenEXR only
+  # through pkg-config, so vcpkg's pkgconf is that, over vcpkg's .pc files, which for a
+  # static triplet carry the private dependencies too. The JPEG XL-source gate needs EXR
+  # for one of its sources; the EXR gate itself is left out below (ROADMAP.md, Phase 8).
   parity-windows-jxl:
     name: parity with cjxl / windows
     runs-on: windows-2022
@@ -521,14 +539,23 @@ jobs:
       - name: Build the reference cjxl
         run: |
           vcpkg="$(cygpath -u "$VCPKG_INSTALLATION_ROOT")"
-          "$vcpkg/vcpkg.exe" install --triplet x64-windows-static libpng giflib
+          "$vcpkg/vcpkg.exe" install --triplet x64-windows-static libpng giflib openexr
+          "$vcpkg/vcpkg.exe" install --triplet x64-windows pkgconf
+          pkgconf=$(cygpath -m "$(find "$vcpkg/installed/x64-windows/tools" -iname pkgconf.exe | head -1)")
+          export PKG_CONFIG_PATH="$(cygpath -m "$vcpkg/installed/x64-windows-static/lib/pkgconfig")"
+          "$pkgconf" --modversion OpenEXR
           jpeg="$RUNNER_TEMP/jpeg-install"
           cmake -S third_party/libjpeg-turbo -B "$RUNNER_TEMP/jpeg" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DENABLE_SHARED=OFF -DENABLE_STATIC=ON -DWITH_JPEG8=ON -DWITH_TURBOJPEG=OFF -DWITH_TOOLS=OFF -DWITH_TESTS=OFF "-DCMAKE_INSTALL_PREFIX=$jpeg"
           cmake --build "$RUNNER_TEMP/jpeg" --config Release
           cmake --install "$RUNNER_TEMP/jpeg" --config Release
           jpeglib=$(find "$jpeg" -iname 'jpeg-static.lib' | head -1)
           libjxl=$(cargo metadata --format-version 1 | python -c 'import json, os, sys; print(os.path.join(os.path.dirname([p for p in json.load(sys.stdin)["packages"] if p["name"] == "jpegxl-src"][0]["manifest_path"]), "libjxl"))')
-          cmake -S "$libjxl" -B "$RUNNER_TEMP/libjxl" "-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF -DJPEGXL_ENABLE_TOOLS=ON -DJPEGXL_ENABLE_DOXYGEN=OFF -DJPEGXL_ENABLE_MANPAGES=OFF -DJPEGXL_ENABLE_BENCHMARK=OFF -DJPEGXL_ENABLE_EXAMPLES=OFF -DJPEGXL_ENABLE_JNI=OFF -DJPEGXL_ENABLE_SJPEG=OFF -DJPEGXL_ENABLE_OPENEXR=OFF -DJPEGXL_BUNDLE_LIBPNG=OFF -DJPEGXL_ENABLE_PLUGINS=OFF "-DJPEG_LIBRARY=$(cygpath -m "$jpeglib")" "-DJPEG_INCLUDE_DIR=$(cygpath -m "$jpeg/include")"
+          # /Zc:lambda: libjxl 0.12.0's exr.cc has a lambda use a constexpr local without
+          # capturing it, valid C++ that MSVC's legacy lambda parser refuses (C3493). The
+          # conforming parser takes it; it changes how lambdas parse, not the code generated.
+          CXXFLAGS=/Zc:lambda cmake -S "$libjxl" -B "$RUNNER_TEMP/libjxl" "-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF -DJPEGXL_ENABLE_TOOLS=ON -DJPEGXL_ENABLE_DOXYGEN=OFF -DJPEGXL_ENABLE_MANPAGES=OFF -DJPEGXL_ENABLE_BENCHMARK=OFF -DJPEGXL_ENABLE_EXAMPLES=OFF -DJPEGXL_ENABLE_JNI=OFF -DJPEGXL_ENABLE_SJPEG=OFF -DJPEGXL_ENABLE_OPENEXR=ON -DJPEGXL_BUNDLE_LIBPNG=OFF -DJPEGXL_ENABLE_PLUGINS=OFF "-DPKG_CONFIG_EXECUTABLE=$pkgconf" "-DJPEG_LIBRARY=$(cygpath -m "$jpeglib")" "-DJPEG_INCLUDE_DIR=$(cygpath -m "$jpeg/include")"
+          # libjxl leaves EXR out quietly when it cannot find OpenEXR; the EXR gate needs it in.
+          grep -q '^OpenEXR_FOUND:INTERNAL=1' "$RUNNER_TEMP/libjxl/CMakeCache.txt" || { echo "::error::cjxl would be built without EXR"; exit 1; }
           cmake --build "$RUNNER_TEMP/libjxl" --config Release --target cjxl
           cjxl=$(find "$RUNNER_TEMP/libjxl" -iname cjxl.exe | head -1)
           "$cjxl" --version
@@ -537,8 +564,101 @@ jobs:
 
       - name: byte parity with cjxl
         run: |
-          cargo test --release --no-fail-fast --package skidbladnir-encode --test jxl_parity -- --skip matches_cjxl_through_exr --skip matches_cjxl_from_jpeg_xl --nocapture
+          # EXR: 139 of 149 match here; cjxl with vcpkg's OpenEXR writes other bytes for a data
+          # window inside the display window and for a second layer kept as extra channels,
+          # which cjxl on Linux and macOS writes as Skidbladnir does (ROADMAP.md, Phase 8).
+          cargo test --release --no-fail-fast --package skidbladnir-encode --test jxl_parity -- --skip matches_cjxl_through_exr --nocapture
           cargo test --release --no-fail-fast --package skidbladnir-encode --test pnm -- matches_cjxl_reading_pnm matches_cjxl_reading_pfm matches_cjxl_reading_pgx --nocapture
+
+  # avifenc on Windows: the pinned libavif and libaom built with MSVC by the same script as on
+  # Linux and macOS, reading JPEG through our libjpeg-turbo and PNG through vcpkg's libpng,
+  # all on the static C runtime (ROADMAP.md, Phase 8).
+  parity-windows-avif:
+    name: parity with avifenc / windows
+    runs-on: windows-2022
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: Install nasm
+        uses: ilammy/setup-nasm@v1
+
+      - name: Build libheif (standard edition)
+        uses: ./.github/actions/libheif
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the reference avifenc
+        run: |
+          vcpkg="$(cygpath -u "$VCPKG_INSTALLATION_ROOT")"
+          "$vcpkg/vcpkg.exe" install --triplet x64-windows-static libpng zlib
+          jpeg="$RUNNER_TEMP/jpeg-install"
+          cmake -S third_party/libjpeg-turbo -B "$RUNNER_TEMP/jpeg" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DENABLE_SHARED=OFF -DENABLE_STATIC=ON -DWITH_JPEG8=ON -DWITH_TURBOJPEG=OFF -DWITH_TOOLS=OFF -DWITH_TESTS=OFF "-DCMAKE_INSTALL_PREFIX=$jpeg"
+          cmake --build "$RUNNER_TEMP/jpeg" --config Release
+          cmake --install "$RUNNER_TEMP/jpeg" --config Release
+          avifenc=$(scripts/build-reference-avifenc.sh --prefix "$RUNNER_TEMP/avifenc" --jpeg "$jpeg" --cmake-arg "-DCMAKE_TOOLCHAIN_FILE=$(cygpath -m "$vcpkg/scripts/buildsystems/vcpkg.cmake")" --cmake-arg -DVCPKG_TARGET_TRIPLET=x64-windows-static --cmake-arg -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded | tail -n 1)
+          "$avifenc" --version
+          echo "SKIDBLADNIR_REFERENCE_AVIFENC=$(cygpath -m "$avifenc")" >> "$GITHUB_ENV"
+          echo "SKIDBLADNIR_REQUIRE_PARITY=1" >> "$GITHUB_ENV"
+
+      - name: byte parity with avifenc
+        run: cargo test --release --no-fail-fast --package skidbladnir-encode --test avif_parity -- --nocapture
+
+  # heif-enc on Windows: a second libheif with Kvazaar, built by build-libheif.sh as the app's
+  # is, with heif-enc beside its DLL. Its readers take JPEG from our libjpeg-turbo, WebP from
+  # our libwebp, and PNG and TIFF from vcpkg, all on the dynamic C runtime libheif uses on
+  # Windows, since heif-enc hands them its FILE pointers (ROADMAP.md, Phase 8).
+  parity-windows-heic:
+    name: parity with heif-enc / windows
+    runs-on: windows-2022
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: Install nasm
+        uses: ilammy/setup-nasm@v1
+
+      - name: Build libheif (standard edition)
+        uses: ./.github/actions/libheif
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the reference heif-enc
+        run: |
+          vcpkg="$(cygpath -u "$VCPKG_INSTALLATION_ROOT")"
+          "$vcpkg/vcpkg.exe" install --triplet x64-windows-static-md libpng "tiff[core]" zlib
+          jpeg="$RUNNER_TEMP/jpeg-install"
+          cmake -S third_party/libjpeg-turbo -B "$RUNNER_TEMP/jpeg" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL -DENABLE_SHARED=OFF -DENABLE_STATIC=ON -DWITH_JPEG8=ON -DWITH_TURBOJPEG=OFF -DWITH_TOOLS=OFF -DWITH_TESTS=OFF "-DCMAKE_INSTALL_PREFIX=$jpeg"
+          cmake --build "$RUNNER_TEMP/jpeg" --config Release
+          cmake --install "$RUNNER_TEMP/jpeg" --config Release
+          webp="$RUNNER_TEMP/webp-install"
+          cmake -S third_party/libwebp -B "$RUNNER_TEMP/libwebp" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL -DBUILD_SHARED_LIBS=OFF -DWEBP_BUILD_ANIM_UTILS=OFF -DWEBP_BUILD_CWEBP=OFF -DWEBP_BUILD_DWEBP=OFF -DWEBP_BUILD_GIF2WEBP=OFF -DWEBP_BUILD_IMG2WEBP=OFF -DWEBP_BUILD_VWEBP=OFF -DWEBP_BUILD_WEBPINFO=OFF -DWEBP_BUILD_WEBPMUX=OFF -DWEBP_BUILD_EXTRAS=OFF "-DCMAKE_INSTALL_PREFIX=$webp"
+          cmake --build "$RUNNER_TEMP/libwebp" --config Release
+          cmake --install "$RUNNER_TEMP/libwebp" --config Release
+          webp_config=$(dirname "$(find "$webp" -name WebPConfig.cmake | head -1)")
+          scripts/build-libheif.sh --prefix "$RUNNER_TEMP/heif-reference" --with-heif-enc --jpeg "$jpeg" --cmake-arg "-DCMAKE_TOOLCHAIN_FILE=$(cygpath -m "$vcpkg/scripts/buildsystems/vcpkg.cmake")" --cmake-arg -DVCPKG_TARGET_TRIPLET=x64-windows-static-md --cmake-arg "-DWebP_DIR=$(cygpath -m "$webp_config")"
+          heif_enc="$RUNNER_TEMP/heif-reference/bin/heif-enc.exe"
+          "$heif_enc" --version
+          "$heif_enc" --list-encoders
+          echo "SKIDBLADNIR_REFERENCE_HEIF_ENC=$(cygpath -m "$heif_enc")" >> "$GITHUB_ENV"
+          echo "SKIDBLADNIR_REQUIRE_PARITY=1" >> "$GITHUB_ENV"
+
+      - name: byte parity with heif-enc
+        run: cargo test --release --no-fail-fast --package skidbladnir-encode --test heic_parity -- --nocapture
 
   # The same smoke test, on Windows. This is the only place the Windows build is
   # LAUNCHED rather than just compiled: the dev host cannot run it, and nobody had
@@ -641,3 +761,10 @@ jobs:
         # The default window, which WebDriver cannot drive; Direct3D falls back to WARP on a
         # runner with no GPU.
         run: scripts/gpui-smoke.sh --app "$INSTALLED_APP"
+
+      - name: Accessibility audit of the gpui window (UI Automation)
+        # The same audit as on Linux, read through UI Automation, what Narrator and NVDA read
+        # (scripts/gpui-a11y-audit.py).
+        run: |
+          python -m pip install --quiet pywinauto
+          python scripts/gpui-a11y-audit.py --app "$(cygpath -w "$INSTALLED_APP")"

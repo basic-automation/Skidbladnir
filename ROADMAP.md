@@ -825,6 +825,8 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       Re-checked 2026-10-02: jpegxl.com's newest news is still that 25 September post;
       Chrome's stable channel is 154, and Chromium's schedule puts 155 stable on 6 October
       2026. <https://chromiumdash.appspot.com/fetch_milestone_schedule?mstone=155>
+      Re-checked 2026-10-03: stable is still 154 (154.0.8037.98), and the schedule still
+      says 6 October. <https://chromiumdash.appspot.com/fetch_releases?channel=Stable&platform=Windows&num=1>
 - [x] **JPEG XL is close to its trigger — prepare, do not build yet.** *Superseded:* the
       owner asked for JPEG XL ahead of Chrome, and it shipped in 0.10.0 on libjxl (see
       "JPEG XL output and input" below), with `cjxl`'s whole surface since 0.14.0. Mozilla announced
@@ -1012,6 +1014,7 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       Re-checked 2026-09-28: `2.12.0` and `3.0.0-alpha.3` are still the newest; no change.
       Re-checked 2026-10-01: `2.12.1` (30 September; taken this run) and `3.0.0-alpha.4`
       (1 October). Still an alpha; no change.
+      Re-checked 2026-10-03: still `2.12.1` and `3.0.0-alpha.4`.
 - [ ] **Drop `macos-private-api`.** Tauri 2.12.1 no longer needs the `macos-private-api`
       feature (or `macOSPrivateAPI` in `tauri.conf.json`) for transparency or fullscreen on
       macOS (tauri-apps/tauri#16166). Skidbladnir enables the feature only for its frameless
@@ -1025,7 +1028,7 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
 - [x] Confirm the encoder is current. **No libwebp upgrade is pending:** 1.6.0
       (9 July 2025) is still the newest release, and it is exactly what `libwebp-sys`
       vendors and what the parity test compares against, so the parity claim is against
-      current upstream. Re-check each run. Re-checked 2026-09-25, 2026-09-27, 2026-09-28 and 2026-10-01: still 1.6.0.
+      current upstream. Re-check each run. Re-checked 2026-09-25, 2026-09-27, 2026-09-28, 2026-10-01 and 2026-10-03: still 1.6.0.
       <https://github.com/webmproject/libwebp/tags>
 - [x] Strike the JPEG 2000 claim from the README — done; the Status section now lists
       WebP as the only output format rather than promising JPEG 2000.
@@ -1304,6 +1307,7 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       subtraction for lossless fp32 predictors", open since 20 August 2026) says it fixes
       it, with a regression test. libjxl 0.12.0 is still the newest tag; watch for a
       release carrying #4948. <https://github.com/libjxl/libjxl/pull/4948>
+      Re-checked 2026-10-03: #4902 and #4948 still open, 0.12.0 still the newest tag.
 - [x] **A still GIF into JPEG XL, as `cjxl` reads it** (2026-10-01). `cjxl` reads GIF with
       its own reader (`lib/extras/dec/gif.cc`): three colour channels, alpha only when a
       pixel is transparent, perceptual sRGB — and it counts GIF a lossy input, so with no
@@ -1486,7 +1490,7 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       scratch directories after the clock, which ticks in microseconds on macOS, so
       parallel tests shared and deleted one directory; a counter replaced it. Every gate
       then passed on macOS in CI run 36956355147.
-- [ ] Parity on Windows: the reference tools would have to build there (`makefile.unix`
+- [x] Parity on Windows: the reference tools would have to build there (`makefile.unix`
       does not; CMake might). A first slice, sized 2026-10-02 from libwebp's sources:
       libwebp's CMake builds `cwebp` with MSVC, but on Windows it reads PNG, JPEG and TIFF
       through WIC whenever `wincodec.h` is found (`cmake/deps.cmake`, `HAVE_WINCODEC_H`), a
@@ -1504,8 +1508,44 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       `tests/parity.rs`, `tests/animation.rs` and `tests/gif.rs` gate and `tests/pnm.rs`'s
       cwebp ones on Windows; and `cjxl` from libjxl's CMake with MSVC — every JPEG XL gate
       but EXR's and the JPEG XL-source one (libjxl finds OpenEXR only through pkg-config),
-      and `tests/pnm.rs`'s PNM, PFM and PGX ones. **Next:** OpenEXR for that `cjxl`
-      (pkg-config from vcpkg), then avifenc and heif-enc.
+      and `tests/pnm.rs`'s PNM, PFM and PGX ones. **Done (2026-10-03):** OpenEXR for that
+      `cjxl` (vcpkg's `openexr`, found through vcpkg's `pkgconf`; `/Zc:lambda`, since MSVC's
+      legacy lambda parser refuses libjxl 0.12.0's `exr.cc`), so the JPEG XL-source gate
+      runs there (132 of 132); `avifenc` built by `scripts/build-reference-avifenc.sh`,
+      which now runs under Git Bash with MSVC (every `tests/avif_parity.rs` gate); and
+      `heif-enc` from a second libheif built by `scripts/build-libheif.sh` with vcpkg's
+      readers on the dynamic runtime (every `tests/heic_parity.rs` gate). All gates in CI
+      run 37171820482. Two real bugs came out of it, below. The EXR gate itself stays out
+      on Windows (next item).
+- [ ] **EXR on Windows: `cjxl` writes other bytes for 10 of 149** (found 2026-10-03, CI run
+      37171820482): every case of two fixtures, a data window inside the display window
+      and a second layer kept as extra channels; cjxl's files are the larger. On Linux
+      (Ubuntu's OpenEXR) and macOS (Homebrew's) `cjxl` writes Skidbladnir's bytes for all
+      149, and Skidbladnir reads EXR in Rust, so the Windows reference reads those files
+      differently: vcpkg's OpenEXR version, or `exr.cc`'s window arithmetic under
+      LLP64, are the first suspects. Next: have the Windows job decode cjxl's file of one
+      failing case with `djxl` and compare it with the Linux one.
+- [x] **Every Windows libheif lacked sharp YUV** (found and fixed 2026-10-03 by the Windows
+      `heif-enc` parity job): `scripts/build-libheif.sh` looked for `sharpyuv.lib`, MSVC
+      builds `libsharpyuv.lib`, and libheif's configure quietly built without it. `heif-enc`
+      then refuses `-C sharp-yuv`; the app only prefers it, so a Windows HEIC made with Sharp
+      YUV used the default downsampler. The script now finds it and fails without it.
+      Gate: the Windows `heic_parity` run, 8 of 8 tests, sharp YUV cases included.
+- [x] **libaom, libavif and libjpeg-turbo were debug-quality builds on Windows** (found and
+      fixed 2026-10-03 by the Windows `avifenc` parity job): with Visual Studio's generator
+      `cmake-rs` 0.1.58 replaces `CMAKE_<LANG>_FLAGS_RELEASE` with the compiler's base
+      flags minus `/O`, so CMake's `/O2 /Ob2 /DNDEBUG` never reached them: unoptimised,
+      assertions on. A libaom assertion (`av1/encoder/bitstream.c:2982`) ended the test
+      process on a superres setting. `build.rs`'s `msvc_release_build` now sets the Release
+      flags itself. Gate: the Windows `avif_parity` run, 4 of 4 tests, byte for byte.
+- [ ] **libjxl on Windows has the same unoptimised build**: `jpegxl-src` builds it with
+      `cmake-rs` and ClangCL, so the flag replacement above applies, and `build.rs` cannot
+      reach that configure. The JPEG XL gates pass there all the same (byte parity held
+      with an unoptimised libjxl), so this is speed, and assertion code shipped, not output.
+      The fix is the one already suggested for `jpegxl-src`'s licence header: our own
+      CMake invocation over the pinned libjxl source, through `msvc_release_build`; the
+      Windows JPEG XL gates must stay green through it (Linux showed an unoptimised
+      libjxl rounding differently on decode).
 
 **Multi-image features the tools have, deferred by the owner (2026-09-28):**
 
@@ -1570,10 +1610,57 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       their first run (37092442114), the first time anything automated opened the gpui
       window on Windows. macOS is covered by the release workflow, which launches the app
       and screenshots its window.
-- [ ] Accessibility of the gpui window: no screen reader has been run against it (PR #67's
-      "not tested"), and the axe audit (`a11y-audit.sh`) covers only the webview window.
-- [ ] Dragging files onto the gpui window has not been tested (PR #67); `SKID_INPUTS` takes
-      the drop path in code, not a real drag.
+- [x] An accessibility audit of the gpui window (2026-10-03): `scripts/gpui-a11y-audit.py`
+      reads the window as a screen reader does, AT-SPI on Linux (in a private D-Bus session
+      per state, with its own accessibility bus) and UI Automation on Windows (pywinauto),
+      in ten states: each format with every disclosure open, the preset form, the settings,
+      an open select, a queued file's menu, the preview and About. It fails on nameless
+      controls and images, buttons sharing a name, sliders out of range, required text
+      fields missing or unreadable, and a field that will not take the focus. CI steps in
+      both Linux window legs and the Windows window job. **It found that no text or number
+      field reached a screen reader at all**: gpuikit's input implements none of gpui's
+      accessibility methods, so the role and name set on it were dropped. `Announced`
+      (`controls.rs`) now reports them, with the value as a text run; 15 problems in the 5
+      first states with the old code. Also two buttons named only "Apply" and a bare
+      "Collapse"/"Expand", renamed in both windows; and Convert, announced as "Convert"
+      whatever was queued and as available when dimmed, is now named as drawn ("Convert 2
+      files") and marked disabled when it does nothing. A field focused over AT-SPI and typed
+      into with `wtype` reads back what was typed (dev host, Hyprland).
+- [ ] A person using the gpui window with a screen reader: Orca, Narrator or NVDA, and
+      VoiceOver. The audit above checks what they are given, not how it sounds or flows.
+      macOS is not audited at all (AccessKit's NSAccessibility tree; reading it from a CI
+      runner needs an accessibility permission granted to the reader).
+- [x] Dragging files onto the gpui window, on X11 (2026-10-03): `scripts/gpui-drop-test.py`
+      plays a file manager's side of XDND with python-xlib (offers a PNG as
+      `text/uri-list`, answers the window's selection request, drops), then presses
+      Convert through AT-SPI and checks the WebP on disk. CI steps in both Linux window
+      legs (Xvfb); passes here through XWayland, and fails with the drop left out.
+- [x] Keyboard reach of the gpui window (2026-10-03): `scripts/gpui-keyboard-test.py` tabs
+      through each format's panel (every disclosure open), reading the focus from AT-SPI,
+      and fails on a control or radio group Tab never reaches, a trap, a nameless focus, or
+      a Shift+Tab cycle that is not Tab's reversed. Clean in all four panels here; taking
+      Lossless out of the tab order fails it. CI steps in both Linux window legs. In the
+      WebP panel it also presses the keys inside controls (the arrows, Page Up, Home and End
+      on a slider; the arrows in a radio group; Space on a check box); reversing the
+      slider's arrows fails it; and a select (Down opens it on the current choice, Down and
+      Enter choose, Escape closes). The queue's menu keys are not exercised yet.
+- [x] **A select's value did not reach AT-SPI** (found and fixed 2026-10-03 by the keyboard
+      test): the trigger is a `ComboBox` with `aria_value`, but AccessKit 0.18.1 gives a
+      combo box no Text interface (`supports_text_ranges` covers text inputs, labels and
+      documents only), and the open list is a pop-up elsewhere in the tree, so a screen
+      reader could say "libwebp preset, combo box" but not "photo". Each select now carries
+      its choice as a selected option of its own (`chosen_option` in `controls.rs`), as a
+      browser exposes a `<select>`; AT-SPI's Selection reports it. The audit checks every
+      select says what it holds (AT-SPI only); without the option, 9 of its 10 states fail.
+      What UI Automation reads for it is not checked yet.
+- [ ] A drop onto the gpui window on Wayland (a native Wayland drag source) and on Windows
+      (OLE drag and drop) is still untested; the X11 test above is the only real drop.
+- [ ] AccessKit's AT-SPI mapping reports every button enabled: accesskit_atspi_common
+      0.18.1 (`node.rs`) adds `Enabled | Sensitive` unless the role is one of those
+      `is_read_only_supported` lists (text inputs, check boxes, sliders and the like), so a
+      disabled Convert is announced as available on Linux. The window marks it disabled
+      (UI Automation passes that on); report upstream, and take the fix when AccessKit has
+      one.
 - [ ] The gpui window on macOS and Windows has not been opened by a person (CI builds and
       tests it; the Windows installer smoke runs the webview window).
 - [x] The saving percentage is computed **once**, in Rust. `savingOf()` is gone from

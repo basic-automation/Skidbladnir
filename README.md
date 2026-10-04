@@ -74,8 +74,8 @@ with the exceptions listed under [What "every option" means](#what-every-option-
 | HEIC | `heif-enc -e kvazaar` 1.23.5 | libheif 1.23.5 + Kvazaar 2.3.2 | 182 cases: every option, PNG, JPEG, TIFF (RGB, straight alpha, and premultiplied alpha read as `heif-enc` reads it on request), WebP, HEIC and 8-bit 4:2:0 Y4M inputs |
 
 That is 4,270 cases in all. CI runs every one of them on Linux x86-64, Linux ARM64 and
-macOS with Apple silicon, and on Windows all of WebP's, animated WebP's and nearly all of
-JPEG XL's (not yet AVIF's or HEIC's), for every pull request and every push to `master`.
+macOS with Apple silicon, and on Windows x64 all but JPEG XL's 149 EXR cases, for every
+pull request and every push to `master`.
 
 The [GPL edition](#editions) writes HEIC with x265 instead, adding `heif-enc`'s `-L`
 lossless, 4:4:4 and 4:2:2 chroma, 10-bit output, x265's main tuning controls and any
@@ -128,8 +128,11 @@ byte against a reference.
 - Each format keeps its own settings while you try another. Settings and the destination
   are remembered between launches, and you can save named presets of your own.
 - Every control shows the flag it sets, with the expert ones in folding sections. The
-  whole window works from the keyboard, and every control is labelled for a screen
-  reader.
+  whole window works from the keyboard, and every control, text and number fields
+  included, has a name and a role a screen reader can announce. CI checks both on every
+  change: it tabs through each format's panel and checks every control is reached, and
+  reads the window the way a screen reader does, over AT-SPI on Linux and UI Automation
+  on Windows (and with axe in the webview window).
 - Your source image is never overwritten, and every write goes through a temporary file,
   so a failed conversion cannot damage a file that was already there. Before a run, the
   window warns when two queued files would be written to the same name (`photo.png` and
@@ -324,10 +327,13 @@ same source as the library the app links (`scripts/build-reference-tools.sh`). P
   `avifenc` are both built without libyuv. A packaged `avifenc` (Homebrew, most Linux
   distributions) usually links libyuv, which converts RGB to YUV differently, so it
   writes other bytes even at libavif 1.4.2.
-- **Tested on Linux x86-64 and macOS on Apple silicon.** CI builds the reference tools and
-  runs the parity tests on both, so the encoders' x86 and ARM code paths are each held to
-  the tools. The Windows build and the Intel Mac build link the same sources, but no
-  reference tool runs on those, so identical bytes there are expected, not tested.
+- **Tested on Linux (x86-64 and ARM64), macOS on Apple silicon and Windows x64.** CI
+  builds the reference tools and runs the parity tests on each, so the encoders' x86 and
+  ARM code paths, and their MSVC builds, are each held to the tools. On Windows the EXR
+  cases are left out: there `cjxl`, reading EXR through vcpkg's OpenEXR, writes other bytes
+  for 10 of the 149, where on Linux and macOS it writes Skidbladnir's. The Intel Mac build
+  links the same sources, but no reference tool runs there, so identical bytes there are
+  expected, not tested.
 - **AVIF with libaom**, `avifenc`'s default codec: `-c rav1e` and `-c svt` are not built
   in. JPEG gain-map conversion needs `avifenc` built with libxml2, which it is not by
   default, and is not offered.
@@ -475,6 +481,10 @@ Known gaps:
   and Debian 12, and its `.rpm` on the latest Fedora, on x86-64 and ARM64 alike, and
   checked to find every library it needs; the ARM64 app itself has not been launched. The
   published 0.5.0 `.deb` and AppImage were run through that release's smoke test by hand.
+- Nobody has used Skidbladnir with a screen reader yet (Orca, Narrator, NVDA or
+  VoiceOver). What one is given is checked automatically on Linux and Windows, not on
+  macOS. Before 1.4.1 the window's text and number fields (sizes, crops, exact values)
+  were missing from it entirely.
 - The app is not code-signed on any platform;
   [Opening it the first time](#opening-it-the-first-time) shows how to get past each
   system's warning.
