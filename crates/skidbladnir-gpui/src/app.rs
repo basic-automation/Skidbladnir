@@ -9,7 +9,7 @@ use std::{
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use gpui::{AnyElement, AppContext, Bounds, ClickEvent, Context, Entity, ExternalPaths, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement, PathPromptOptions, Pixels, Render, RenderImage, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, StyledImage, Subscription, Window, canvas, div, img, point, prelude::FluentBuilder, px, size, svg};
-use gpuikit::{elements::input::input, input::InputState};
+use gpuikit::input::InputState;
 use skidbladnir_encode::{
 	EncodeJob, OutputFormat, settings::HEIC_X265, source::{self, Conversion, FoundImage, PathInspection}
 };
@@ -930,7 +930,7 @@ impl Skid {
 		}
 		let name_empty = self.preset_name.read(cx).content().trim().is_empty();
 		let add = self.bounds_of("preset-add").unwrap_or_default();
-		let preset_form = preset_open.then(|| crate::controls::place(gpui::Anchor::TopLeft, point(add.right() + px(8.), add.top()), crate::controls::popup_panel("preset-form", None, div().flex().w(px(256.)).gap(px(8.)).p(px(8.)).child(input(&self.preset_name, cx).flex_1().h(px(28.)).px(px(10.)).py(px(6.)).rounded(px(9.)).bg(c(BG)).border_1().border_color(c(RULE)).xs().text_color(c(FG))).child(primary_button("preset-save", "Save", name_empty).press(self, "preset-save", "Save", Ring::Primary, 9., |this, _, cx| this.save_preset(cx), window, cx)), cx)));
+		let preset_form = preset_open.then(|| crate::controls::place(gpui::Anchor::TopLeft, point(add.right() + px(8.), add.top()), crate::controls::popup_panel("preset-form", None, div().flex().w(px(256.)).gap(px(8.)).p(px(8.)).child(crate::controls::named_input(&self.preset_name, "preset-name", "Preset name", None, cx).flex_1().h(px(28.)).px(px(10.)).py(px(6.)).rounded(px(9.)).bg(c(BG)).border_1().border_color(c(RULE)).xs().text_color(c(FG))).child(primary_button("preset-save", "Save", name_empty).press(self, "preset-save", "Save", Ring::Primary, 9., |this, _, cx| this.save_preset(cx), window, cx)), cx)));
 		div().id("sidebar")
 			.role(gpui::Role::Complementary)
 			.aria_label("Queue and presets")
@@ -943,7 +943,7 @@ impl Skid {
 			.child(div().id("collapse-row").flex().justify_end().on_mouse_down(MouseButton::Left, |event, window, _| drag_window(event, window)).child(link_button("collapse", "Collapse", 90.).press(
 				self,
 				"collapse",
-				"Collapse",
+				"Collapse the sidebar",
 				Ring::Neutral,
 				9.,
 				|this, _, cx| {
@@ -1086,7 +1086,7 @@ impl Skid {
 				bar.child(link_button("expand", "Expand", -90.).press(
 					self,
 					"expand",
-					"Expand",
+					"Expand the sidebar",
 					Ring::Neutral,
 					9.,
 					|this, _, cx| {

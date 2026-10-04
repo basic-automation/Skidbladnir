@@ -803,15 +803,92 @@ pub fn add_button(skid: &mut Skid, id: &str, label: &str, handler: impl Fn(&mut 
 	div().id(ElementId::Name(id.to_owned().into())).flex().flex_none().items_center().gap(px(6.)).px(px(10.)).py(px(6.)).rounded(px(9.)).fade_bg(id.to_owned(), c(FIELD), ca(RULE, 0.75)).xs().medium().text_color(c(FG)).child(icon("material-symbols--add", 16., c(FG))).child(SharedString::from(label.to_owned())).press(skid, id, label, Ring::Neutral, 9., handler, window, cx)
 }
 
-/// A gpuikit input announced as a named text field. gpuikit's input has no accessibility
-/// builders of its own, but any interactive element given an id has gpui's.
-pub fn named_input(state: &gpui::Entity<InputState>, id: &str, name: &str, placeholder: Option<&str>, cx: &gpui::App) -> gpui::Stateful<gpuikit::elements::input::Input> {
+/// A gpuikit input announced as a named text field.
+pub fn named_input(state: &gpui::Entity<InputState>, id: &str, name: &str, placeholder: Option<&str>, cx: &gpui::App) -> Announced<gpui::Stateful<gpuikit::elements::input::Input>> {
 	let field = input(state, cx);
 	let field = match placeholder {
 		Some(text) => field.placeholder(text.to_owned()),
 		None => field,
 	};
-	field.id(ElementId::Name(format!("input-{id}").into())).role(gpui::Role::TextInput).aria_label(name.to_owned()).aria_value(state.read(cx).content().to_owned())
+	Announced { element: field.id(ElementId::Name(format!("input-{id}").into())), role: gpui::Role::TextInput, label: name.to_owned().into(), value: Some(state.read(cx).content().to_owned().into()) }
+}
+
+/// An element announced to assistive technology with a role, a name and a value it does not
+/// report itself. gpuikit's input implements none of `Element`'s accessibility methods, so
+/// the `.role()` and `.aria_label()` gpui lets any interactive element take were set on it and
+/// dropped: no text or number field reached a screen reader (found by
+/// `scripts/gpui-a11y-audit.py`). This forwards everything else to the element, its id
+/// included, so the node is the one gpui marks focused when the input has the focus.
+pub struct Announced<E> {
+	element: E,
+	role: gpui::Role,
+	label: SharedString,
+	value: Option<SharedString>,
+}
+
+impl<E: gpui::Element> gpui::Element for Announced<E> {
+	type PrepaintState = E::PrepaintState;
+	type RequestLayoutState = E::RequestLayoutState;
+
+	fn id(&self) -> Option<ElementId> {
+		self.element.id()
+	}
+
+	fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+		self.element.source_location()
+	}
+
+	fn a11y_role(&self) -> Option<gpui::Role> {
+		Some(self.role)
+	}
+
+	fn write_a11y_info(&self, node: &mut gpui::accesskit::Node) {
+		self.element.write_a11y_info(node);
+		node.set_label(self.label.to_string());
+		if let Some(value) = &self.value {
+			node.set_value(value.to_string());
+		}
+	}
+
+	/// The value again as a text run, the child AccessKit reads a text field's text from: on
+	/// Linux, without one, AT-SPI has no text to give a screen reader, only the field's name.
+	fn a11y_synthetic_children(&mut self, prepaint: &mut Self::PrepaintState, builder: &mut gpui::A11ySubtreeBuilder) {
+		self.element.a11y_synthetic_children(prepaint, builder);
+		if let Some(value) = &self.value {
+			let mut run = gpui::accesskit::Node::new(gpui::Role::TextRun);
+			run.set_value(value.to_string());
+			// UTF-8 lengths fit a byte: a char is at most four.
+			run.set_character_lengths(value.chars().map(|character| u8::try_from(character.len_utf8()).unwrap_or(4)).collect::<Vec<_>>());
+			let id = builder.synthetic_node_id("value");
+			builder.push_child(id, run);
+		}
+	}
+
+	fn request_layout(&mut self, id: Option<&gpui::GlobalElementId>, inspector_id: Option<&gpui::InspectorElementId>, window: &mut Window, cx: &mut gpui::App) -> (gpui::LayoutId, Self::RequestLayoutState) {
+		self.element.request_layout(id, inspector_id, window, cx)
+	}
+
+	fn prepaint(&mut self, id: Option<&gpui::GlobalElementId>, inspector_id: Option<&gpui::InspectorElementId>, bounds: Bounds<Pixels>, request_layout: &mut Self::RequestLayoutState, window: &mut Window, cx: &mut gpui::App) -> Self::PrepaintState {
+		self.element.prepaint(id, inspector_id, bounds, request_layout, window, cx)
+	}
+
+	fn paint(&mut self, id: Option<&gpui::GlobalElementId>, inspector_id: Option<&gpui::InspectorElementId>, bounds: Bounds<Pixels>, request_layout: &mut Self::RequestLayoutState, prepaint: &mut Self::PrepaintState, window: &mut Window, cx: &mut gpui::App) {
+		self.element.paint(id, inspector_id, bounds, request_layout, prepaint, window, cx);
+	}
+}
+
+impl<E: gpui::Element> IntoElement for Announced<E> {
+	type Element = Self;
+
+	fn into_element(self) -> Self::Element {
+		self
+	}
+}
+
+impl<E: Styled> Styled for Announced<E> {
+	fn style(&mut self) -> &mut gpui::StyleRefinement {
+		self.element.style()
+	}
 }
 
 impl Skid {

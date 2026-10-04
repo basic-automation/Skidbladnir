@@ -11,7 +11,7 @@
 use std::rc::Rc;
 
 use gpui::{AnyElement, AppContext, Context, ElementId, Hsla, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, ParentElement, Pixels, Point, SharedString, StatefulInteractiveElement, Styled, Window, div, hsla, linear_color_stop, linear_gradient, prelude::FluentBuilder, px, rgb};
-use gpuikit::{elements::input::input, input::InputState};
+use gpuikit::input::InputState;
 
 use crate::{
 	app::{Popup, Skid}, controls::{Press, Ring, Set, field, field_label, place_local, popup_panel}, theme::{ACCENT, BRIGHT, FG, RULE, Type, c, ca}
@@ -177,7 +177,7 @@ impl Skid {
 		if std::env::var_os("SKID_PROBE").is_some() {
 			eprintln!("picker anchor {anchor:?}");
 		}
-		let body = div().flex().flex_col().gap(px(10.)).p(px(12.)).child(square).child(strip).child(div().flex().items_center().gap(px(8.)).child(div().size(px(28.)).flex_none().rounded(px(6.)).bg(rgb(value)).border_1().border_color(c(RULE))).child(input(&hex, cx).id(format!("{key}-hex-field")).aria_label("Hex colour").flex_1().h(px(28.)).px(px(10.)).py(px(6.)).rounded(px(9.)).bg(c(RULE)).xs().text_color(c(FG))));
+		let body = div().flex().flex_col().gap(px(10.)).p(px(12.)).child(square).child(strip).child(div().flex().items_center().gap(px(8.)).child(div().size(px(28.)).flex_none().rounded(px(6.)).bg(rgb(value)).border_1().border_color(c(RULE))).child(crate::controls::named_input(&hex, &format!("{key}-hex-field"), "Hex colour", None, cx).flex_1().h(px(28.)).px(px(10.)).py(px(6.)).rounded(px(9.)).bg(c(RULE)).xs().text_color(c(FG))));
 		place_local(gpui::Anchor::TopLeft, gpui::point(px(0.), anchor.size.height + px(8.)), popup_panel(&format!("{key}-panel"), None, body, cx).role(gpui::Role::Dialog).aria_label("Choose a colour")).into_any_element()
 	}
 

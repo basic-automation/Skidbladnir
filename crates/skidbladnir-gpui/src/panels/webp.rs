@@ -111,7 +111,7 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 		.child(div().flex().items_center().gap(px(8.)).child(preset_picker.flex_1().min_w_0()).child(button_soft("webp-preset-apply", "Apply", false).press(
 			this,
 			"webp-preset-apply",
-			"Apply",
+			"Apply the libwebp preset",
 			Ring::Neutral,
 			9.,
 			|t, _, cx| {
@@ -130,7 +130,7 @@ pub fn render(this: &mut Skid, window: &mut Window, cx: &mut Context<Skid>) -> A
 		.child(div().flex().items_center().gap(px(8.)).child(level_picker.flex_1().min_w_0()).child(button_soft("webp-level-apply", "Apply", false).press(
 			this,
 			"webp-level-apply",
-			"Apply",
+			"Apply the lossless level",
 			Ring::Neutral,
 			9.,
 			|t, _, cx| {

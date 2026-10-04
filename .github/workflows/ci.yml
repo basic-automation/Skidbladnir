@@ -323,7 +323,8 @@ jobs:
           sudo apt-get install --no-install-recommends -y \
             libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev \
             libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libwayland-dev libfontconfig-dev libfreetype-dev \
-            webkit2gtk-driver xvfb mesa-vulkan-drivers libvulkan1
+            webkit2gtk-driver xvfb mesa-vulkan-drivers libvulkan1 \
+            dbus at-spi2-core python3-gi gir1.2-atspi-2.0
 
       - uses: actions/setup-node@v7
         with:
@@ -377,6 +378,12 @@ jobs:
         # opens it with its debug variables and checks a conversion to each format on disk.
         # The runner has no GPU, so Vulkan is Mesa's lavapipe, on Xvfb's X11 display.
         run: xvfb-run -a env -u WAYLAND_DISPLAY scripts/gpui-smoke.sh --edition ${{ matrix.edition }}
+
+      - name: Accessibility audit of the gpui window
+        # What a screen reader reads from the default window, over AT-SPI, in a private D-Bus
+        # session: every control named, no two buttons alike, every text field present and
+        # readable and focusable (scripts/gpui-a11y-audit.py). The system Python, for its gi.
+        run: xvfb-run -a env -u WAYLAND_DISPLAY /usr/bin/python3 scripts/gpui-a11y-audit.py --edition ${{ matrix.edition }}
 
       - name: Accessibility audit
         # At every severity, "minor" included: at the default ("serious") an <h1> outside

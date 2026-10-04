@@ -494,6 +494,7 @@ function basename(path: string): string {
 					trailing-icon="i-subway-down-2"
 					class="px-1 py-1.5 text-xs font-semibold text-paleday-fg"
 					:ui="{ trailingIcon: 'size-4 rotate-90' }"
+					aria-label="Collapse the sidebar"
 					@click="sidebarCollapsed = true"
 				>
 					Collapse
@@ -589,6 +590,7 @@ function basename(path: string): string {
 					trailing-icon="i-subway-down-2"
 					class="px-1 py-1.5 text-xs font-semibold text-paleday-fg"
 					:ui="{ trailingIcon: 'size-4 -rotate-90' }"
+					aria-label="Expand the sidebar"
 					@click="sidebarCollapsed = false"
 				>
 					Expand
