@@ -1639,8 +1639,10 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       through each format's panel (every disclosure open), reading the focus from AT-SPI,
       and fails on a control or radio group Tab never reaches, a trap, a nameless focus, or
       a Shift+Tab cycle that is not Tab's reversed. Clean in all four panels here; taking
-      Lossless out of the tab order fails it. CI steps in both Linux window legs. Arrow keys
-      inside radio groups, sliders and lists are not exercised yet.
+      Lossless out of the tab order fails it. CI steps in both Linux window legs. In the
+      WebP panel it also presses the keys inside controls (the arrows, Page Up, Home and End
+      on a slider; the arrows in a radio group; Space on a check box); reversing the
+      slider's arrows fails it. Selects' and menus' keys are not exercised yet.
 - [ ] A drop onto the gpui window on Wayland (a native Wayland drag source) and on Windows
       (OLE drag and drop) is still untested; the X11 test above is the only real drop.
 - [ ] AccessKit's AT-SPI mapping reports every button enabled: accesskit_atspi_common

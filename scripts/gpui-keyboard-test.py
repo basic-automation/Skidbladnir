@@ -8,7 +8,9 @@ smoke test and axe check it; nothing had checked the gpui window. This presses T
 keyboard user does, and after each press reads which control has the focus from the
 window's accessibility tree (AT-SPI). It fails when a control that says it can take the
 focus is never reached, when Tab stops moving (a trap), or when the focus lands on a
-nameless control. Shift+Tab must walk the same cycle backwards.
+nameless control. Shift+Tab must walk the same cycle backwards. In the WebP panel it also
+presses the keys inside controls: the arrows, Page Up, Home and End on a slider, the arrows
+in a radio group, Space on a check box.
 
 Each format's panel is checked with every disclosure open. It runs in the private AT-SPI
 session scripts/gpui-a11y-audit.py sets up, with a scratch configuration, and the window on
@@ -97,6 +99,60 @@ def walk_cycle(reader, app, pid, key, limit):
 	return visited, f"{key} did not come back to where it started in {limit} presses"
 
 
+def inner_keys(reader, app, pid):
+	"""The keys inside controls, in the WebP panel: the arrows, Home and End on a slider,
+	the arrows in a radio group, Space on a check box. Each control is focused over AT-SPI
+	first, as a screen reader's user would move to it."""
+	atspi = reader.atspi
+	problems = []
+
+	def find(role, name):
+		return next((node for node in reader.walk(app) if node.get_role() == role and node.get_name() == name), None)
+
+	def focus(node):
+		component = node.get_component_iface()
+		if component is None or not component.grab_focus():
+			return False
+		for _ in range(20):
+			if node.get_state_set().contains(atspi.StateType.FOCUSED):
+				return True
+			time.sleep(0.1)
+		return False
+
+	slider = find(atspi.Role.SLIDER, "Quality")
+	if slider is None or not focus(slider):
+		problems.append("the Quality slider cannot be focused")
+	else:
+		value = lambda: find(atspi.Role.SLIDER, "Quality").get_value_iface().get_current_value()
+		start = value()
+		for key, expected in (("Right", start + 1), ("Left", start), ("Page_Up", min(start + 10, 100)), ("End", 100), ("Home", 0)):
+			press(pid, key)
+			if value() != expected:
+				problems.append(f"{key} on the Quality slider gives {value()}, not {expected}")
+
+	quality = find(atspi.Role.RADIO_BUTTON, "Quality")
+	if quality is None or not focus(quality):
+		problems.append("the Quality radio button cannot be focused")
+	else:
+		press(pid, "Right")
+		size = find(atspi.Role.RADIO_BUTTON, "File size")
+		if size is None or not size.get_state_set().contains(atspi.StateType.CHECKED) or not size.get_state_set().contains(atspi.StateType.FOCUSED):
+			problems.append("Right from the Quality radio button does not check and focus File size")
+		press(pid, "Left")
+		if not find(atspi.Role.RADIO_BUTTON, "Quality").get_state_set().contains(atspi.StateType.CHECKED):
+			problems.append("Left from File size does not check Quality again")
+
+	lossless = find(atspi.Role.CHECK_BOX, "Lossless")
+	if lossless is None or not focus(lossless):
+		problems.append("the Lossless check box cannot be focused")
+	else:
+		before = lossless.get_state_set().contains(atspi.StateType.CHECKED)
+		press(pid, "space")
+		if find(atspi.Role.CHECK_BOX, "Lossless").get_state_set().contains(atspi.StateType.CHECKED) == before:
+			problems.append("Space does not toggle the Lossless check box")
+	return problems
+
+
 def run(args):
 	reader = audit.AtspiReader()
 	failures = 0
@@ -145,6 +201,11 @@ def run(args):
 							problems.append(problem)
 						elif [node.path for node in backward][:-1] != [node.path for node in reversed(forward)][1:]:
 							problems.append("Shift+Tab does not walk Tab's cycle backwards")
+						if label == "webp":
+							inner = inner_keys(reader, app, process.pid)
+							problems += inner
+							if not inner:
+								print("ok   webp: the arrows, Page Up, Home and End move the Quality slider; the arrows move a radio group's choice; Space toggles a check box")
 						if problems:
 							failures += len(problems)
 							print(f"FAIL {label}: {len(forward)} Tab stops for {len(stops)} controls and {len(groups)} radio groups; {len(problems)} problems:")
