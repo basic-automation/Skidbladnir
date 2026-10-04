@@ -390,6 +390,11 @@ jobs:
         # accessibility tree and the WebP checked on disk (scripts/gpui-drop-test.py).
         run: xvfb-run -a env -u WAYLAND_DISPLAY /usr/bin/python3 scripts/gpui-drop-test.py --edition ${{ matrix.edition }}
 
+      - name: Tab through the gpui window
+        # Every control and radio group reached by Tab, in a cycle Shift+Tab walks back
+        # (scripts/gpui-keyboard-test.py).
+        run: xvfb-run -a env -u WAYLAND_DISPLAY /usr/bin/python3 scripts/gpui-keyboard-test.py --edition ${{ matrix.edition }}
+
       - name: Accessibility audit
         # At every severity, "minor" included: at the default ("serious") an <h1> outside
         # any landmark went unnoticed in every state from the Nanna redesign until 1.2.
