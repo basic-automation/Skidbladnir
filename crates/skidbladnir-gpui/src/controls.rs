@@ -431,6 +431,10 @@ impl Skid {
 			.aria_label(name.to_owned())
 			.aria_value(current.clone())
 			.aria_expanded(open)
+			.a11y_synthetic_children({
+				let current = current.clone();
+				move |builder| chosen_option(builder, current)
+			})
 			.relative()
 			.flex()
 			.items_center()
@@ -801,6 +805,18 @@ pub fn icon_button(skid: &mut Skid, id: &str, icon_name: &str, label: &str, hand
 /// `UButton size="sm" color="neutral" variant="soft" icon="i-material-symbols-add"`.
 pub fn add_button(skid: &mut Skid, id: &str, label: &str, handler: impl Fn(&mut Skid, &mut Window, &mut Context<Skid>) + 'static, window: &Window, cx: &mut Context<Skid>) -> gpui::Stateful<gpui::Div> {
 	div().id(ElementId::Name(id.to_owned().into())).flex().flex_none().items_center().gap(px(6.)).px(px(10.)).py(px(6.)).rounded(px(9.)).fade_bg(id.to_owned(), c(FIELD), ca(RULE, 0.75)).xs().medium().text_color(c(FG)).child(icon("material-symbols--add", 16., c(FG))).child(SharedString::from(label.to_owned())).press(skid, id, label, Ring::Neutral, 9., handler, window, cx)
+}
+
+/// A select's choice, as a selected option inside it, which is how a browser or GTK exposes
+/// a select and what a screen reader reads its value from. AccessKit gives a combo box no
+/// text of its own on AT-SPI, and the open list is a pop-up drawn elsewhere in the tree, so
+/// without it a screen reader could name the select but not say what it holds.
+fn chosen_option(builder: &mut gpui::A11ySubtreeBuilder, current: String) {
+	let mut option = gpui::accesskit::Node::new(gpui::Role::ListBoxOption);
+	option.set_label(current);
+	option.set_selected(true);
+	let id = builder.synthetic_node_id("chosen");
+	builder.push_child(id, option);
 }
 
 /// A gpuikit input announced as a named text field.
