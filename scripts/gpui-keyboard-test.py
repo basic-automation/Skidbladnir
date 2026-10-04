@@ -82,9 +82,11 @@ def describe(node):
 
 
 def walk_cycle(reader, app, pid, key, limit):
-	"""Press `key` until the focus comes back to the first control it reached; the nodes it
-	visited, that one last. Nodes are told apart by their AT-SPI path, which AccessKit
-	derives from gpui's element id: two controls may share a name."""
+	"""Press `key` until a control comes round again; the cycle of controls between its two
+	visits, in order. Controls are told apart by their AT-SPI path, which AccessKit derives
+	from gpui's element id: two controls may share a name. The first presses may pass
+	through a control outside the cycle (where the focus started), so the cycle is what
+	repeats, not what came first."""
 	visited = []
 	for _ in range(limit):
 		press(pid, key)
@@ -93,10 +95,21 @@ def walk_cycle(reader, app, pid, key, limit):
 			return visited, "the focus left every control (nothing reports focused)"
 		if visited and node.path == visited[-1].path:
 			return visited, f"{key} did not move the focus from {describe(node)}"
+		paths = [seen.path for seen in visited]
+		if node.path in paths:
+			return visited[paths.index(node.path):], None
 		visited.append(node)
-		if len(visited) > 1 and node.path == visited[0].path:
-			return visited, None
-	return visited, f"{key} did not come back to where it started in {limit} presses"
+	return visited, f"{key} did not come round to a control twice in {limit} presses; the first: " + ", ".join(describe(node) for node in visited[:6])
+
+
+def same_cycle_reversed(forward, backward):
+	"""Whether `backward` is `forward` walked the other way, from wherever it starts."""
+	ahead = [node.path for node in forward]
+	behind = [node.path for node in reversed(backward)]
+	if sorted(ahead) != sorted(behind):
+		return False
+	turn = ahead.index(behind[0])
+	return ahead[turn:] + ahead[:turn] == behind
 
 
 def inner_keys(reader, app, pid):
@@ -230,7 +243,7 @@ def run(args):
 						backward, problem = walk_cycle(reader, app, process.pid, "shift+Tab", limit)
 						if problem:
 							problems.append(problem)
-						elif [node.path for node in backward][:-1] != [node.path for node in reversed(forward)][1:]:
+						elif not problems and not same_cycle_reversed(forward, backward):
 							problems.append("Shift+Tab does not walk Tab's cycle backwards")
 						if label == "webp":
 							inner = inner_keys(reader, app, process.pid)
@@ -243,7 +256,7 @@ def run(args):
 							for line in problems[:20]:
 								print(f"       {line}")
 						else:
-							print(f"ok   {label}: Tab reaches all {len(stops)} controls and {len(groups)} radio groups in a cycle of {len(forward) - 1} stops; Shift+Tab walks it back")
+							print(f"ok   {label}: Tab reaches all {len(stops)} controls and {len(groups)} radio groups in a cycle of {len(forward)} stops; Shift+Tab walks it back")
 					except NotOurs as error:
 						failures += 1
 						print(f"STOP {label}: {error}; no keys were sent")
