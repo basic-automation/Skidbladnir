@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""Audit the gpui window's accessibility tree the way a screen reader reads it: over AT-SPI.
+"""Audit the gpui window's accessibility tree the way a screen reader reads it.
 
 WHY THIS EXISTS
 ---------------
 scripts/a11y-audit.sh runs axe-core against the webview window, but the window most people
 get since 1.3.0 is the gpui one, which no audit had read. gpui hands its tree to AccessKit,
-which publishes it on the AT-SPI bus only once an assistive technology switches
-accessibility on. This script does that inside a private session: its own D-Bus session
-bus, its own AT-SPI bus with a screen reader reported on, and the window
-launched into it with a scratch configuration, so neither the user's desktop nor their
-Skidbladnir settings are touched. Then it reads the tree through libatspi, as Orca does.
+which gives it to the platform's accessibility API: AT-SPI on Linux (what Orca reads), UI
+Automation on Windows (what Narrator and NVDA read). This script reads it from there.
+
+On Linux AccessKit publishes the tree only once an assistive technology switches
+accessibility on. The script does that inside a private session: its own D-Bus session
+bus, its own AT-SPI bus with a screen reader reported on, and the window launched into it
+with a scratch configuration, so neither the user's desktop nor their Skidbladnir settings
+are touched. On Windows UI Automation asks the window for its tree directly; the app's
+configuration folder cannot be redirected there, so it runs only in CI.
 
 For every state below (each format with every disclosure open, the pop-ups, the preview
 and the About view) it fails on:
@@ -20,15 +24,15 @@ and the About view) it fails on:
 - an image with no name;
 - a text or number field the state must have that is not in the tree, or one whose text
   (its value) a screen reader cannot read;
-- a text field that, asked over AT-SPI to take the focus, is not then reported focused;
+- a text field that, asked to take the focus, is not then reported focused;
 - a state in which the window's tree has no controls at all (the audit read nothing).
 
 USAGE
     scripts/gpui-a11y-audit.py [--app <binary>] [--edition standard|gpl] [--report <json>]
 
-Linux only. Needs a display, dbus, at-spi2-core (the accessibility bus's configuration and
-at-spi2-registryd) and the GObject bindings for libatspi (python3-gi, gir1.2-atspi-2.0). It
-re-executes itself under dbus-run-session.
+Linux: needs a display, dbus, at-spi2-core (the accessibility bus's configuration and
+at-spi2-registryd) and the GObject bindings for libatspi (python3-gi, gir1.2-atspi-2.0);
+it re-executes itself under dbus-run-session. Windows: needs pywinauto.
 """
 
 import argparse
@@ -43,9 +47,10 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Each state: a label, the window's debug variables (crates/skidbladnir-gpui/src/app.rs,
-# `debug_state`), the text fields it must have, and whether a PNG is queued first. Every
+# `debug_state`), the text fields it must have, whether a PNG is queued first, and how many
+# images it must show (none if left out). Every
 # format's panel with every disclosure open, then the pop-ups, the preview and the About
-# view. Text and number fields are checked by name because gpuikit's input once reported
+# view; the preview's two images must be there too. Text and number fields are checked by name because gpuikit's input once reported
 # none of them (see `Announced` in crates/skidbladnir-gpui/src/controls.rs), and nothing
 # else would notice them missing.
 STATES = [
@@ -57,7 +62,7 @@ STATES = [
 	("settings", {"SKID_FORMAT": "webp", "SKID_OPEN": "settings"}, [], False),
 	("an open select", {"SKID_FORMAT": "webp", "SKID_OPEN": "select-webp-preset"}, [], False),
 	("a file queued, its menu open", {"SKID_FORMAT": "webp", "SKID_OPEN": "queue"}, [], True),
-	("the preview", {"SKID_FORMAT": "webp", "SKID_PREVIEW": "1"}, [], True),
+	("the preview", {"SKID_FORMAT": "webp", "SKID_PREVIEW": "1"}, [], True, 2),
 	("about", {"SKID_FORMAT": "webp", "SKID_OPEN": "about:license"}, [], False),
 ]
 
@@ -172,129 +177,219 @@ def enable_accessibility():
 	return [registry, bus]
 
 
-def find_app(atspi, pid, timeout=30.0):
-	"""The window's application node on the AT-SPI desktop, once it has controls in it."""
-	deadline = time.monotonic() + timeout
-	while time.monotonic() < deadline:
-		desktop = atspi.get_desktop(0)
-		for index in range(desktop.get_child_count()):
-			app = desktop.get_child_at_index(index)
-			if app is None:
-				continue
+class Node:
+	"""One accessible element, as either platform's accessibility API reports it."""
+
+	def __init__(self, role, name, description="", kind="other", value=None, text=None, focus=None):
+		self.role = role  # the platform's own name for the role, for the report
+		self.name = (name or "").strip()
+		self.description = (description or "").strip()
+		self.kind = kind  # "control", "field" (a text or number field, also a control), "image" or "other"
+		self.value = value  # a slider's (current, minimum, maximum), or None for no value interface
+		self.text = text  # a field's text, or None when it exposes none
+		self.focus = focus  # for a field: asks the window to focus it; true if it then reports focused
+
+
+class AtspiReader:
+	"""Linux: AT-SPI, through libatspi, inside the private session `run` sets up."""
+
+	def __init__(self):
+		import gi
+
+		gi.require_version("Atspi", "2.0")
+		from gi.repository import Atspi
+
+		self.atspi = Atspi
+		self.services = enable_accessibility()
+		Atspi.init()
+
+	def close(self):
+		for process in self.services:
+			process.terminate()
+
+	def find(self, pid, timeout=90.0):
+		"""The window's application node on the AT-SPI desktop, once it has controls in it."""
+		deadline = time.monotonic() + timeout
+		while time.monotonic() < deadline:
+			desktop = self.atspi.get_desktop(0)
+			for index in range(desktop.get_child_count()):
+				app = desktop.get_child_at_index(index)
+				if app is None:
+					continue
+				try:
+					if app.get_process_id() == pid and any(node.kind in ("control", "field") for node in self.nodes(app)):
+						self.activate(pid)
+						return app
+				except Exception:  # noqa: BLE001 — a half-registered application raises; try again
+					pass
+			time.sleep(0.5)
+		return None
+
+	@staticmethod
+	def activate(pid):
+		"""On a bare X server (CI's Xvfb) no window manager gives the window the input focus,
+		and a field in a window without it cannot hold the keyboard focus: give it with
+		xdotool. A Wayland compositor focuses a new window itself."""
+		if os.environ.get("WAYLAND_DISPLAY") or not os.environ.get("DISPLAY") or shutil.which("xdotool") is None:
+			return
+		windows = subprocess.run(["xdotool", "search", "--pid", str(pid)], capture_output=True, text=True).stdout.split()
+		for window in windows:
+			subprocess.run(["xdotool", "windowfocus", window], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+	def walk(self, node):
+		yield node
+		try:
+			count = node.get_child_count()
+		except Exception:  # noqa: BLE001
+			return
+		for index in range(count):
+			child = node.get_child_at_index(index)
+			if child is not None:
+				yield from self.walk(child)
+
+	def nodes(self, app):
+		atspi = self.atspi
+		for node in self.walk(app):
+			role = node.get_role()
+			editable = role == atspi.Role.TEXT and node.get_state_set().contains(atspi.StateType.EDITABLE)
+			if role in (atspi.Role.ENTRY, atspi.Role.PASSWORD_TEXT) or editable:
+				text = node.get_text_iface()
+				yield Node(node.get_role_name(), node.get_name(), node.get_description(), "field", text=None if text is None else atspi.Text.get_text(text, 0, atspi.Text.get_character_count(text)), focus=lambda node=node: self.focus(node))
+			elif any(role == getattr(atspi.Role, name, None) for name in CONTROL_ROLES):
+				value = node.get_value_iface() if role == atspi.Role.SLIDER else None
+				yield Node(node.get_role_name(), node.get_name(), node.get_description(), "control", value=None if value is None else (value.get_current_value(), value.get_minimum_value(), value.get_maximum_value()))
+			elif role == atspi.Role.IMAGE:
+				yield Node(node.get_role_name(), node.get_name(), kind="image")
+
+	def focus(self, node):
+		component = node.get_component_iface()
+		if component is None or not component.grab_focus():
+			return False
+		for _ in range(20):
+			time.sleep(0.1)
+			if node.get_state_set().contains(self.atspi.StateType.FOCUSED):
+				return True
+		return False
+
+
+class UiaReader:
+	"""Windows: UI Automation, what Narrator and NVDA read, through pywinauto."""
+
+	CONTROLS = {"Button", "CheckBox", "RadioButton", "Slider", "Spinner", "ComboBox", "ListItem", "MenuItem", "Hyperlink", "TabItem", "TreeItem"}
+
+	def __init__(self):
+		from pywinauto import Application
+
+		self.application = Application
+
+	def close(self):
+		pass
+
+	def find(self, pid, timeout=90.0):
+		deadline = time.monotonic() + timeout
+		while time.monotonic() < deadline:
 			try:
-				if app.get_process_id() == pid and count_controls(atspi, app) > 0:
-					return app
-			except Exception:  # noqa: BLE001 — a half-registered application raises; try again
+				window = self.application(backend="uia").connect(process=pid, timeout=5).top_window()
+				if any(node.kind in ("control", "field") for node in self.nodes(window)):
+					return window
+			except Exception:  # noqa: BLE001 — not up yet; try again
 				pass
-		time.sleep(0.5)
-	return None
+			time.sleep(0.5)
+		return None
+
+	def nodes(self, window):
+		for element in window.descendants():
+			info = element.element_info
+			kind = info.control_type
+			if kind == "Edit":
+				try:
+					text = element.iface_value.CurrentValue
+				except Exception:  # noqa: BLE001 — no Value pattern
+					text = None
+				yield Node(kind, info.name, kind="field", text=text, focus=lambda element=element: self.focus(element))
+			elif kind in self.CONTROLS:
+				value = None
+				if kind == "Slider":
+					try:
+						pattern = element.iface_range_value
+						value = (pattern.CurrentValue, pattern.CurrentMinimum, pattern.CurrentMaximum)
+					except Exception:  # noqa: BLE001 — no RangeValue pattern
+						value = None
+				yield Node(kind, info.name, kind="control", value=value)
+			elif kind == "Image":
+				yield Node(kind, info.name, kind="image")
+
+	@staticmethod
+	def focus(element):
+		try:
+			element.set_focus()
+		except Exception:  # noqa: BLE001
+			return False
+		for _ in range(20):
+			time.sleep(0.1)
+			if element.has_keyboard_focus():
+				return True
+		return False
 
 
-def walk(node, depth=0):
-	yield node, depth
-	try:
-		count = node.get_child_count()
-	except Exception:  # noqa: BLE001
-		return
-	for index in range(count):
-		child = node.get_child_at_index(index)
-		if child is not None:
-			yield from walk(child, depth + 1)
-
-
-def is_control(atspi, node):
-	"""A node a user operates: one of CONTROL_ROLES, or editable text."""
-	role = node.get_role()
-	if any(role == getattr(atspi.Role, name, None) for name in CONTROL_ROLES):
-		return True
-	return role == atspi.Role.TEXT and node.get_state_set().contains(atspi.StateType.EDITABLE)
-
-
-def count_controls(atspi, app):
-	return sum(1 for node, _ in walk(app) if is_control(atspi, node))
-
-
-def audit(atspi, app, fields):
-	"""Every control in the tree, and what is wrong with each."""
-	controls, problems = [], []
-	entries = []
+def audit(nodes, fields):
+	"""Every control, the number of images, and what is wrong."""
+	controls, problems, entries = [], [], []
 	images = 0
-	for node, _ in walk(app):
-		if node.get_role() == atspi.Role.IMAGE:
+	for node in nodes:
+		if node.kind == "image":
 			images += 1
-			if not (node.get_name() or "").strip():
+			if not node.name:
 				problems.append("an image with no name: a screen reader cannot say what it shows")
-		if not is_control(atspi, node):
 			continue
-		role = node.get_role_name()
-		name = (node.get_name() or "").strip()
-		entry = {"role": role, "name": name}
-		if not name:
-			description = (node.get_description() or "").strip()
-			problems.append(f"{role} with no name" + (f" (description: {description!r})" if description else ""))
-		if role == "slider":
-			value = node.get_value_iface() if hasattr(node, "get_value_iface") else None
-			if value is None:
-				problems.append(f"slider {name!r} has no value")
+		if node.kind not in ("control", "field"):
+			continue
+		entry = {"role": node.role, "name": node.name}
+		if not node.name:
+			problems.append(f"{node.role} with no name" + (f" (description: {node.description!r})" if node.description else ""))
+		if node.role.lower() == "slider":
+			if node.value is None:
+				problems.append(f"slider {node.name!r} has no value")
 			else:
-				current, low, high = value.get_current_value(), value.get_minimum_value(), value.get_maximum_value()
+				current, low, high = node.value
 				entry["value"] = [current, low, high]
 				if not low <= current <= high:
-					problems.append(f"slider {name!r} is at {current}, outside {low}..{high}")
-		if is_text_field(atspi, node):
-			entries.append((name, node))
-			text = node.get_text_iface()
-			if text is None:
-				problems.append(f"text field {name!r} exposes no text: a screen reader cannot read its value")
+					problems.append(f"slider {node.name!r} is at {current}, outside {low}..{high}")
+		if node.kind == "field":
+			entries.append(node)
+			if node.text is None:
+				problems.append(f"text field {node.name!r} exposes no text: a screen reader cannot read its value")
 			else:
-				entry["value"] = atspi.Text.get_text(text, 0, atspi.Text.get_character_count(text))
+				entry["value"] = node.text
 		controls.append(entry)
-	names = {name for name, _ in entries}
+	names = {node.name for node in entries}
 	problems += [f"no text field named {field!r}" for field in fields if field not in names]
-	buttons = [control["name"] for control in controls if control["role"] == "button" and control["name"]]
+	buttons = [control["name"] for control in controls if control["role"].lower() in ("button", "push button") and control["name"]]
 	problems += [f"{buttons.count(name)} buttons are all named {name!r}: a screen reader cannot tell them apart" for name in sorted(set(buttons)) if buttons.count(name) > 1]
-	if entries:
-		problems += focus_problems(atspi, *entries[0])
+	# Ask the window to focus a field, as a screen reader's user would: its keyboard focus
+	# and its accessibility focus must be the same element.
+	if entries and not entries[0].focus():
+		problems.append(f"text field {entries[0].name!r} was asked to take the focus and is not reported focused")
 	return controls, images, problems
 
 
-def is_text_field(atspi, node):
-	return node.get_role() in (atspi.Role.ENTRY, atspi.Role.PASSWORD_TEXT) or (node.get_role() == atspi.Role.TEXT and node.get_state_set().contains(atspi.StateType.EDITABLE))
-
-
-def focus_problems(atspi, name, node):
-	"""Ask the window to focus a field, as a screen reader's user would, and check the field
-	is then the node reported focused: the window's keyboard focus and its accessibility
-	focus must be the same element."""
-	component = node.get_component_iface()
-	if component is None or not component.grab_focus():
-		return [f"text field {name!r} cannot be focused"]
-	for _ in range(20):
-		time.sleep(0.1)
-		if node.get_state_set().contains(atspi.StateType.FOCUSED):
-			return []
-	return [f"text field {name!r} was asked to take the focus and is not reported focused"]
-
-
 def run(args):
-	import gi
-
-	gi.require_version("Atspi", "2.0")
-	from gi.repository import Atspi
-
-	accessibility = enable_accessibility()
-	Atspi.init()
+	windows = sys.platform == "win32"
+	reader = UiaReader() if windows else AtspiReader()
 	app_path = os.path.abspath(args.app)
 	env_base = dict(os.environ)
 	# A bare binary needs libheif beside it, as the installers ship it, or the edition's build.
 	libheif = os.path.join(ROOT, "build", "libheif-gpl" if args.edition == "gpl" else "libheif", "lib")
-	if not os.path.exists(os.path.join(os.path.dirname(app_path), "libheif.so.1")) and os.path.exists(os.path.join(libheif, "libheif.so.1")):
+	if not windows and not os.path.exists(os.path.join(os.path.dirname(app_path), "libheif.so.1")) and os.path.exists(os.path.join(libheif, "libheif.so.1")):
 		env_base["LD_LIBRARY_PATH"] = libheif + (":" + env_base["LD_LIBRARY_PATH"] if env_base.get("LD_LIBRARY_PATH") else "")
 	failures = 0
 	report = {}
 	try:
-		for label, variables, fields, queued in STATES:
+		for label, variables, fields, queued, *rest in STATES:
+			min_images = rest[0] if rest else 0
 			with tempfile.TemporaryDirectory(prefix="skidbladnir-gpui-a11y.") as scratch:
+				# On Windows the configuration folder cannot be redirected: main() runs this
+				# only in CI there.
 				env = dict(env_base, XDG_CONFIG_HOME=os.path.join(scratch, "config"), XDG_DATA_HOME=os.path.join(scratch, "data"), **variables)
 				if queued:
 					write_png(os.path.join(scratch, "input.png"))
@@ -302,16 +397,26 @@ def run(args):
 				log = open(os.path.join(scratch, "app.log"), "wb")
 				process = subprocess.Popen([app_path], env=env, stdout=log, stderr=subprocess.STDOUT)
 				try:
-					app = find_app(Atspi, process.pid)
+					app = reader.find(process.pid)
 					if app is None:
 						failures += 1
 						alive = process.poll() is None
 						print(f"FAIL {label}: no accessibility tree with controls from the window (process {'running' if alive else 'exited'})")
 						continue
-					# Let the expanded panel, the pop-up SKID_OPEN opens after 1.5 s, or the
-					# preview (encoded after 1.5 s), settle into the tree.
-					time.sleep(5 if "SKID_PREVIEW" in variables else 3)
-					controls, images, problems = audit(Atspi, app, fields)
+					# The expanded panel, the pop-up SKID_OPEN opens after 1.5 s, and the preview
+					# (encoded after 1.5 s) come later than the window, later still on a
+					# software renderer: wait for what the state must have, then a moment more.
+					deadline = time.monotonic() + 60
+					while time.monotonic() < deadline:
+						nodes = list(reader.nodes(app))
+						names = {node.name for node in nodes if node.kind == "field"}
+						if all(field in names for field in fields) and sum(1 for node in nodes if node.kind == "image") >= min_images:
+							break
+						time.sleep(1)
+					time.sleep(2)
+					controls, images, problems = audit(list(reader.nodes(app)), fields)
+					if images < min_images:
+						problems.append(f"{images} images, not {min_images}")
 					report[label] = controls
 					roles = {}
 					for control in controls:
@@ -332,8 +437,7 @@ def run(args):
 						process.kill()
 					log.close()
 	finally:
-		for process in accessibility:
-			process.terminate()
+		reader.close()
 	if args.report:
 		with open(args.report, "w") as out:
 			json.dump(report, out, indent=1)
@@ -343,12 +447,16 @@ def run(args):
 
 def main():
 	parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-	parser.add_argument("--app", default=os.path.join(ROOT, "target", "release", "skidbladnir"))
+	parser.add_argument("--app", default=os.path.join(ROOT, "target", "release", "skidbladnir.exe" if sys.platform == "win32" else "skidbladnir"))
 	parser.add_argument("--edition", choices=["standard", "gpl"], default="standard")
 	parser.add_argument("--report", help="write every control's role, name and value as JSON here")
 	args = parser.parse_args()
 	if not os.access(args.app, os.X_OK):
 		sys.exit(f"no app at {args.app}: build it first, or pass --app")
+	if sys.platform == "win32":
+		if os.environ.get("CI") != "true":
+			sys.exit("on Windows the app's configuration folder cannot be redirected, so this runs only in CI (CI=true)")
+		return run(args)
 	if "SKIDBLADNIR_A11Y_AUDIT_SESSION" not in os.environ:
 		return in_private_session(sys.argv[1:])
 	return run(args)

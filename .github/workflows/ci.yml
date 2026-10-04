@@ -324,7 +324,7 @@ jobs:
             libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev \
             libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libwayland-dev libfontconfig-dev libfreetype-dev \
             webkit2gtk-driver xvfb mesa-vulkan-drivers libvulkan1 \
-            dbus at-spi2-core python3-gi gir1.2-atspi-2.0
+            dbus at-spi2-core python3-gi gir1.2-atspi-2.0 xdotool
 
       - uses: actions/setup-node@v7
         with:
@@ -747,3 +747,10 @@ jobs:
         # The default window, which WebDriver cannot drive; Direct3D falls back to WARP on a
         # runner with no GPU.
         run: scripts/gpui-smoke.sh --app "$INSTALLED_APP"
+
+      - name: Accessibility audit of the gpui window (UI Automation)
+        # The same audit as on Linux, read through UI Automation, what Narrator and NVDA read
+        # (scripts/gpui-a11y-audit.py).
+        run: |
+          python -m pip install --quiet pywinauto
+          python scripts/gpui-a11y-audit.py --app "$(cygpath -w "$INSTALLED_APP")"
