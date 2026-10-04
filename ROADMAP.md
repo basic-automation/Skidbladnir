@@ -1642,7 +1642,16 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       Lossless out of the tab order fails it. CI steps in both Linux window legs. In the
       WebP panel it also presses the keys inside controls (the arrows, Page Up, Home and End
       on a slider; the arrows in a radio group; Space on a check box); reversing the
-      slider's arrows fails it. Selects' and menus' keys are not exercised yet.
+      slider's arrows fails it; and a select (Down opens it on the current choice, Down and
+      Enter choose, Escape closes). The queue's menu keys are not exercised yet.
+- [ ] **A closed select's value does not reach AT-SPI** (found 2026-10-03 by the keyboard
+      test): the trigger is a `ComboBox` with `aria_value`, but AccessKit 0.18.1 gives a
+      combo box no Text interface (`supports_text_ranges` covers text inputs, labels and
+      documents only), and a closed select has no option children for its Selection
+      interface to report. So on Linux a screen reader can say "libwebp preset, combo box"
+      but not "photo". Check what UI Automation gets (its Value pattern), then give the
+      closed select something AT-SPI reads: the chosen option as a selected child, as
+      browsers expose a closed `<select>`, is the first candidate.
 - [ ] A drop onto the gpui window on Wayland (a native Wayland drag source) and on Windows
       (OLE drag and drop) is still untested; the X11 test above is the only real drop.
 - [ ] AccessKit's AT-SPI mapping reports every button enabled: accesskit_atspi_common

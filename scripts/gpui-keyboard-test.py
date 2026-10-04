@@ -10,7 +10,7 @@ window's accessibility tree (AT-SPI). It fails when a control that says it can t
 focus is never reached, when Tab stops moving (a trap), or when the focus lands on a
 nameless control. Shift+Tab must walk the same cycle backwards. In the WebP panel it also
 presses the keys inside controls: the arrows, Page Up, Home and End on a slider, the arrows
-in a radio group, Space on a check box.
+in a radio group, Down, Enter and Escape in a select, Space on a check box.
 
 Each format's panel is checked with every disclosure open. It runs in the private AT-SPI
 session scripts/gpui-a11y-audit.py sets up, with a scratch configuration, and the window on
@@ -142,6 +142,37 @@ def inner_keys(reader, app, pid):
 		if not find(atspi.Role.RADIO_BUTTON, "Quality").get_state_set().contains(atspi.StateType.CHECKED):
 			problems.append("Left from File size does not check Quality again")
 
+	# A select: Down opens it on the current choice, Down and Enter choose the next, and
+	# opening it again shows that one chosen; Escape closes it. (Its value is read from the
+	# open list: a closed select tells AT-SPI nothing of it; see ROADMAP.md.)
+	def chosen():
+		options = [node for node in reader.walk(app) if node.get_role() == atspi.Role.LIST_ITEM]
+		picked = [node.get_name() for node in options if node.get_state_set().contains(atspi.StateType.SELECTED)]
+		return options, picked
+
+	preset = find(atspi.Role.COMBO_BOX, "libwebp preset")
+	if preset is None or not focus(preset):
+		problems.append("the libwebp preset select cannot be focused")
+	else:
+		press(pid, "Down")
+		options, picked = chosen()
+		if not options:
+			problems.append("Down does not open the libwebp preset select")
+		else:
+			names = [node.get_name() for node in options]
+			following = names[(names.index(picked[0]) + 1) % len(names)] if picked else None
+			press(pid, "Down")
+			press(pid, "Return")
+			if chosen()[0]:
+				problems.append("Enter does not close the libwebp preset select")
+			press(pid, "Down")
+			options, now = chosen()
+			if now != [following]:
+				problems.append(f"Down and Enter in the libwebp preset select chose {now}, not {[following]}")
+			press(pid, "Escape")
+			if chosen()[0]:
+				problems.append("Escape does not close the libwebp preset select")
+
 	lossless = find(atspi.Role.CHECK_BOX, "Lossless")
 	if lossless is None or not focus(lossless):
 		problems.append("the Lossless check box cannot be focused")
@@ -205,7 +236,7 @@ def run(args):
 							inner = inner_keys(reader, app, process.pid)
 							problems += inner
 							if not inner:
-								print("ok   webp: the arrows, Page Up, Home and End move the Quality slider; the arrows move a radio group's choice; Space toggles a check box")
+								print("ok   webp: the arrows, Page Up, Home and End move the Quality slider; the arrows move a radio group's choice; a select opens, chooses and closes from the keyboard; Space toggles a check box")
 						if problems:
 							failures += len(problems)
 							print(f"FAIL {label}: {len(forward)} Tab stops for {len(stops)} controls and {len(groups)} radio groups; {len(problems)} problems:")
