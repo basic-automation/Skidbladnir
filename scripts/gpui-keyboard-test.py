@@ -156,10 +156,10 @@ def inner_keys(reader, app, pid):
 			problems.append("Left from File size does not check Quality again")
 
 	# A select: Down opens it on the current choice, Down and Enter choose the next, and
-	# opening it again shows that one chosen; Escape closes it. (Its value is read from the
-	# open list: a closed select tells AT-SPI nothing of it; see ROADMAP.md.)
+	# opening it again shows that one chosen, as the select itself says; Escape closes it.
 	def chosen():
-		options = [node for node in reader.walk(app) if node.get_role() == atspi.Role.LIST_ITEM]
+		# The open list's options (a select also carries its choice as an option of its own).
+		options = [node for node in reader.walk(app) if node.get_role() == atspi.Role.LIST_ITEM and node.get_parent().get_role() == atspi.Role.LIST_BOX]
 		picked = [node.get_name() for node in options if node.get_state_set().contains(atspi.StateType.SELECTED)]
 		return options, picked
 
@@ -178,6 +178,10 @@ def inner_keys(reader, app, pid):
 			press(pid, "Return")
 			if chosen()[0]:
 				problems.append("Enter does not close the libwebp preset select")
+			closed = find(atspi.Role.COMBO_BOX, "libwebp preset").get_selection_iface()
+			held = [atspi.Selection.get_selected_child(closed, 0).get_name()] if closed and atspi.Selection.get_n_selected_children(closed) else []
+			if held != [following]:
+				problems.append(f"the closed libwebp preset select says it holds {held}, not {[following]}")
 			press(pid, "Down")
 			options, now = chosen()
 			if now != [following]:

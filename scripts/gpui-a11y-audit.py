@@ -21,6 +21,7 @@ and the About view) it fails on:
   menu item, link) with no accessible name: a screen reader would say only its role;
 - two buttons with the same name, which a screen reader cannot tell apart;
 - a slider whose value is missing or outside its own range;
+- a select that does not say what it holds (AT-SPI: no selected option);
 - an image with no name;
 - a text or number field the state must have that is not in the tree, or one whose text
   (its value) a screen reader cannot read;
@@ -259,7 +260,13 @@ class AtspiReader:
 				yield Node(node.get_role_name(), node.get_name(), node.get_description(), "field", text=None if text is None else atspi.Text.get_text(text, 0, atspi.Text.get_character_count(text)), focus=lambda node=node: self.focus(node))
 			elif any(role == getattr(atspi.Role, name, None) for name in CONTROL_ROLES):
 				value = node.get_value_iface() if role == atspi.Role.SLIDER else None
-				yield Node(node.get_role_name(), node.get_name(), node.get_description(), "control", value=None if value is None else (value.get_current_value(), value.get_minimum_value(), value.get_maximum_value()))
+				text = None
+				if role == atspi.Role.COMBO_BOX:
+					# What a screen reader says a select holds: its selected option.
+					selection = node.get_selection_iface()
+					chosen = [atspi.Selection.get_selected_child(selection, index) for index in range(atspi.Selection.get_n_selected_children(selection))] if selection else []
+					text = ", ".join(child.get_name() or "" for child in chosen)
+				yield Node(node.get_role_name(), node.get_name(), node.get_description(), "control", value=None if value is None else (value.get_current_value(), value.get_minimum_value(), value.get_maximum_value()), text=text)
 			elif role == atspi.Role.IMAGE:
 				yield Node(node.get_role_name(), node.get_name(), kind="image")
 
@@ -367,6 +374,10 @@ def audit(nodes, fields, queued=False):
 				entry["value"] = [current, low, high]
 				if not low <= current <= high:
 					problems.append(f"slider {node.name!r} is at {current}, outside {low}..{high}")
+		if node.role == "combo box" and node.text is not None:
+			entry["value"] = node.text
+			if not node.text.strip():
+				problems.append(f"select {node.name!r} does not say what it holds")
 		if node.kind == "field":
 			entries.append(node)
 			if node.text is None:
@@ -473,7 +484,17 @@ def each_in_its_own_session(args):
 		for index in range(len(STATES)):
 			part = os.path.join(scratch, f"{index}.json")
 			command = ["--app", args.app, "--edition", args.edition, "--state", str(index), "--report", part]
-			failed += 1 if in_private_session(command) else 0
+			status = in_private_session(command)
+			read = False
+			if os.path.exists(part):
+				with open(part) as source:
+					read = STATES[index][0] in json.load(source)
+			if status and not read:
+				# The tree never appeared (seen once in CI: one state of ten, on lavapipe).
+				# Once more in a new session; a state that was read is never retried.
+				print(f"     {STATES[index][0]}: no tree read; once more in a new session")
+				status = in_private_session(command)
+			failed += 1 if status else 0
 			if os.path.exists(part):
 				with open(part) as source:
 					report.update(json.load(source))
