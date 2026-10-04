@@ -11,12 +11,13 @@ bus, its own AT-SPI bus with a screen reader reported on, and the window
 launched into it with a scratch configuration, so neither the user's desktop nor their
 Skidbladnir settings are touched. Then it reads the tree through libatspi, as Orca does.
 
-For every state below (each format, with every disclosure open, and the preset form) it
-fails on:
+For every state below (each format with every disclosure open, the pop-ups, the preview
+and the About view) it fails on:
 - a control (button, check box, radio button, slider, combo box, text field, list option,
   menu item, link) with no accessible name: a screen reader would say only its role;
 - two buttons with the same name, which a screen reader cannot tell apart;
 - a slider whose value is missing or outside its own range;
+- an image with no name;
 - a text or number field the state must have that is not in the tree, or one whose text
   (its value) a screen reader cannot read;
 - a text field that, asked over AT-SPI to take the focus, is not then reported focused;
@@ -41,17 +42,39 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# (label, SKID_FORMAT, SKID_EXPAND, SKID_OPEN, fields that must be there): every format's
-# panel with every disclosure open, and the preset form. Text and number fields are checked
-# by name because gpuikit's input once reported none of them (see `Announced` in
-# crates/skidbladnir-gpui/src/controls.rs), and nothing else would notice them missing.
+# Each state: a label, the window's debug variables (crates/skidbladnir-gpui/src/app.rs,
+# `debug_state`), the text fields it must have, and whether a PNG is queued first. Every
+# format's panel with every disclosure open, then the pop-ups, the preview and the About
+# view. Text and number fields are checked by name because gpuikit's input once reported
+# none of them (see `Announced` in crates/skidbladnir-gpui/src/controls.rs), and nothing
+# else would notice them missing.
 STATES = [
-	("webp", "webp", "webp-lossy,webp-animation", None, ["Width", "Height", "Quality, exact value"]),
-	("avif", "avif", "avif-layout,avif-quantizers,avif-transform,avif-libaom", None, ["Width", "Height"]),
-	("jxl", "jxl", "jxl-filters,jxl-modular-section,jxl-codestream", None, ["Width", "Height", "Quality, exact value", "Photon noise"]),
-	("heic", "heic", "heic-geometry,heic-x265-parameters", None, ["Width", "Height", "Add a compatible brand"]),
-	("preset form", "webp", "", "preset-form", ["Preset name"]),
+	("webp", {"SKID_FORMAT": "webp", "SKID_EXPAND": "webp-lossy,webp-animation"}, ["Width", "Height", "Quality, exact value"], False),
+	("avif", {"SKID_FORMAT": "avif", "SKID_EXPAND": "avif-layout,avif-quantizers,avif-transform,avif-libaom"}, ["Width", "Height"], False),
+	("jxl", {"SKID_FORMAT": "jxl", "SKID_EXPAND": "jxl-filters,jxl-modular-section,jxl-codestream"}, ["Width", "Height", "Quality, exact value", "Photon noise"], False),
+	("heic", {"SKID_FORMAT": "heic", "SKID_EXPAND": "heic-geometry,heic-x265-parameters"}, ["Width", "Height", "Add a compatible brand"], False),
+	("preset form", {"SKID_FORMAT": "webp", "SKID_OPEN": "preset-form"}, ["Preset name"], False),
+	("settings", {"SKID_FORMAT": "webp", "SKID_OPEN": "settings"}, [], False),
+	("an open select", {"SKID_FORMAT": "webp", "SKID_OPEN": "select-webp-preset"}, [], False),
+	("a file queued, its menu open", {"SKID_FORMAT": "webp", "SKID_OPEN": "queue"}, [], True),
+	("the preview", {"SKID_FORMAT": "webp", "SKID_PREVIEW": "1"}, [], True),
+	("about", {"SKID_FORMAT": "webp", "SKID_OPEN": "about:license"}, [], False),
 ]
+
+# A 16x12 RGBA PNG, for the states with a file in the queue.
+def write_png(path):
+	import struct
+	import zlib
+
+	width, height = 16, 12
+	raw = b"".join(b"\0" + bytes(v for x in range(width) for v in (x * 16, y * 20, 128, 255)) for y in range(height))
+
+	def chunk(kind, data):
+		return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+	with open(path, "wb") as out:
+		out.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
 
 # Atspi.Role names: by enum, not by name, since libatspi reports a push button as "button".
 CONTROL_ROLES = ("PUSH_BUTTON", "TOGGLE_BUTTON", "CHECK_BOX", "RADIO_BUTTON", "SLIDER", "SPIN_BUTTON", "COMBO_BOX", "ENTRY", "PASSWORD_TEXT", "LIST_ITEM", "MENU_ITEM", "CHECK_MENU_ITEM", "RADIO_MENU_ITEM", "LINK", "SWITCH")
@@ -195,7 +218,12 @@ def audit(atspi, app, fields):
 	"""Every control in the tree, and what is wrong with each."""
 	controls, problems = [], []
 	entries = []
+	images = 0
 	for node, _ in walk(app):
+		if node.get_role() == atspi.Role.IMAGE:
+			images += 1
+			if not (node.get_name() or "").strip():
+				problems.append("an image with no name: a screen reader cannot say what it shows")
 		if not is_control(atspi, node):
 			continue
 		role = node.get_role_name()
@@ -227,7 +255,7 @@ def audit(atspi, app, fields):
 	problems += [f"{buttons.count(name)} buttons are all named {name!r}: a screen reader cannot tell them apart" for name in sorted(set(buttons)) if buttons.count(name) > 1]
 	if entries:
 		problems += focus_problems(atspi, *entries[0])
-	return controls, problems
+	return controls, images, problems
 
 
 def is_text_field(atspi, node):
@@ -265,11 +293,12 @@ def run(args):
 	failures = 0
 	report = {}
 	try:
-		for label, fmt, expand, open_, fields in STATES:
+		for label, variables, fields, queued in STATES:
 			with tempfile.TemporaryDirectory(prefix="skidbladnir-gpui-a11y.") as scratch:
-				env = dict(env_base, XDG_CONFIG_HOME=os.path.join(scratch, "config"), XDG_DATA_HOME=os.path.join(scratch, "data"), SKID_FORMAT=fmt, SKID_EXPAND=expand)
-				if open_:
-					env["SKID_OPEN"] = open_
+				env = dict(env_base, XDG_CONFIG_HOME=os.path.join(scratch, "config"), XDG_DATA_HOME=os.path.join(scratch, "data"), **variables)
+				if queued:
+					write_png(os.path.join(scratch, "input.png"))
+					env["SKID_INPUTS"] = os.path.join(scratch, "input.png")
 				log = open(os.path.join(scratch, "app.log"), "wb")
 				process = subprocess.Popen([app_path], env=env, stdout=log, stderr=subprocess.STDOUT)
 				try:
@@ -279,9 +308,10 @@ def run(args):
 						alive = process.poll() is None
 						print(f"FAIL {label}: no accessibility tree with controls from the window (process {'running' if alive else 'exited'})")
 						continue
-					# Let the expanded panel, or the pop-up SKID_OPEN opens after 1.5 s, settle into the tree.
-					time.sleep(3)
-					controls, problems = audit(Atspi, app, fields)
+					# Let the expanded panel, the pop-up SKID_OPEN opens after 1.5 s, or the
+					# preview (encoded after 1.5 s), settle into the tree.
+					time.sleep(5 if "SKID_PREVIEW" in variables else 3)
+					controls, images, problems = audit(Atspi, app, fields)
 					report[label] = controls
 					roles = {}
 					for control in controls:
@@ -293,7 +323,7 @@ def run(args):
 						for problem in problems:
 							print(f"       {problem}")
 					else:
-						print(f"ok   {label}: {len(controls)} controls, every one named ({summary})")
+						print(f"ok   {label}: {len(controls)} controls, every one named ({summary}){f'; {images} images, named' if images else ''}")
 				finally:
 					process.terminate()
 					try:
