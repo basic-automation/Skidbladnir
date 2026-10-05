@@ -827,6 +827,7 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       2026. <https://chromiumdash.appspot.com/fetch_milestone_schedule?mstone=155>
       Re-checked 2026-10-03: stable is still 154 (154.0.8037.98), and the schedule still
       says 6 October. <https://chromiumdash.appspot.com/fetch_releases?channel=Stable&platform=Windows&num=1>
+      Re-checked 2026-10-04: still 154.0.8037.98. <https://chromiumdash.appspot.com/fetch_releases?channel=Stable&platform=Windows&num=1>
 - [x] **JPEG XL is close to its trigger — prepare, do not build yet.** *Superseded:* the
       owner asked for JPEG XL ahead of Chrome, and it shipped in 0.10.0 on libjxl (see
       "JPEG XL output and input" below), with `cjxl`'s whole surface since 0.14.0. Mozilla announced
@@ -1583,7 +1584,12 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       runs at build time and nothing of it is linked; Phase 7's JPEG XL item). Not a
       submodule alone: libjxl's own dependencies (highway, brotli, skcms) are nested
       submodules, and every CI job checks out `submodules: true` without recursion, so the
-      source tarball and all 12 checkouts would change with it.
+      source tarball and all 12 checkouts would change with it. Pins at libjxl v0.12.0
+      (`git ls-tree v0.12.0 third_party/`, 2026-10-04): highway `457c8917`, brotli
+      `028fb5a2`, skcms `96d9171c`; the library build needs only those three (sjpeg, lcms,
+      libpng, zlib, googletest, libjpeg-turbo and testdata are for tools, tests or
+      alternatives). The reference `cjxl` builds (`scripts/build-reference-tools.sh`, the
+      Windows `cjxl` job) take their source from `jpegxl-src` too and move with it.
 
 **Multi-image features the tools have, deferred by the owner (2026-09-28):**
 
@@ -1805,6 +1811,9 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       helper, in development scope only; the bundle listing
       (`LICENSES/third-party/javascript.md`) confirms it is not in what ships. Take a fix
       when `listhen` or `node-forge` has one. <https://github.com/advisories/GHSA-86w9-cpqp-85rv>
+      Re-checked 2026-10-04: the same three open (#43 `glib`, #44 `esbuild`, #45
+      `node-forge`, no patched version); `glib` 0.18.5, `fontless` 1.2.1, `listhen` 1.10.1,
+      `node-forge` 1.4.0 are still what resolves.
 - [x] README: an acknowledgements and non-affiliation section (2026-10-01).
 - [x] README: a dated "How it compares" table (2026-10-01): Squoosh, XnConvert,
       Converseen and the raw CLIs, each from its own page
