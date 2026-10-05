@@ -1208,6 +1208,19 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       loop); only if it still overflows, measure there. **The CRT is now consistent**
       (0.15.0, below); the overflow did not recur in that PR's Windows runs, which proves
       little for an intermittent failure — keep watching before ticking.
+      **Measured again 2026-10-04, for every encoder:** `scripts/stack-probe.sh` (with
+      `examples/stack-probe.rs`) bisects the smallest stack each encoder's heaviest settings
+      survive with *every* thread limited, the encoders' own worker threads included (glibc
+      takes their default from `ulimit -s`; on Windows a thread started without a size gets
+      the executable's 1 MiB). On the dev host, release build: AVIF at speed 0 needs 124 KiB,
+      everything else (WebP `-m 6` lossy and lossless, animated WebP from GIF, JPEG XL
+      `-e 9` lossy and lossless, HEIC) at most 44 KiB; debug build: at most 92 KiB. This
+      mattered beyond the tests: gpui runs the window's background tasks, conversions and
+      previews included, on the Windows thread pool (`TrySubmitThreadpoolCallback`,
+      `gpui-windows` 1.17.2 `dispatcher.rs`), whose threads have that 1 MiB, so the gpui
+      window on Windows has about 8x headroom (MSVC's frames are not measured, and can be
+      larger). Nothing on Linux comes near the 2 MiB of a test thread, so the overflow is
+      still unexplained there.
 - [x] **Concurrent HEIC encodes tripped libheif's memory limit** (found and fixed
       2026-10-01/02 by CI: two of PR #68's macOS parity runs failed one HEIC case each with
       "Memory usage of 18446744073709539283 bytes ... exceeds the security limit", while the
