@@ -197,6 +197,19 @@ jobs:
         shell: bash
         run: scripts/gpui-smoke.sh --app target/debug/skidbladnir
 
+      - name: Accessibility audit of the gpui window (macOS, reported only)
+        # What VoiceOver is given, read through the Accessibility API (scripts/gpui-a11y-audit.py),
+        # which macOS lets a process read only with the Accessibility permission. Reported, not
+        # yet required: whether a hosted runner's reader has it is the first thing to learn.
+        if: matrix.os == 'macos-latest' && matrix.edition == 'standard'
+        continue-on-error: true
+        timeout-minutes: 20
+        shell: bash
+        run: |
+          python3 -m venv "$RUNNER_TEMP/ax"
+          "$RUNNER_TEMP/ax/bin/pip" install --quiet pyobjc-framework-ApplicationServices
+          "$RUNNER_TEMP/ax/bin/python" scripts/gpui-a11y-audit.py --app target/debug/skidbladnir
+
       - name: HEIC reference decoder for the GPL edition
         # The standard legs get heif-dec with the parity step below; this leg skips that
         # step (parity is libwebp's, the same in both editions) but still checks what x265
