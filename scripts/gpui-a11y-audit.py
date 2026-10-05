@@ -214,8 +214,17 @@ class AtspiReader:
 			process.terminate()
 
 	def find(self, pid, timeout=90.0):
-		"""The window's application node on the AT-SPI desktop, once it has controls in it."""
+		"""The window's application node on the AT-SPI desktop, once it has controls in it.
+
+		When the app is there but its window stays empty, the window is made to draw a frame.
+		gpui (`gpui-unofficial` 1.17.2 `window.rs`) answers accessibility's activation with a
+		tree of the window alone, then asks for a frame to send the real one; but a frame
+		sends it only if accessibility was active from its start, so an activation that lands
+		mid-frame leaves the window empty until something draws again, which in a window
+		nobody touches is never (CI's Xvfb: the app listed with its window, nothing in it,
+		for 90 seconds). A person's first key or pointer move would draw that frame."""
 		deadline = time.monotonic() + timeout
+		empty_since = None
 		while time.monotonic() < deadline:
 			desktop = self.atspi.get_desktop(0)
 			for index in range(desktop.get_child_count()):
@@ -223,13 +232,33 @@ class AtspiReader:
 				if app is None:
 					continue
 				try:
-					if app.get_process_id() == pid and any(node.kind in ("control", "field") for node in self.nodes(app)):
+					if app.get_process_id() != pid:
+						continue
+					if any(node.kind in ("control", "field") for node in self.nodes(app)):
 						self.activate(pid)
 						return app
+					empty_since = empty_since or time.monotonic()
+					if time.monotonic() - empty_since > 5:
+						print("     the window is listed with nothing in it; making it draw a frame")
+						self.redraw(pid)
+						empty_since = time.monotonic()
 				except Exception:  # noqa: BLE001 — a half-registered application raises; try again
 					pass
 			time.sleep(0.5)
 		return None
+
+	@staticmethod
+	def redraw(pid):
+		"""Have the window draw a frame: resize it by a pixel and back (X11, xdotool)."""
+		if os.environ.get("WAYLAND_DISPLAY") or not os.environ.get("DISPLAY") or shutil.which("xdotool") is None:
+			return
+		for window in subprocess.run(["xdotool", "search", "--pid", str(pid)], capture_output=True, text=True).stdout.split():
+			geometry = subprocess.run(["xdotool", "getwindowgeometry", "--shell", window], capture_output=True, text=True).stdout
+			size = dict(line.split("=", 1) for line in geometry.split() if "=" in line)
+			if "WIDTH" in size and "HEIGHT" in size:
+				subprocess.run(["xdotool", "windowsize", window, str(int(size["WIDTH"]) + 1), size["HEIGHT"]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+				time.sleep(0.3)
+				subprocess.run(["xdotool", "windowsize", window, size["WIDTH"], size["HEIGHT"]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 	@staticmethod
 	def activate(pid):

@@ -1751,10 +1751,16 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       run 37258119163) shows the app registered on the AT-SPI desktop with its window as
       its one child, but nothing inside the window for 90 seconds, so it is AccessKit's
       tree for the window that does not arrive, not the app's connection. A registry
-      started 3 seconds late does not reproduce it on the dev host. Next: read how
-      `gpui-linux` 1.17.2 hands the window's first tree to AccessKit's X11 adapter (its
-      activation handler lives in gpui, not in the app), and have a failing session print
-      the window's first-frame probe (`SKID_PROBE`) to see whether the window drew at all.
+      started 3 seconds late does not reproduce it on the dev host. The likely mechanism,
+      read from `gpui-unofficial` 1.17.2 `window.rs` (not proven): on activation gpui hands
+      AccessKit a tree of the window alone and asks for a frame to send the real one, but
+      a frame sends the tree only if accessibility was active from its start, so an
+      activation that lands mid-frame leaves the window empty until something draws again,
+      which in a window nobody touches is never. Since 2026-10-04 the audit (and the keyboard
+      test, through it) resizes the window by a pixel and back when it is listed but empty for
+      5 seconds, and says so in the log; whether that recovers a session is CI's to show.
+      A person's first key or pointer move would draw the frame, so it matters little
+      outside tests, but it is gpui's to fix: report it upstream once confirmed.
 - [x] The saving percentage is computed **once**, in Rust. `savingOf()` is gone from
       `pages/index.vue`; the conversion report and the preview both carry the core's
       `saving_percent`, and the window only formats it (commit 235dbc0 — this box was left
