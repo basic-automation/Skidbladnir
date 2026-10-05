@@ -13,11 +13,19 @@ window's accessibility tree, as a screen reader's user would, and checks that th
 converted file is written. It runs inside the private AT-SPI session
 scripts/gpui-a11y-audit.py sets up, with a scratch configuration.
 
+On Windows a drag between applications is OLE drag and drop, which a script cannot play
+one side of the way XDND can, so there the drag is a real one: Explorer is opened on a
+folder holding the PNG, and the mouse presses on the file's icon, moves onto the window and
+lets go, as a user does. Convert is then pressed through UI Automation. The app's
+configuration folder cannot be redirected on Windows, so that half writes the real one,
+puts back what was there afterwards, and runs only in CI (CI=true), on a throwaway runner.
+
 USAGE
     scripts/gpui-drop-test.py [--app <binary>] [--edition standard|gpl]
 
-Linux, X11 only (under Wayland it runs the window through XWayland: WAYLAND_DISPLAY is
-unset for it). Needs python-xlib and xdotool, and what the audit needs.
+Linux: X11 only (under Wayland it runs the window through XWayland: WAYLAND_DISPLAY is
+unset for it). Needs python-xlib and xdotool, and what the audit needs. Windows: needs
+pywinauto.
 """
 
 import argparse
@@ -186,6 +194,115 @@ def run(args):
 	return report(failures)
 
 
+def run_windows(args):
+	"""A real drag from Explorer onto the window, then Convert through UI Automation."""
+	import win32gui
+	from pywinauto import Desktop, mouse
+
+	reader = audit.UiaReader()
+	failures = []
+	config = os.path.join(os.environ["APPDATA"], "com.basicautomation.skidbladnir")
+	preferences_path = os.path.join(config, "preferences.json")
+	saved = None
+	if os.path.exists(preferences_path):
+		with open(preferences_path, "rb") as previous:
+			saved = previous.read()
+	explorer = None
+	with tempfile.TemporaryDirectory(prefix="skidbladnir-gpui-drop.") as scratch:
+		out = os.path.join(scratch, "out")
+		folder = os.path.join(scratch, "drag from here")
+		os.makedirs(out)
+		os.makedirs(folder)
+		os.makedirs(config, exist_ok=True)
+		with open(preferences_path, "w") as preferences:
+			json.dump({"outputDirectory": out}, preferences)
+		audit.write_png(os.path.join(folder, "dropped image.png"))
+		process = subprocess.Popen([os.path.abspath(args.app)], env=dict(os.environ, SKID_FORMAT="webp"), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+		try:
+			window = reader.find(process.pid)
+			if window is None:
+				return report(["the window's UI Automation tree never appeared"])
+
+			def convert_name():
+				return next((node.name for node in reader.nodes(window) if node.role == "Button" and node.name.startswith("Convert")), None)
+
+			if convert_name() != "Convert":
+				return report([f"with nothing queued Convert is named {convert_name()!r}"])
+			# Side by side, so neither covers the other: Explorer on the left, the window on
+			# the right of a runner's small screen.
+			win32gui.MoveWindow(window.handle, 520, 0, 760, 720, True)
+			subprocess.Popen(["explorer.exe", folder])
+			shell = None
+			deadline = time.monotonic() + 60
+			while shell is None and time.monotonic() < deadline:
+				shell = next((candidate for candidate in Desktop(backend="uia").windows() if candidate.class_name() == "CabinetWClass" and "drag from here" in candidate.window_text()), None)
+				time.sleep(0.5)
+			if shell is None:
+				return report(["Explorer did not open the folder"])
+			explorer = shell
+			win32gui.MoveWindow(shell.handle, 0, 0, 500, 600, True)
+			time.sleep(1)
+			item = None
+			deadline = time.monotonic() + 30
+			while item is None and time.monotonic() < deadline:
+				item = next((element for element in shell.descendants(control_type="ListItem") if element.window_text().startswith("dropped image")), None)
+				time.sleep(0.5)
+			if item is None:
+				return report(["Explorer does not list the PNG: " + ", ".join(element.window_text() for element in shell.descendants(control_type="ListItem"))])
+			start = item.rectangle().mid_point()
+			target = window.rectangle().mid_point()
+			print(f"     dragging {item.window_text()!r} from {start.x},{start.y} to the window at {target.x},{target.y}")
+			mouse.press(button="left", coords=(start.x, start.y))
+			time.sleep(0.3)
+			# Past the drag threshold first, so Explorer starts the drag, then across in steps:
+			# the drag loop follows the pointer as it moves.
+			for step in range(1, 31):
+				mouse.move(coords=(start.x + (target.x - start.x) * step // 30, start.y + (target.y - start.y) * step // 30))
+				time.sleep(0.05)
+			time.sleep(0.5)
+			mouse.release(button="left", coords=(target.x, target.y))
+			for _ in range(100):
+				if convert_name() == "Convert 1 file":
+					break
+				time.sleep(0.1)
+			else:
+				return report([f"after the drop Convert is named {convert_name()!r}: the file was not queued"])
+			print("ok   the window took the drop from Explorer: Convert is named 'Convert 1 file'")
+			button = next(element for element in reader.walk(window) if element.element_info.control_type == "Button" and element.element_info.name == "Convert 1 file")
+			button.invoke()
+			output = os.path.join(out, "dropped image.webp")
+			for _ in range(150):
+				if os.path.exists(output) and os.path.getsize(output) > 0:
+					break
+				time.sleep(0.1)
+			if not os.path.exists(output):
+				failures.append(f"Convert wrote nothing to {out}: {sorted(os.listdir(out))}")
+			else:
+				with open(output, "rb") as written:
+					head = written.read(16)
+				if head[:4] != b"RIFF" or head[8:12] != b"WEBP":
+					failures.append("the converted file is not a WebP")
+				else:
+					print(f"ok   the dropped PNG converts to WebP ({os.path.getsize(output)} bytes)")
+		finally:
+			if explorer is not None:
+				try:
+					explorer.close()
+				except Exception:  # noqa: BLE001 — already gone
+					pass
+			process.terminate()
+			try:
+				process.wait(timeout=10)
+			except subprocess.TimeoutExpired:
+				process.kill()
+			if saved is None:
+				os.remove(preferences_path)
+			else:
+				with open(preferences_path, "wb") as restored:
+					restored.write(saved)
+	return report(failures)
+
+
 def report(failures):
 	for failure in failures:
 		print(f"FAIL {failure}")
@@ -200,6 +317,10 @@ def main():
 	args = parser.parse_args()
 	if not os.access(args.app, os.X_OK):
 		sys.exit(f"no app at {args.app}: build it first, or pass --app")
+	if sys.platform == "win32":
+		if os.environ.get("CI") != "true":
+			sys.exit("on Windows the app's configuration folder cannot be redirected, so this runs only in CI (CI=true)")
+		return run_windows(args)
 	if not os.environ.get("DISPLAY"):
 		sys.exit("needs an X display (DISPLAY), or XWayland")
 	if "SKIDBLADNIR_A11Y_AUDIT_SESSION" not in os.environ:

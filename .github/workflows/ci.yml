@@ -765,3 +765,7 @@ jobs:
         run: |
           python -m pip install --quiet pywinauto
           python scripts/gpui-a11y-audit.py --app "$(cygpath -w "$INSTALLED_APP")"
+
+      - name: A real drop onto the gpui window, from Explorer
+        # OLE drag and drop, by mouse, from Explorer's own window (scripts/gpui-drop-test.py).
+        run: python scripts/gpui-drop-test.py --app "$(cygpath -w "$INSTALLED_APP")"
