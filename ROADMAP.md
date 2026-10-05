@@ -1530,14 +1530,26 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       readers on the dynamic runtime (every `tests/heic_parity.rs` gate). All gates in CI
       run 37171820482. Two real bugs came out of it, below. The EXR gate itself stays out
       on Windows (next item).
-- [ ] **EXR on Windows: `cjxl` writes other bytes for 10 of 149** (found 2026-10-03, CI run
-      37171820482): every case of two fixtures, a data window inside the display window
-      and a second layer kept as extra channels; cjxl's files are the larger. On Linux
-      (Ubuntu's OpenEXR) and macOS (Homebrew's) `cjxl` writes Skidbladnir's bytes for all
-      149, and Skidbladnir reads EXR in Rust, so the Windows reference reads those files
-      differently: vcpkg's OpenEXR version, or `exr.cc`'s window arithmetic under
-      LLP64, are the first suspects. Next: have the Windows job decode cjxl's file of one
-      failing case with `djxl` and compare it with the Linux one.
+- [x] **EXR on Windows: `cjxl` writes other bytes for 10 of 149** (found 2026-10-03, CI run
+      37171820482; diagnosed and settled 2026-10-04): every case of the two fixtures whose
+      data window leaves part of the display window uncovered. Not Skidbladnir and not
+      OpenEXR: libjxl 0.12.0's `lib/extras/dec/exr.cc` `malloc`s the display-window image
+      (`PackedImage`, `packed_image.cc`) and copies only the data window in ("TODO(eustas):
+      should we deal with unpopulated pixels?"), so `cjxl` encodes whatever the allocator
+      returned there: zero on a fresh glibc or macOS heap, other bytes on Windows. Shown on
+      the dev host: with `MALLOC_PERTURB_=165` Linux's `cjxl` diverges on exactly the same 10
+      of 149. Skidbladnir makes those pixels zero, so `matches_cjxl_through_exr` now holds
+      those two fixtures to `cjxl` reading the same image with the zeros written out (the
+      data window widened to the display window), every `cjxl` run in `tests/jxl_parity.rs`
+      is under `MALLOC_PERTURB_` (a case that matches only by luck fails on Linux too), and
+      the EXR gate runs on Windows. 149 of 149 on the dev host and on Windows (CI run
+      37253214479, `parity with cjxl / windows`); moving the placement one pixel fails the 10. Still unfixed on libjxl's main branch
+      (<https://github.com/libjxl/libjxl/blob/main/lib/extras/dec/exr.cc>, the TODO at line
+      464; <https://github.com/libjxl/libjxl/blob/main/lib/extras/packed_image.cc>, line 110).
+- [ ] Report libjxl's uninitialised EXR border upstream (an issue on libjxl/libjxl; none
+      found by searching its tracker on 2026-10-04): `cjxl` encodes undefined pixels for any
+      EXR whose data window does not cover its display window. The routine does not file
+      issues on its own; the reproduction is the `MALLOC_PERTURB_` run above.
 - [x] **Every Windows libheif lacked sharp YUV** (found and fixed 2026-10-03 by the Windows
       `heif-enc` parity job): `scripts/build-libheif.sh` looked for `sharpyuv.lib`, MSVC
       builds `libsharpyuv.lib`, and libheif's configure quietly built without it. `heif-enc`
@@ -1551,7 +1563,14 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       assertions on. A libaom assertion (`av1/encoder/bitstream.c:2982`) ended the test
       process on a superres setting. `build.rs`'s `msvc_release_build` now sets the Release
       flags itself. Gate: the Windows `avif_parity` run, 4 of 4 tests, byte for byte.
-- [ ] **libjxl on Windows has the same unoptimised build**: `jpegxl-src` builds it with
+- [x] **libjxl on Windows has the same unoptimised build** (fixed 2026-10-04, though not
+      the way first suggested): `cmake-rs` replaces the Release flags only when no generator
+      is named, and reads `CMAKE_GENERATOR` from the environment, so `build.rs`
+      (`libjxl_msvc_generator`) names the Visual Studio generator for `jpegxl-src`'s build in
+      release builds, and fails the build if libjxl's `CMakeCache.txt` then lacks `/O2` and
+      `/DNDEBUG` (a cache configured before is removed first). Every Windows parity job
+      passed with it, the build-time check included (CI run 37253214479: `cjxl` 7 of 7
+      tests, `avifenc`, `heif-enc`, libwebp's tools). *Original item:* `jpegxl-src` builds it with
       `cmake-rs` and ClangCL, so the flag replacement above applies, and `build.rs` cannot
       reach that configure. The JPEG XL gates pass there all the same (byte parity held
       with an unoptimised libjxl), so this is speed, and assertion code shipped, not output.
@@ -1559,6 +1578,12 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       CMake invocation over the pinned libjxl source, through `msvc_release_build`; the
       Windows JPEG XL gates must stay green through it (Linux showed an unoptimised
       libjxl rounding differently on decode).
+- [ ] Build libjxl from a pinned source with our own CMake call instead of `jpegxl-src`'s:
+      its crates.io metadata says BSD-3-Clause but its `lib.rs` carries a GPL header (it only
+      runs at build time and nothing of it is linked; Phase 7's JPEG XL item). Not a
+      submodule alone: libjxl's own dependencies (highway, brotli, skcms) are nested
+      submodules, and every CI job checks out `submodules: true` without recursion, so the
+      source tarball and all 12 checkouts would change with it.
 
 **Multi-image features the tools have, deferred by the owner (2026-09-28):**
 
@@ -1670,8 +1695,9 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       reader could say "libwebp preset, combo box" but not "photo". Each select now carries
       its choice as a selected option of its own (`chosen_option` in `controls.rs`), as a
       browser exposes a `<select>`; AT-SPI's Selection reports it. The audit checks every
-      select says what it holds (AT-SPI only); without the option, 9 of its 10 states fail.
-      What UI Automation reads for it is not checked yet.
+      select says what it holds; without the option, 9 of its 10 states fail. On Windows
+      the audit reads UI Automation's Value (or selected item) for the same check (since
+      2026-10-04; passes in CI run 37253214479).
 - [ ] A drop onto the gpui window on Wayland (a native Wayland drag source) and on Windows
       (OLE drag and drop) is still untested; the X11 test above is the only real drop.
 - [ ] AccessKit's AT-SPI mapping reports every button enabled: accesskit_atspi_common

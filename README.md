@@ -73,9 +73,9 @@ with the exceptions listed under [What "every option" means](#what-every-option-
 | JPEG XL | `cjxl` 0.12.0 | libjxl 0.12.0 | 551 cases: every option, PNG, PNM, PFM, PGX, EXR, still-GIF and JPEG XL inputs, JPEG recompression and decoding |
 | HEIC | `heif-enc -e kvazaar` 1.23.5 | libheif 1.23.5 + Kvazaar 2.3.2 | 182 cases: every option, PNG, JPEG, TIFF (RGB, straight alpha, and premultiplied alpha read as `heif-enc` reads it on request), WebP, HEIC and 8-bit 4:2:0 Y4M inputs |
 
-That is 4,270 cases in all. CI runs every one of them on Linux x86-64, Linux ARM64 and
-macOS with Apple silicon, and on Windows x64 all but JPEG XL's 149 EXR cases, for every
-pull request and every push to `master`.
+That is 4,270 cases in all. CI runs every one of them on Linux x86-64, Linux ARM64,
+macOS with Apple silicon and Windows x64, for every pull request and every push to
+`master`.
 
 The [GPL edition](#editions) writes HEIC with x265 instead, adding `heif-enc`'s `-L`
 lossless, 4:4:4 and 4:2:2 chroma, 10-bit output, x265's main tuning controls and any
@@ -329,9 +329,11 @@ same source as the library the app links (`scripts/build-reference-tools.sh`). P
   writes other bytes even at libavif 1.4.2.
 - **Tested on Linux (x86-64 and ARM64), macOS on Apple silicon and Windows x64.** CI
   builds the reference tools and runs the parity tests on each, so the encoders' x86 and
-  ARM code paths, and their MSVC builds, are each held to the tools. On Windows the EXR
-  cases are left out: there `cjxl`, reading EXR through vcpkg's OpenEXR, writes other bytes
-  for 10 of the 149, where on Linux and macOS it writes Skidbladnir's. The Intel Mac build
+  ARM code paths, and their MSVC builds, are each held to the tools. One exception in
+  what is compared: for an EXR whose data window does not cover its display window, `cjxl`
+  encodes whatever memory it was given for the uncovered pixels (libjxl 0.12.0 never writes
+  them): zero on Linux and macOS by chance, other bytes on Windows. Skidbladnir makes them zero, and those
+  cases are held to `cjxl` reading the same image with the zeros written out. The Intel Mac build
   links the same sources, but no reference tool runs there, so identical bytes there are
   expected, not tested.
 - **AVIF with libaom**, `avifenc`'s default codec: `-c rav1e` and `-c svt` are not built
