@@ -10,7 +10,8 @@ window's accessibility tree (AT-SPI). It fails when a control that says it can t
 focus is never reached, when Tab stops moving (a trap), or when the focus lands on a
 nameless control. Shift+Tab must walk the same cycle backwards. In the WebP panel it also
 presses the keys inside controls: the arrows, Page Up, Home and End on a slider, the arrows
-in a radio group, Down, Enter and Escape in a select, Space on a check box.
+in a radio group, Down, Enter and Escape in a select, the queue's menu (Enter to open, the
+arrows, Home and End, Space on its check item, Escape back to Queue), Space on a check box.
 
 Each format's panel is checked with every disclosure open. It runs in the private AT-SPI
 session scripts/gpui-a11y-audit.py sets up, with a scratch configuration, and the window on
@@ -38,6 +39,10 @@ audit = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(audit)
 
 STATES = [state for state in audit.STATES if state[0] in ("webp", "avif", "jxl", "heic")]
+
+
+# The exit status of a state whose window never showed an accessibility tree.
+NO_TREE = 3
 
 
 class NotOurs(Exception):
@@ -77,6 +82,26 @@ def focused(reader, app):
 	return None
 
 
+def settled_focus(reader, app, previous):
+	"""The focus after a key, once it has moved from `previous` and held still for two reads:
+	on a software renderer the window can take longer than the fixed pause after the key to
+	move it, and a read in between would see the old control (seen once in CI: a Tab stop
+	missing from a cycle). Gives up waiting after two seconds and returns what is focused."""
+	deadline = time.monotonic() + 2
+	node = focused(reader, app)
+	while time.monotonic() < deadline:
+		if node is not None and (previous is None or node.path != previous.path):
+			time.sleep(0.1)
+			again = focused(reader, app)
+			if again is not None and again.path == node.path:
+				return node
+			node = again
+			continue
+		time.sleep(0.05)
+		node = focused(reader, app)
+	return node
+
+
 def describe(node):
 	return f"{node.get_role_name()} {node.get_name()!r}" if node is not None else "nothing"
 
@@ -90,7 +115,7 @@ def walk_cycle(reader, app, pid, key, limit):
 	visited = []
 	for _ in range(limit):
 		press(pid, key)
-		node = focused(reader, app)
+		node = settled_focus(reader, app, visited[-1] if visited else None)
 		if node is None:
 			return visited, "the focus left every control (nothing reports focused)"
 		if visited and node.path == visited[-1].path:
@@ -190,6 +215,50 @@ def inner_keys(reader, app, pid):
 			if chosen()[0]:
 				problems.append("Escape does not close the libwebp preset select")
 
+	# The queue's menu: Enter on Queue opens it on its first item; Down, Up, Home and End move
+	# the highlight; Space ticks "include subfolders" and leaves the menu open; Escape closes
+	# it and gives the focus back to Queue. Enter is never pressed on the first two items,
+	# which open the system's file dialogs.
+	def menu():
+		items = [node for node in reader.walk(app) if node.get_role() in (atspi.Role.MENU_ITEM, atspi.Role.CHECK_MENU_ITEM)]
+		lit = [node.get_name() for node in items if node.get_state_set().contains(atspi.StateType.SELECTED)]
+		return items, lit
+
+	queue = find(atspi.Role.PUSH_BUTTON, "Queue")
+	if queue is None or not focus(queue):
+		problems.append("the Queue button cannot be focused")
+	else:
+		press(pid, "Return")
+		items, lit = menu()
+		names = [node.get_name() for node in items]
+		if len(items) != 3:
+			problems.append(f"Enter on Queue opens {len(items)} menu items, not 3: {names}")
+		else:
+			if lit != names[:1]:
+				problems.append(f"the queue's menu opens with {lit} highlighted, not {names[:1]}")
+			for key, expected in (("Down", 1), ("Up", 0), ("End", 2), ("Home", 0), ("Down", 1), ("Down", 2), ("Down", 2)):
+				press(pid, key)
+				if menu()[1] != [names[expected]]:
+					problems.append(f"{key} in the queue's menu highlights {menu()[1]}, not {[names[expected]]}")
+			subfolders = lambda: next((node for node in menu()[0] if node.get_role() == atspi.Role.CHECK_MENU_ITEM), None)
+			# Space only with the check item highlighted: on another item it would open a
+			# file dialog.
+			if subfolders() is None or menu()[1] != [subfolders().get_name()]:
+				problems.append("the queue menu's check item is not highlighted; Space was not pressed")
+			else:
+				before = subfolders().get_state_set().contains(atspi.StateType.CHECKED)
+				press(pid, "space")
+				after = subfolders()
+				if after is None:
+					problems.append("Space on the queue menu's check item closes the menu")
+				elif after.get_state_set().contains(atspi.StateType.CHECKED) == before:
+					problems.append(f"Space does not toggle {after.get_name()!r} in the queue's menu")
+			press(pid, "Escape")
+			if menu()[0]:
+				problems.append("Escape does not close the queue's menu")
+			elif describe(focused(reader, app)) != describe(find(atspi.Role.PUSH_BUTTON, "Queue")):
+				problems.append(f"Escape leaves the focus on {describe(focused(reader, app))}, not on Queue")
+
 	lossless = find(atspi.Role.CHECK_BOX, "Lossless")
 	if lossless is None or not focus(lossless):
 		problems.append("the Lossless check box cannot be focused")
@@ -219,9 +288,11 @@ def run(args):
 					try:
 						app = reader.find(process.pid)
 						if app is None:
-							failures += 1
 							print(f"FAIL {label}: no accessibility tree")
-							continue
+							log.flush()
+							audit.diagnose_no_tree(reader, process.pid, os.path.join(scratch, "app.log"))
+							# Told apart from a real failure, so main() can try once more.
+							return NO_TREE
 						time.sleep(2)
 						atspi = reader.atspi
 						# What Tab must reach: every control that can take the focus, scrolled into
@@ -253,7 +324,7 @@ def run(args):
 							inner = inner_keys(reader, app, process.pid)
 							problems += inner
 							if not inner:
-								print("ok   webp: the arrows, Page Up, Home and End move the Quality slider; the arrows move a radio group's choice; a select opens, chooses and closes from the keyboard; Space toggles a check box")
+								print("ok   webp: the arrows, Page Up, Home and End move the Quality slider; the arrows move a radio group's choice; a select opens, chooses and closes from the keyboard; the queue's menu opens, moves, ticks and closes from the keyboard; Space toggles a check box")
 						if problems:
 							failures += len(problems)
 							print(f"FAIL {label}: {len(forward)} Tab stops for {len(stops)} controls and {len(groups)} radio groups; {len(problems)} problems:")
@@ -287,8 +358,18 @@ def main():
 	if not os.environ.get("DISPLAY") or shutil.which("xdotool") is None:
 		sys.exit("needs an X display (DISPLAY), or XWayland, and xdotool")
 	if "SKIDBLADNIR_A11Y_AUDIT_SESSION" not in os.environ:
-		# Each state in a private session of its own, as the audit runs them.
-		failed = sum(1 for index in range(len(STATES)) if audit.in_private_session(["--app", args.app, "--edition", args.edition, "--state", str(index)], __file__))
+		# Each state in a private session of its own, as the audit runs them, and, as there,
+		# once more in a new session when the window's tree never appeared (on CI's Xvfb,
+		# every other session in one run of 2026-10-04); a state whose keys ran is never
+		# retried.
+		failed = 0
+		for index in range(len(STATES)):
+			command = ["--app", args.app, "--edition", args.edition, "--state", str(index)]
+			status = audit.in_private_session(command, __file__)
+			if status == NO_TREE:
+				print(f"     {STATES[index][0]}: no tree read; once more in a new session")
+				status = audit.in_private_session(command, __file__)
+			failed += 1 if status else 0
 		print("all checks passed" if not failed else f"{failed} of {len(STATES)} states with problems")
 		return 1 if failed else 0
 	return run(args)

@@ -187,6 +187,29 @@ jobs:
       - name: cargo test
         run: cargo test --workspace --features "${{ env.FEATURES }}"
 
+      - name: Smoke test the gpui window (macOS)
+        # The default window since 1.3.0, which nothing in CI had opened on macOS (release.yml
+        # only screenshots the bundle starting): it converts a PNG to every format and a raw
+        # YUV file, as on Linux and Windows (scripts/gpui-smoke.sh). The debug build this job
+        # already has; its rpath finds build/libheif.
+        if: matrix.os == 'macos-latest' && matrix.edition == 'standard'
+        timeout-minutes: 10
+        shell: bash
+        run: scripts/gpui-smoke.sh --app target/debug/skidbladnir
+
+      - name: Accessibility audit of the gpui window (macOS, reported only)
+        # What VoiceOver is given, read through the Accessibility API (scripts/gpui-a11y-audit.py),
+        # which macOS lets a process read only with the Accessibility permission. Reported, not
+        # yet required: whether a hosted runner's reader has it is the first thing to learn.
+        if: matrix.os == 'macos-latest' && matrix.edition == 'standard'
+        continue-on-error: true
+        timeout-minutes: 20
+        shell: bash
+        run: |
+          python3 -m venv "$RUNNER_TEMP/ax"
+          "$RUNNER_TEMP/ax/bin/pip" install --quiet pyobjc-framework-ApplicationServices pyobjc-framework-Cocoa
+          "$RUNNER_TEMP/ax/bin/python" scripts/gpui-a11y-audit.py --app target/debug/skidbladnir
+
       - name: HEIC reference decoder for the GPL edition
         # The standard legs get heif-dec with the parity step below; this leg skips that
         # step (parity is libwebp's, the same in both editions) but still checks what x265
@@ -512,8 +535,8 @@ jobs:
   # already builds the library so for the app), reading JPEG through our libjpeg-turbo and
   # PNG, GIF and EXR through vcpkg's libpng, giflib and OpenEXR. libjxl finds OpenEXR only
   # through pkg-config, so vcpkg's pkgconf is that, over vcpkg's .pc files, which for a
-  # static triplet carry the private dependencies too. The JPEG XL-source gate needs EXR
-  # for one of its sources; the EXR gate itself is left out below (ROADMAP.md, Phase 8).
+  # static triplet carry the private dependencies too. The EXR gate and the JPEG XL-source
+  # one (which has an EXR among its sources) need it.
   parity-windows-jxl:
     name: parity with cjxl / windows
     runs-on: windows-2022
@@ -564,10 +587,7 @@ jobs:
 
       - name: byte parity with cjxl
         run: |
-          # EXR: 139 of 149 match here; cjxl with vcpkg's OpenEXR writes other bytes for a data
-          # window inside the display window and for a second layer kept as extra channels,
-          # which cjxl on Linux and macOS writes as Skidbladnir does (ROADMAP.md, Phase 8).
-          cargo test --release --no-fail-fast --package skidbladnir-encode --test jxl_parity -- --skip matches_cjxl_through_exr --nocapture
+          cargo test --release --no-fail-fast --package skidbladnir-encode --test jxl_parity -- --nocapture
           cargo test --release --no-fail-fast --package skidbladnir-encode --test pnm -- matches_cjxl_reading_pnm matches_cjxl_reading_pfm matches_cjxl_reading_pgx --nocapture
 
   # avifenc on Windows: the pinned libavif and libaom built with MSVC by the same script as on
@@ -768,3 +788,7 @@ jobs:
         run: |
           python -m pip install --quiet pywinauto
           python scripts/gpui-a11y-audit.py --app "$(cygpath -w "$INSTALLED_APP")"
+
+      - name: A real drop onto the gpui window, from Explorer
+        # OLE drag and drop, by mouse, from Explorer's own window (scripts/gpui-drop-test.py).
+        run: python scripts/gpui-drop-test.py --app "$(cygpath -w "$INSTALLED_APP")"

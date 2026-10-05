@@ -827,6 +827,7 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       2026. <https://chromiumdash.appspot.com/fetch_milestone_schedule?mstone=155>
       Re-checked 2026-10-03: stable is still 154 (154.0.8037.98), and the schedule still
       says 6 October. <https://chromiumdash.appspot.com/fetch_releases?channel=Stable&platform=Windows&num=1>
+      Re-checked 2026-10-04: still 154.0.8037.98. <https://chromiumdash.appspot.com/fetch_releases?channel=Stable&platform=Windows&num=1>
 - [x] **JPEG XL is close to its trigger — prepare, do not build yet.** *Superseded:* the
       owner asked for JPEG XL ahead of Chrome, and it shipped in 0.10.0 on libjxl (see
       "JPEG XL output and input" below), with `cjxl`'s whole surface since 0.14.0. Mozilla announced
@@ -1208,6 +1209,19 @@ The README has promised JPEG 2000 "coming soon" since 2019. Decide it honestly.
       loop); only if it still overflows, measure there. **The CRT is now consistent**
       (0.15.0, below); the overflow did not recur in that PR's Windows runs, which proves
       little for an intermittent failure — keep watching before ticking.
+      **Measured again 2026-10-04, for every encoder:** `scripts/stack-probe.sh` (with
+      `examples/stack-probe.rs`) bisects the smallest stack each encoder's heaviest settings
+      survive with *every* thread limited, the encoders' own worker threads included (glibc
+      takes their default from `ulimit -s`; on Windows a thread started without a size gets
+      the executable's 1 MiB). On the dev host, release build: AVIF at speed 0 needs 124 KiB,
+      everything else (WebP `-m 6` lossy and lossless, animated WebP from GIF, JPEG XL
+      `-e 9` lossy and lossless, HEIC) at most 44 KiB; debug build: at most 92 KiB. This
+      mattered beyond the tests: gpui runs the window's background tasks, conversions and
+      previews included, on the Windows thread pool (`TrySubmitThreadpoolCallback`,
+      `gpui-windows` 1.17.2 `dispatcher.rs`), whose threads have that 1 MiB, so the gpui
+      window on Windows has about 8x headroom (MSVC's frames are not measured, and can be
+      larger). Nothing on Linux comes near the 2 MiB of a test thread, so the overflow is
+      still unexplained there.
 - [x] **Concurrent HEIC encodes tripped libheif's memory limit** (found and fixed
       2026-10-01/02 by CI: two of PR #68's macOS parity runs failed one HEIC case each with
       "Memory usage of 18446744073709539283 bytes ... exceeds the security limit", while the
@@ -1517,14 +1531,26 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       readers on the dynamic runtime (every `tests/heic_parity.rs` gate). All gates in CI
       run 37171820482. Two real bugs came out of it, below. The EXR gate itself stays out
       on Windows (next item).
-- [ ] **EXR on Windows: `cjxl` writes other bytes for 10 of 149** (found 2026-10-03, CI run
-      37171820482): every case of two fixtures, a data window inside the display window
-      and a second layer kept as extra channels; cjxl's files are the larger. On Linux
-      (Ubuntu's OpenEXR) and macOS (Homebrew's) `cjxl` writes Skidbladnir's bytes for all
-      149, and Skidbladnir reads EXR in Rust, so the Windows reference reads those files
-      differently: vcpkg's OpenEXR version, or `exr.cc`'s window arithmetic under
-      LLP64, are the first suspects. Next: have the Windows job decode cjxl's file of one
-      failing case with `djxl` and compare it with the Linux one.
+- [x] **EXR on Windows: `cjxl` writes other bytes for 10 of 149** (found 2026-10-03, CI run
+      37171820482; diagnosed and settled 2026-10-04): every case of the two fixtures whose
+      data window leaves part of the display window uncovered. Not Skidbladnir and not
+      OpenEXR: libjxl 0.12.0's `lib/extras/dec/exr.cc` `malloc`s the display-window image
+      (`PackedImage`, `packed_image.cc`) and copies only the data window in ("TODO(eustas):
+      should we deal with unpopulated pixels?"), so `cjxl` encodes whatever the allocator
+      returned there: zero on a fresh glibc or macOS heap, other bytes on Windows. Shown on
+      the dev host: with `MALLOC_PERTURB_=165` Linux's `cjxl` diverges on exactly the same 10
+      of 149. Skidbladnir makes those pixels zero, so `matches_cjxl_through_exr` now holds
+      those two fixtures to `cjxl` reading the same image with the zeros written out (the
+      data window widened to the display window), every `cjxl` run in `tests/jxl_parity.rs`
+      is under `MALLOC_PERTURB_` (a case that matches only by luck fails on Linux too), and
+      the EXR gate runs on Windows. 149 of 149 on the dev host and on Windows (CI run
+      37253214479, `parity with cjxl / windows`); moving the placement one pixel fails the 10. Still unfixed on libjxl's main branch
+      (<https://github.com/libjxl/libjxl/blob/main/lib/extras/dec/exr.cc>, the TODO at line
+      464; <https://github.com/libjxl/libjxl/blob/main/lib/extras/packed_image.cc>, line 110).
+- [ ] Report libjxl's uninitialised EXR border upstream (an issue on libjxl/libjxl; none
+      found by searching its tracker on 2026-10-04): `cjxl` encodes undefined pixels for any
+      EXR whose data window does not cover its display window. The routine does not file
+      issues on its own; the reproduction is the `MALLOC_PERTURB_` run above.
 - [x] **Every Windows libheif lacked sharp YUV** (found and fixed 2026-10-03 by the Windows
       `heif-enc` parity job): `scripts/build-libheif.sh` looked for `sharpyuv.lib`, MSVC
       builds `libsharpyuv.lib`, and libheif's configure quietly built without it. `heif-enc`
@@ -1538,7 +1564,14 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       assertions on. A libaom assertion (`av1/encoder/bitstream.c:2982`) ended the test
       process on a superres setting. `build.rs`'s `msvc_release_build` now sets the Release
       flags itself. Gate: the Windows `avif_parity` run, 4 of 4 tests, byte for byte.
-- [ ] **libjxl on Windows has the same unoptimised build**: `jpegxl-src` builds it with
+- [x] **libjxl on Windows has the same unoptimised build** (fixed 2026-10-04, though not
+      the way first suggested): `cmake-rs` replaces the Release flags only when no generator
+      is named, and reads `CMAKE_GENERATOR` from the environment, so `build.rs`
+      (`libjxl_msvc_generator`) names the Visual Studio generator for `jpegxl-src`'s build in
+      release builds, and fails the build if libjxl's `CMakeCache.txt` then lacks `/O2` and
+      `/DNDEBUG` (a cache configured before is removed first). Every Windows parity job
+      passed with it, the build-time check included (CI run 37253214479: `cjxl` 7 of 7
+      tests, `avifenc`, `heif-enc`, libwebp's tools). *Original item:* `jpegxl-src` builds it with
       `cmake-rs` and ClangCL, so the flag replacement above applies, and `build.rs` cannot
       reach that configure. The JPEG XL gates pass there all the same (byte parity held
       with an unoptimised libjxl), so this is speed, and assertion code shipped, not output.
@@ -1546,6 +1579,21 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       CMake invocation over the pinned libjxl source, through `msvc_release_build`; the
       Windows JPEG XL gates must stay green through it (Linux showed an unoptimised
       libjxl rounding differently on decode).
+- [ ] Build libjxl from a pinned source with our own CMake call instead of `jpegxl-src`'s:
+      its crates.io metadata says BSD-3-Clause but its `lib.rs` carries a GPL header (it only
+      runs at build time and nothing of it is linked; Phase 7's JPEG XL item). Not a
+      submodule alone: libjxl's own dependencies (highway, brotli, skcms) are nested
+      submodules, and every CI job checks out `submodules: true` without recursion, so the
+      source tarball and all 12 checkouts would change with it. Pins at libjxl v0.12.0
+      (`git ls-tree v0.12.0 third_party/`, 2026-10-04): highway `457c8917`, brotli
+      `028fb5a2`, skcms `96d9171c`; the library build needs only those three (sjpeg, lcms,
+      libpng, zlib, googletest, libjpeg-turbo and testdata are for tools, tests or
+      alternatives). The reference `cjxl` builds (`scripts/build-reference-tools.sh`, the
+      Windows `cjxl` job) take their source from `jpegxl-src` too and move with it. Top-level
+      submodules for the three would need no change to the checkouts, but libjxl cannot
+      simply be pointed at them: `third_party/skcms.cmake` hard-codes
+      `${PROJECT_SOURCE_DIR}/third_party/skcms`, so `build.rs` would assemble a source
+      overlay (libjxl with the three in its `third_party/`) in `OUT_DIR` and configure that.
 
 **Multi-image features the tools have, deferred by the owner (2026-09-28):**
 
@@ -1643,7 +1691,16 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       WebP panel it also presses the keys inside controls (the arrows, Page Up, Home and End
       on a slider; the arrows in a radio group; Space on a check box); reversing the
       slider's arrows fails it; and a select (Down opens it on the current choice, Down and
-      Enter choose, Escape closes). The queue's menu keys are not exercised yet.
+      Enter choose, Escape closes). And the queue's menu (2026-10-04): Enter on Queue opens
+      it on its first item, Down/Up/Home/End move the highlight, Space ticks "Include
+      subfolders" and leaves it open, Escape closes it with the focus on Queue. Space is
+      pressed only once the check item is highlighted, since the other two open file
+      dialogs. Swapping Up and Down in the app fails 6 of those checks; the menu is
+      highlight-only, so the focus never leaves Queue and the Escape check guards only
+      against losing it. Since 2026-10-04 the test reads the focus once it has moved and
+      held still, not at a fixed pause after the key: master's run 37180306916 lost a Tab
+      stop ("Tab never reaches 'App settings'"), which a read before the focus moved would
+      explain (not reproduced, so not proven).
 - [x] **A select's value did not reach AT-SPI** (found and fixed 2026-10-03 by the keyboard
       test): the trigger is a `ComboBox` with `aria_value`, but AccessKit 0.18.1 gives a
       combo box no Text interface (`supports_text_ranges` covers text inputs, labels and
@@ -1651,10 +1708,17 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       reader could say "libwebp preset, combo box" but not "photo". Each select now carries
       its choice as a selected option of its own (`chosen_option` in `controls.rs`), as a
       browser exposes a `<select>`; AT-SPI's Selection reports it. The audit checks every
-      select says what it holds (AT-SPI only); without the option, 9 of its 10 states fail.
-      What UI Automation reads for it is not checked yet.
-- [ ] A drop onto the gpui window on Wayland (a native Wayland drag source) and on Windows
-      (OLE drag and drop) is still untested; the X11 test above is the only real drop.
+      select says what it holds; without the option, 9 of its 10 states fail. On Windows
+      the audit reads UI Automation's Value (or selected item) for the same check (since
+      2026-10-04; passes in CI run 37253214479).
+- [x] A real drop onto the gpui window on Windows (2026-10-04): `scripts/gpui-drop-test.py`
+      opens Explorer on a folder holding a PNG, presses the mouse on the file, moves onto the
+      window and lets go (OLE drag and drop from the real file manager), then invokes "Convert
+      1 file" through UI Automation and checks the WebP on disk. A step in the Windows window
+      job; passed on its first run (CI run 37255781900) and since.
+- [ ] A drop onto the gpui window on Wayland (a native Wayland drag source) is still
+      untested: a Wayland drag needs a real pointer press's serial, which a script cannot
+      fake the way it plays XDND on X11.
 - [ ] AccessKit's AT-SPI mapping reports every button enabled: accesskit_atspi_common
       0.18.1 (`node.rs`) adds `Enabled | Sensitive` unless the role is one of those
       `is_read_only_supported` lists (text inputs, check boxes, sliders and the like), so a
@@ -1663,6 +1727,44 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       one.
 - [ ] The gpui window on macOS and Windows has not been opened by a person (CI builds and
       tests it; the Windows installer smoke runs the webview window).
+- [x] CI opens the gpui window on macOS (2026-10-04): the macOS rust job runs
+      `scripts/gpui-smoke.sh` against its debug build, converting a PNG to every format and
+      a raw YUV file (5 of 5 in CI run 37258119163). Before, only `release.yml`'s launch
+      screenshot had shown it there.
+- [ ] The gpui window's macOS accessibility tree, read by the audit (`AxReader`,
+      2026-10-04; a reported-only CI step). The hosted runner's reader is trusted for
+      accessibility. CI run 37258119163 read all 10 states: every control named, every
+      select's value and slider range given, Convert disabled with nothing queued. The one
+      problem in each was a text field that, asked to take the focus (`AXFocused`), did not
+      report it. Bringing the app to the front first (`AXFrontmost`, `AXMain`) did not
+      change that (run 37259957909). AccessKit's adapter does pass the request on
+      (`accesskit_macos` 0.26.3 `setAccessibilityFocused:` → `Action::Focus`), but reports
+      a node focused only while the host view has focus, which gpui gives it only while the
+      window is key (`gpui-macos` 1.17.2 `window.rs`, `update_view_focus_state(is_active)`);
+      a bare binary started from CI is not the active app. But activating it
+      (`NSRunningApplication.activateWithOptions_`) worked (run 37261752235: active,
+      `AXFrontmost` and `AXMain` true) and still no field reported the focus, so that is not
+      it either. The reader now prints the AXError the request returns and whether
+      `AXFocused` is settable, to tell a refused request from one taken and never reported.
+      Make the step required once it is clean.
+- [ ] **On CI's Xvfb, some private AT-SPI sessions never get the window's controls**: the
+      audit's and keyboard test's single retry absorbs it (every run of 2026-10-04, mostly
+      the GPL leg; once on master, run 37180306916). The diagnosis printed since then (CI
+      run 37258119163) shows the app registered on the AT-SPI desktop with its window as
+      its one child, but nothing inside the window for 90 seconds, so it is AccessKit's
+      tree for the window that does not arrive, not the app's connection. A registry
+      started 3 seconds late does not reproduce it on the dev host. The likely mechanism,
+      read from `gpui-unofficial` 1.17.2 `window.rs` (not proven): on activation gpui hands
+      AccessKit a tree of the window alone and asks for a frame to send the real one, but
+      a frame sends the tree only if accessibility was active from its start, so an
+      activation that lands mid-frame leaves the window empty until something draws again,
+      which in a window nobody touches is never. Since 2026-10-04 the audit (and the keyboard
+      test, through it) resizes the window by a pixel and back when it is listed but empty for
+      5 seconds, and says so in the log. Its first occurrence in CI (run 37261752235, GPL
+      leg) was recovered by it at once, the state passing with no retry: one case, in
+      keeping with the mechanism, not proof of it.
+      A person's first key or pointer move would draw the frame, so it matters little
+      outside tests, but it is gpui's to fix: report it upstream once confirmed.
 - [x] The saving percentage is computed **once**, in Rust. `savingOf()` is gone from
       `pages/index.vue`; the conversion report and the preview both carry the core's
       `saving_percent`, and the window only formats it (commit 235dbc0 — this box was left
@@ -1760,6 +1862,9 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       helper, in development scope only; the bundle listing
       (`LICENSES/third-party/javascript.md`) confirms it is not in what ships. Take a fix
       when `listhen` or `node-forge` has one. <https://github.com/advisories/GHSA-86w9-cpqp-85rv>
+      Re-checked 2026-10-04: the same three open (#43 `glib`, #44 `esbuild`, #45
+      `node-forge`, no patched version); `glib` 0.18.5, `fontless` 1.2.1, `listhen` 1.10.1,
+      `node-forge` 1.4.0 are still what resolves.
 - [x] README: an acknowledgements and non-affiliation section (2026-10-01).
 - [x] README: a dated "How it compares" table (2026-10-01): Squoosh, XnConvert,
       Converseen and the raw CLIs, each from its own page

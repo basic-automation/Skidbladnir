@@ -73,9 +73,9 @@ with the exceptions listed under [What "every option" means](#what-every-option-
 | JPEG XL | `cjxl` 0.12.0 | libjxl 0.12.0 | 551 cases: every option, PNG, PNM, PFM, PGX, EXR, still-GIF and JPEG XL inputs, JPEG recompression and decoding |
 | HEIC | `heif-enc -e kvazaar` 1.23.5 | libheif 1.23.5 + Kvazaar 2.3.2 | 182 cases: every option, PNG, JPEG, TIFF (RGB, straight alpha, and premultiplied alpha read as `heif-enc` reads it on request), WebP, HEIC and 8-bit 4:2:0 Y4M inputs |
 
-That is 4,270 cases in all. CI runs every one of them on Linux x86-64, Linux ARM64 and
-macOS with Apple silicon, and on Windows x64 all but JPEG XL's 149 EXR cases, for every
-pull request and every push to `master`.
+That is 4,270 cases in all. CI runs every one of them on Linux x86-64, Linux ARM64,
+macOS with Apple silicon and Windows x64, for every pull request and every push to
+`master`.
 
 The [GPL edition](#editions) writes HEIC with x265 instead, adding `heif-enc`'s `-L`
 lossless, 4:4:4 and 4:2:2 chroma, 10-bit output, x265's main tuning controls and any
@@ -132,7 +132,9 @@ byte against a reference.
   included, has a name and a role a screen reader can announce. CI checks both on every
   change: it tabs through each format's panel and checks every control is reached, and
   reads the window the way a screen reader does, over AT-SPI on Linux and UI Automation
-  on Windows (and with axe in the webview window).
+  on Windows (and with axe in the webview window). It also drops a file onto the window
+  as a file manager does, through X11 on Linux and by dragging it out of Explorer on
+  Windows, and converts it.
 - Your source image is never overwritten, and every write goes through a temporary file,
   so a failed conversion cannot damage a file that was already there. Before a run, the
   window warns when two queued files would be written to the same name (`photo.png` and
@@ -191,8 +193,9 @@ it. If **Smart App Control** is turned on (Windows Security > App & browser cont
 Windows blocks unsigned apps and offers no exception, so Skidbladnir cannot be installed
 on that PC until it is signed.
 
-**macOS (experimental).** The macOS builds are new: CI builds them and runs the test suite
-on macOS, but nobody has opened the app on a real Mac yet, so please
+**macOS (experimental).** The macOS builds are new: CI builds them, runs the test suite
+on macOS and converts to every format through the window there, but nobody has opened the
+app on a real Mac yet, so please
 [report problems](https://github.com/basic-automation/Skidbladnir/issues). Open the `.dmg`,
 drag Skidbladnir into Applications, and open it from there.
 
@@ -329,9 +332,11 @@ same source as the library the app links (`scripts/build-reference-tools.sh`). P
   writes other bytes even at libavif 1.4.2.
 - **Tested on Linux (x86-64 and ARM64), macOS on Apple silicon and Windows x64.** CI
   builds the reference tools and runs the parity tests on each, so the encoders' x86 and
-  ARM code paths, and their MSVC builds, are each held to the tools. On Windows the EXR
-  cases are left out: there `cjxl`, reading EXR through vcpkg's OpenEXR, writes other bytes
-  for 10 of the 149, where on Linux and macOS it writes Skidbladnir's. The Intel Mac build
+  ARM code paths, and their MSVC builds, are each held to the tools. One exception in
+  what is compared: for an EXR whose data window does not cover its display window, `cjxl`
+  encodes whatever memory it was given for the uncovered pixels (libjxl 0.12.0 never writes
+  them): zero on Linux and macOS by chance, other bytes on Windows. Skidbladnir makes them zero, and those
+  cases are held to `cjxl` reading the same image with the zeros written out. The Intel Mac build
   links the same sources, but no reference tool runs there, so identical bytes there are
   expected, not tested.
 - **AVIF with libaom**, `avifenc`'s default codec: `-c rav1e` and `-c svt` are not built
@@ -474,7 +479,8 @@ binary release is [v0.4.3](https://github.com/basic-automation/Skidbladnir/relea
 Known gaps:
 
 - **macOS is experimental.** The `.dmg`s (Apple silicon and Intel) are built by CI, and
-  the test suite runs on macOS, but nobody has yet opened the app on a real Mac. The
+  the test suite runs on macOS, where CI also opens the window and converts to every
+  format with it, but nobody has yet opened the app on a real Mac. The
   standard edition's Windows installer is installed and exercised by CI on every change,
   and the Linux app (both editions) is launched and driven by CI on every change, though
   not from its `.deb` or AppImage. Each release's `.deb` is installed by CI on Ubuntu 22.04

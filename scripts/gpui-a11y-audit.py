@@ -12,8 +12,10 @@ On Linux AccessKit publishes the tree only once an assistive technology switches
 accessibility on. The script does that inside a private session: its own D-Bus session
 bus, its own AT-SPI bus with a screen reader reported on, and the window launched into it
 with a scratch configuration, so neither the user's desktop nor their Skidbladnir settings
-are touched. On Windows UI Automation asks the window for its tree directly; the app's
-configuration folder cannot be redirected there, so it runs only in CI.
+are touched. On Windows UI Automation asks the window for its tree directly, and on macOS
+the Accessibility API (what VoiceOver reads; pyobjc, and the Accessibility permission for
+the process reading it); the app's configuration folder cannot be redirected on either, so
+there it runs only in CI.
 
 For every state below (each format with every disclosure open, the pop-ups, the preview
 and the About view) it fails on:
@@ -21,7 +23,8 @@ and the About view) it fails on:
   menu item, link) with no accessible name: a screen reader would say only its role;
 - two buttons with the same name, which a screen reader cannot tell apart;
 - a slider whose value is missing or outside its own range;
-- a select that does not say what it holds (AT-SPI: no selected option);
+- a select that does not say what it holds (AT-SPI: no selected option; UI Automation:
+  no value and no selected item);
 - an image with no name;
 - a text or number field the state must have that is not in the tree, or one whose text
   (its value) a screen reader cannot read;
@@ -211,8 +214,17 @@ class AtspiReader:
 			process.terminate()
 
 	def find(self, pid, timeout=90.0):
-		"""The window's application node on the AT-SPI desktop, once it has controls in it."""
+		"""The window's application node on the AT-SPI desktop, once it has controls in it.
+
+		When the app is there but its window stays empty, the window is made to draw a frame.
+		gpui (`gpui-unofficial` 1.17.2 `window.rs`) answers accessibility's activation with a
+		tree of the window alone, then asks for a frame to send the real one; but a frame
+		sends it only if accessibility was active from its start, so an activation that lands
+		mid-frame leaves the window empty until something draws again, which in a window
+		nobody touches is never (CI's Xvfb: the app listed with its window, nothing in it,
+		for 90 seconds). A person's first key or pointer move would draw that frame."""
 		deadline = time.monotonic() + timeout
+		empty_since = None
 		while time.monotonic() < deadline:
 			desktop = self.atspi.get_desktop(0)
 			for index in range(desktop.get_child_count()):
@@ -220,13 +232,33 @@ class AtspiReader:
 				if app is None:
 					continue
 				try:
-					if app.get_process_id() == pid and any(node.kind in ("control", "field") for node in self.nodes(app)):
+					if app.get_process_id() != pid:
+						continue
+					if any(node.kind in ("control", "field") for node in self.nodes(app)):
 						self.activate(pid)
 						return app
+					empty_since = empty_since or time.monotonic()
+					if time.monotonic() - empty_since > 5:
+						print("     the window is listed with nothing in it; making it draw a frame")
+						self.redraw(pid)
+						empty_since = time.monotonic()
 				except Exception:  # noqa: BLE001 — a half-registered application raises; try again
 					pass
 			time.sleep(0.5)
 		return None
+
+	@staticmethod
+	def redraw(pid):
+		"""Have the window draw a frame: resize it by a pixel and back (X11, xdotool)."""
+		if os.environ.get("WAYLAND_DISPLAY") or not os.environ.get("DISPLAY") or shutil.which("xdotool") is None:
+			return
+		for window in subprocess.run(["xdotool", "search", "--pid", str(pid)], capture_output=True, text=True).stdout.split():
+			geometry = subprocess.run(["xdotool", "getwindowgeometry", "--shell", window], capture_output=True, text=True).stdout
+			size = dict(line.split("=", 1) for line in geometry.split() if "=" in line)
+			if "WIDTH" in size and "HEIGHT" in size:
+				subprocess.run(["xdotool", "windowsize", window, str(int(size["WIDTH"]) + 1), size["HEIGHT"]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+				time.sleep(0.3)
+				subprocess.run(["xdotool", "windowsize", window, size["WIDTH"], size["HEIGHT"]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 	@staticmethod
 	def activate(pid):
@@ -334,20 +366,18 @@ class UiaReader:
 						value = (pattern.CurrentValue, pattern.CurrentMinimum, pattern.CurrentMaximum)
 					except Exception:  # noqa: BLE001 — no RangeValue pattern
 						value = None
-				node = Node(kind, info.name, kind="control", value=value, enabled=element.is_enabled())
+				text = None
 				if kind == "ComboBox":
-					# Reported, not yet checked: what UI Automation says a select holds, by its
-					# Value pattern or its selected item (ROADMAP.md).
-					held = None
+					# What Narrator and NVDA say a select holds: its Value pattern, else its
+					# selected item; neither is an empty answer, which the audit fails.
 					try:
-						held = element.iface_value.CurrentValue
+						text = element.iface_value.CurrentValue
 					except Exception:  # noqa: BLE001 — no Value pattern
 						try:
-							held = ", ".join(item.window_text() for item in element.get_selection())
+							text = ", ".join(item.window_text() for item in element.get_selection())
 						except Exception:  # noqa: BLE001 — no Selection pattern either
-							held = None
-					node.description = f"holds {held!r}"
-				yield node
+							text = ""
+				yield Node(kind, info.name, kind="control", value=value, text=text, enabled=element.is_enabled())
 			elif kind == "Image":
 				yield Node(kind, info.name, kind="image")
 
@@ -364,6 +394,123 @@ class UiaReader:
 		return False
 
 
+class AxReader:
+	"""macOS: the Accessibility API (AXUIElement), what VoiceOver reads, through pyobjc. The
+	process reading it needs the Accessibility permission (System Settings, Privacy &
+	Security); `find` says so rather than reading an empty tree."""
+
+	# AX roles, by the names the audit uses for UI Automation's, so its checks apply as they are.
+	ROLES = {"AXButton": "Button", "AXCheckBox": "CheckBox", "AXRadioButton": "RadioButton", "AXSlider": "Slider", "AXPopUpButton": "ComboBox", "AXComboBox": "ComboBox", "AXMenuItem": "MenuItem", "AXLink": "Hyperlink", "AXDisclosureTriangle": "Button", "AXIncrementor": "Spinner"}
+
+	def __init__(self):
+		import ApplicationServices as ax
+
+		self.ax = ax
+		if not ax.AXIsProcessTrusted():
+			sys.exit("this process is not trusted for accessibility: grant it the Accessibility permission (in CI, a TCC entry)")
+
+	def close(self):
+		pass
+
+	def attribute(self, element, name):
+		error, value = self.ax.AXUIElementCopyAttributeValue(element, name, None)
+		return value if error == 0 else None
+
+	def find(self, pid, timeout=90.0):
+		app = self.ax.AXUIElementCreateApplication(pid)
+		deadline = time.monotonic() + timeout
+		while time.monotonic() < deadline:
+			for window in self.attribute(app, "AXWindows") or []:
+				if any(node.kind in ("control", "field") for node in self.nodes(window)):
+					self.activate(pid, app, window)
+					return window
+			time.sleep(0.5)
+		return None
+
+	def activate(self, pid, app, window):
+		"""Make the app the active one, as a click on its window would. Started from a
+		background process it is not, and gpui tells AccessKit its view has the focus only
+		while the window is key (`gpui-macos` 1.17.2 `window.rs`, `update_view_focus_state`),
+		so no field could report the focus: CI's first macOS runs, where `AXFrontmost` alone
+		did not change that. Says whether it worked, since macOS 14 may refuse an activation
+		another process asks for."""
+		try:
+			from AppKit import NSApplicationActivateIgnoringOtherApps, NSRunningApplication
+
+			running = NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
+			if running is not None:
+				running.activateWithOptions_(NSApplicationActivateIgnoringOtherApps)
+		except ImportError:
+			running = None
+		self.ax.AXUIElementSetAttributeValue(app, "AXFrontmost", True)
+		self.ax.AXUIElementSetAttributeValue(window, "AXMain", True)
+		for _ in range(20):
+			if running is not None and running.isActive():
+				break
+			time.sleep(0.1)
+		print(f"     macOS: the app is {'active' if running is not None and running.isActive() else 'not active'} (AXFrontmost {self.attribute(app, 'AXFrontmost')}, window AXMain {self.attribute(window, 'AXMain')})")
+
+	def walk(self, element):
+		for child in self.attribute(element, "AXChildren") or []:
+			yield child
+			yield from self.walk(child)
+
+	def nodes(self, window):
+		for element in self.walk(window):
+			role = self.attribute(element, "AXRole") or ""
+			name = self.attribute(element, "AXTitle") or self.attribute(element, "AXDescription") or ""
+			if role in ("AXTextField", "AXTextArea"):
+				value = self.attribute(element, "AXValue")
+				yield Node("Edit", str(name), kind="field", text=None if value is None else str(value), focus=lambda element=element: self.focus(element))
+			elif role in self.ROLES:
+				kind = self.ROLES[role]
+				value, text = None, None
+				if kind == "Slider":
+					current, low, high = (self.attribute(element, attribute) for attribute in ("AXValue", "AXMinValue", "AXMaxValue"))
+					value = None if None in (current, low, high) else (float(current), float(low), float(high))
+				elif kind == "ComboBox":
+					held = self.attribute(element, "AXValue")
+					text = "" if held is None else str(held)
+				enabled = self.attribute(element, "AXEnabled")
+				yield Node(kind, str(name), kind="control", value=value, text=text, enabled=None if enabled is None else bool(enabled))
+			elif role == "AXImage":
+				yield Node("Image", str(name), kind="image")
+
+	def focus(self, element):
+		error = self.ax.AXUIElementSetAttributeValue(element, "AXFocused", True)
+		for _ in range(20):
+			time.sleep(0.1)
+			if error == 0 and self.attribute(element, "AXFocused"):
+				return True
+		# Which of the two it was: the request refused (an AXError, or not settable), or taken
+		# and never reported.
+		settable = self.ax.AXUIElementIsAttributeSettable(element, "AXFocused", None)
+		print(f"     macOS: setting AXFocused returned AXError {error}; settable {settable}; AXFocused now {self.attribute(element, 'AXFocused')}")
+		return False
+
+
+def diagnose_no_tree(reader, pid, log_path):
+	"""What there was instead of the window's tree, for a failure that cannot be reproduced
+	off CI: the applications the accessibility API lists, and the end of the app's output."""
+	if isinstance(reader, AtspiReader):
+		try:
+			desktop = reader.atspi.get_desktop(0)
+			listed = []
+			for index in range(desktop.get_child_count()):
+				app = desktop.get_child_at_index(index)
+				if app is not None:
+					listed.append(f"{app.get_name()!r} pid {app.get_process_id()} ({app.get_child_count()} children)")
+			print(f"       AT-SPI lists {len(listed)} application(s), the window's pid being {pid}: " + ("; ".join(listed) or "none"))
+		except Exception as error:  # noqa: BLE001 — the diagnosis must not hide the failure
+			print(f"       AT-SPI could not be listed: {error}")
+	try:
+		with open(log_path, encoding="utf-8", errors="replace") as written:
+			tail = written.read().splitlines()[-15:]
+		print("       the app's output, last lines:" + "".join(f"\n         {line}" for line in tail) if tail else "       the app wrote nothing")
+	except OSError:
+		pass
+
+
 def audit(nodes, fields, queued=False):
 	"""Every control, the number of images, and what is wrong."""
 	controls, problems, entries = [], [], []
@@ -377,8 +524,6 @@ def audit(nodes, fields, queued=False):
 		if node.kind not in ("control", "field"):
 			continue
 		entry = {"role": node.role, "name": node.name}
-		if node.role == "ComboBox" and node.description:
-			print(f"     select {node.name!r} {node.description} (UI Automation)")
 		if not node.name:
 			problems.append(f"{node.role} with no name" + (f" (description: {node.description!r})" if node.description else ""))
 		if node.role.lower() == "slider":
@@ -389,7 +534,7 @@ def audit(nodes, fields, queued=False):
 				entry["value"] = [current, low, high]
 				if not low <= current <= high:
 					problems.append(f"slider {node.name!r} is at {current}, outside {low}..{high}")
-		if node.role == "combo box" and node.text is not None:
+		if node.role.lower() in ("combo box", "combobox") and node.text is not None:
 			entry["value"] = node.text
 			if not node.text.strip():
 				problems.append(f"select {node.name!r} does not say what it holds")
@@ -417,7 +562,7 @@ def audit(nodes, fields, queued=False):
 
 def run(args):
 	windows = sys.platform == "win32"
-	reader = UiaReader() if windows else AtspiReader()
+	reader = UiaReader() if windows else AxReader() if sys.platform == "darwin" else AtspiReader()
 	app_path = os.path.abspath(args.app)
 	env_base = dict(os.environ)
 	# A bare binary needs libheif beside it, as the installers ship it, or the edition's build.
@@ -446,6 +591,8 @@ def run(args):
 						failures += 1
 						alive = process.poll() is None
 						print(f"FAIL {label}: no accessibility tree with controls from the window (process {'running' if alive else 'exited'})")
+						log.flush()
+						diagnose_no_tree(reader, process.pid, os.path.join(scratch, "app.log"))
 						continue
 					# The expanded panel, the pop-up SKID_OPEN opens after 1.5 s, and the preview
 					# (encoded after 1.5 s) come later than the window, later still on a
@@ -529,9 +676,9 @@ def main():
 	args = parser.parse_args()
 	if not os.access(args.app, os.X_OK):
 		sys.exit(f"no app at {args.app}: build it first, or pass --app")
-	if sys.platform == "win32":
+	if sys.platform in ("win32", "darwin"):
 		if os.environ.get("CI") != "true":
-			sys.exit("on Windows the app's configuration folder cannot be redirected, so this runs only in CI (CI=true)")
+			sys.exit("on Windows and macOS the app's configuration folder cannot be redirected, so this runs only in CI (CI=true)")
 		return run(args)
 	if "SKIDBLADNIR_A11Y_AUDIT_SESSION" not in os.environ:
 		return each_in_its_own_session(args)

@@ -157,12 +157,20 @@ struct Run {
 
 impl Run {
 	fn compare(&mut self, name: &str, input: &Path, settings: &JxlSettings) {
+		self.compare_with(name, input, input, settings);
+	}
+
+	/// Ours encoding `input` against `cjxl` encoding `reference_input`, an equivalent file:
+	/// for a case where what `cjxl` reads from `input` itself is not defined.
+	fn compare_with(&mut self, name: &str, input: &Path, reference_input: &Path, settings: &JxlSettings) {
 		let job = EncodeJob { format: OutputFormat::Jxl, jxl: settings.clone(), ..Default::default() };
 		let theirs = self.dir.join(format!("cjxl-{}.jxl", self.total));
 		let ours = self.dir.join(format!("ours-{}.jxl", self.total));
 		self.total += 1;
-		let args = cjxl_args(&job, input, &theirs);
-		let run = Command::new(&self.cjxl).args(&args).output().expect("run cjxl");
+		let args = cjxl_args(&job, reference_input, &theirs);
+		// glibc fills what `malloc` returns with this byte, so a case that only matches
+		// because `cjxl` read memory it never wrote fails here as it would on Windows.
+		let run = Command::new(&self.cjxl).args(&args).env("MALLOC_PERTURB_", "165").output().expect("run cjxl");
 		let reference = run.status.success().then(|| fs::read(&theirs).ok()).flatten();
 		let result = encode_file(&job, input, &ours).map(|_| fs::read(&ours).expect("read ours"));
 		match (reference, result) {
@@ -312,11 +320,31 @@ fn exr_ramp(width: usize, height: usize, channel: usize) -> Vec<f32> {
 	(0..width * height).map(|i| ((i % width) as f32 * 0.07 + (i / width) as f32 * 0.05 + channel as f32 * 0.3).sin() * 1.4 + 0.3).collect()
 }
 
+/// `samples`, a `size` data window at `position`, laid over a `display` window of zeros: the
+/// image Skidbladnir reads from such a file, written as a file whose data window is all of
+/// the display window. The data window must lie inside the display window.
+fn exr_padded(display: (usize, usize), position: (usize, usize), size: (usize, usize), samples: &[f32]) -> Vec<f32> {
+	let mut padded = vec![0.0; display.0 * display.1];
+	for (row, line) in samples.chunks(size.0).enumerate() {
+		let start = (position.1 + row) * display.0 + position.0;
+		padded[start..start + size.0].copy_from_slice(line);
+	}
+	padded
+}
+
 /// Parity through **EXR**, which only `cjxl` reads: half and float samples, RGB, RGBA (EXR's
 /// alpha is premultiplied, and `cjxl` says so), gray, a named layer's channels, a data window
 /// smaller than and offset inside the display window, chromaticities and white luminance,
 /// channels beyond those (named extra channels in `cjxl`'s output), and every compression
 /// the `exr` crate writes. The RGBA file runs the whole option surface.
+///
+/// Where the data window leaves part of the display window uncovered, `cjxl` (libjxl 0.12.0,
+/// `lib/extras/dec/exr.cc`) never writes those pixels: its image is `malloc`ed and only the
+/// data window is copied in, so what it encodes there is whatever the allocator returned.
+/// That is zero on a fresh glibc or macOS heap and other bytes on Windows (and on Linux under
+/// `MALLOC_PERTURB_`, which fails exactly these cases). Skidbladnir makes them zero, so those
+/// fixtures are held to `cjxl` reading the same image with the zeros written out: the data
+/// window widened to the display window.
 #[test]
 fn matches_cjxl_through_exr() {
 	use exr::prelude::{Compression, FlatSamples, f16};
@@ -326,7 +354,15 @@ fn matches_cjxl_through_exr() {
 	let float = |channel: usize| FlatSamples::F32(exr_ramp(w, h, channel));
 	let alpha = FlatSamples::F16((0..w * h).map(|i| f16::from_f32(if i % 5 == 0 { 0.0 } else { f32::from(u8::try_from(i % 7).expect("under 7")) / 6.0 })).collect());
 	let p3 = [[0.68, 0.32], [0.265, 0.69], [0.15, 0.06], [0.3127, 0.329]];
-	let fixtures: Vec<(&str, Vec<u8>)> = vec![("half RGBA, ZIP", exr_file((w, h), (0, 0), (w, h), vec![("R", half(0)), ("G", half(1)), ("B", half(2)), ("A", alpha.clone())], Compression::ZIP16, None, None)), ("float RGB, PIZ, P3, 203 nits", exr_file((w, h), (0, 0), (w, h), vec![("R", float(0)), ("G", float(1)), ("B", float(2))], Compression::PIZ, Some(203.0), Some(p3))), ("half gray, RLE", exr_file((w, h), (0, 0), (w, h), vec![("Y", half(0))], Compression::RLE, None, None)), ("a layer's RGBA, uncompressed", exr_file((w, h), (0, 0), (w, h), vec![("beauty.R", half(0)), ("beauty.G", half(1)), ("beauty.B", half(2)), ("beauty.A", alpha.clone())], Compression::Uncompressed, None, None)), ("float RGB, PXR24", exr_file((w, h), (0, 0), (w, h), vec![("R", float(0)), ("G", float(1)), ("B", float(2))], Compression::PXR24, None, None)), ("half RGB, B44", exr_file((w, h), (0, 0), (w, h), vec![("R", half(0)), ("G", half(1)), ("B", half(2))], Compression::B44, None, None)), ("half RGB, DWAA", exr_file((w, h), (0, 0), (w, h), vec![("R", half(0)), ("G", half(1)), ("B", half(2))], Compression::DWAA(None), None, None)), ("float RGB, DWAB", exr_file((w, h), (0, 0), (w, h), vec![("R", float(0)), ("G", float(1)), ("B", float(2))], Compression::DWAB(None), None, None)), ("RGBA with a float depth and a half mask", exr_file((w, h), (0, 0), (w, h), vec![("R", half(0)), ("G", half(1)), ("B", half(2)), ("A", alpha.clone()), ("Z", float(3)), ("mask", half(4))], Compression::ZIP16, None, None)), ("gray with a depth", exr_file((w, h), (0, 0), (w, h), vec![("Y", half(0)), ("depth.Z", float(1))], Compression::PIZ, None, None)), ("two layers, the second as extra channels", exr_file((w + 2, h + 2), (1, 1), (w, h), vec![("beauty.B", half(0)), ("beauty.G", half(1)), ("beauty.R", half(2)), ("diffuse.B", half(3)), ("diffuse.G", half(4)), ("diffuse.R", half(5))], Compression::RLE, None, None)), ("data window inside the display window", exr_file((w + 6, h + 4), (2, 3), (w, h), vec![("R", half(0)), ("G", half(1)), ("B", half(2))], Compression::ZIP16, None, None)), ("data window past the display window", exr_file((w - 5, h - 3), (-2, -1), (w, h), vec![("R", half(0)), ("G", half(1)), ("B", half(2))], Compression::ZIP16, None, None))];
+	let fixtures: Vec<(&str, Vec<u8>)> = vec![("half RGBA, ZIP", exr_file((w, h), (0, 0), (w, h), vec![("R", half(0)), ("G", half(1)), ("B", half(2)), ("A", alpha.clone())], Compression::ZIP16, None, None)), ("float RGB, PIZ, P3, 203 nits", exr_file((w, h), (0, 0), (w, h), vec![("R", float(0)), ("G", float(1)), ("B", float(2))], Compression::PIZ, Some(203.0), Some(p3))), ("half gray, RLE", exr_file((w, h), (0, 0), (w, h), vec![("Y", half(0))], Compression::RLE, None, None)), ("a layer's RGBA, uncompressed", exr_file((w, h), (0, 0), (w, h), vec![("beauty.R", half(0)), ("beauty.G", half(1)), ("beauty.B", half(2)), ("beauty.A", alpha.clone())], Compression::Uncompressed, None, None)), ("float RGB, PXR24", exr_file((w, h), (0, 0), (w, h), vec![("R", float(0)), ("G", float(1)), ("B", float(2))], Compression::PXR24, None, None)), ("half RGB, B44", exr_file((w, h), (0, 0), (w, h), vec![("R", half(0)), ("G", half(1)), ("B", half(2))], Compression::B44, None, None)), ("half RGB, DWAA", exr_file((w, h), (0, 0), (w, h), vec![("R", half(0)), ("G", half(1)), ("B", half(2))], Compression::DWAA(None), None, None)), ("float RGB, DWAB", exr_file((w, h), (0, 0), (w, h), vec![("R", float(0)), ("G", float(1)), ("B", float(2))], Compression::DWAB(None), None, None)), ("RGBA with a float depth and a half mask", exr_file((w, h), (0, 0), (w, h), vec![("R", half(0)), ("G", half(1)), ("B", half(2)), ("A", alpha.clone()), ("Z", float(3)), ("mask", half(4))], Compression::ZIP16, None, None)), ("gray with a depth", exr_file((w, h), (0, 0), (w, h), vec![("Y", half(0)), ("depth.Z", float(1))], Compression::PIZ, None, None)), ("data window past the display window", exr_file((w - 5, h - 3), (-2, -1), (w, h), vec![("R", half(0)), ("G", half(1)), ("B", half(2))], Compression::ZIP16, None, None))];
+	// Fixtures whose display window the data window does not cover, each with the file `cjxl`
+	// reads instead: the same image, its uncovered pixels written as zeros.
+	let windowed = |display: (usize, usize), position: (usize, usize), names: &[&str], compression: Compression| {
+		let channels = |padded: bool| names.iter().enumerate().map(|(channel, &name)| (name, FlatSamples::F16(if padded { exr_padded(display, position, (w, h), &exr_ramp(w, h, channel)) } else { exr_ramp(w, h, channel) }.into_iter().map(f16::from_f32).collect()))).collect::<Vec<_>>();
+		let at = (i32::try_from(position.0).expect("small"), i32::try_from(position.1).expect("small"));
+		(exr_file(display, at, (w, h), channels(false), compression, None, None), exr_file(display, (0, 0), display, channels(true), compression, None, None))
+	};
+	let uncovered = [("two layers, the second as extra channels", windowed((w + 2, h + 2), (1, 1), &["beauty.B", "beauty.G", "beauty.R", "diffuse.B", "diffuse.G", "diffuse.R"], Compression::RLE)), ("data window inside the display window", windowed((w + 6, h + 4), (2, 3), &["R", "G", "B"], Compression::ZIP16))];
 	let d = || JxlSettings { effort: 3, ..JxlSettings::default() };
 	let few = [("default", JxlSettings::default()), ("-d 0", JxlSettings { target: JxlTarget::Distance(0.0), ..d() }), ("-d 2", JxlSettings { target: JxlTarget::Distance(2.0), ..d() }), ("--premultiply=0", JxlSettings { premultiply: 0, ..d() }), ("intensity target 400", JxlSettings { intensity_target: 400.0, ..d() })];
 	for (index, (name, bytes)) in fixtures.iter().enumerate() {
@@ -353,6 +389,15 @@ fn matches_cjxl_through_exr() {
 			for (case, settings) in &few {
 				run.compare(&format!("{name}, {case}"), &input, settings);
 			}
+		}
+	}
+	for (index, (name, (bytes, zeros_written))) in uncovered.iter().enumerate() {
+		let input = run.dir.join(format!("windowed-{index}.exr"));
+		fs::write(&input, bytes).expect("write the fixture");
+		let reference = run.dir.join(format!("windowed-{index}-zeros-written.exr"));
+		fs::write(&reference, zeros_written).expect("write the fixture with its zeros written");
+		for (case, settings) in &few {
+			run.compare_with(&format!("{name}, {case}"), &input, &reference, settings);
 		}
 	}
 	finish(&run, "EXR conversions");
