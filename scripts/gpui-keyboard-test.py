@@ -82,6 +82,26 @@ def focused(reader, app):
 	return None
 
 
+def settled_focus(reader, app, previous):
+	"""The focus after a key, once it has moved from `previous` and held still for two reads:
+	on a software renderer the window can take longer than the fixed pause after the key to
+	move it, and a read in between would see the old control (seen once in CI: a Tab stop
+	missing from a cycle). Gives up waiting after two seconds and returns what is focused."""
+	deadline = time.monotonic() + 2
+	node = focused(reader, app)
+	while time.monotonic() < deadline:
+		if node is not None and (previous is None or node.path != previous.path):
+			time.sleep(0.1)
+			again = focused(reader, app)
+			if again is not None and again.path == node.path:
+				return node
+			node = again
+			continue
+		time.sleep(0.05)
+		node = focused(reader, app)
+	return node
+
+
 def describe(node):
 	return f"{node.get_role_name()} {node.get_name()!r}" if node is not None else "nothing"
 
@@ -95,7 +115,7 @@ def walk_cycle(reader, app, pid, key, limit):
 	visited = []
 	for _ in range(limit):
 		press(pid, key)
-		node = focused(reader, app)
+		node = settled_focus(reader, app, visited[-1] if visited else None)
 		if node is None:
 			return visited, "the focus left every control (nothing reports focused)"
 		if visited and node.path == visited[-1].path:
@@ -269,6 +289,8 @@ def run(args):
 						app = reader.find(process.pid)
 						if app is None:
 							print(f"FAIL {label}: no accessibility tree")
+							log.flush()
+							audit.diagnose_no_tree(reader, process.pid, os.path.join(scratch, "app.log"))
 							# Told apart from a real failure, so main() can try once more.
 							return NO_TREE
 						time.sleep(2)

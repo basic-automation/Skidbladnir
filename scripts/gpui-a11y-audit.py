@@ -433,6 +433,28 @@ class AxReader:
 		return False
 
 
+def diagnose_no_tree(reader, pid, log_path):
+	"""What there was instead of the window's tree, for a failure that cannot be reproduced
+	off CI: the applications the accessibility API lists, and the end of the app's output."""
+	if isinstance(reader, AtspiReader):
+		try:
+			desktop = reader.atspi.get_desktop(0)
+			listed = []
+			for index in range(desktop.get_child_count()):
+				app = desktop.get_child_at_index(index)
+				if app is not None:
+					listed.append(f"{app.get_name()!r} pid {app.get_process_id()} ({app.get_child_count()} children)")
+			print(f"       AT-SPI lists {len(listed)} application(s), the window's pid being {pid}: " + ("; ".join(listed) or "none"))
+		except Exception as error:  # noqa: BLE001 — the diagnosis must not hide the failure
+			print(f"       AT-SPI could not be listed: {error}")
+	try:
+		with open(log_path, encoding="utf-8", errors="replace") as written:
+			tail = written.read().splitlines()[-15:]
+		print("       the app's output, last lines:" + "".join(f"\n         {line}" for line in tail) if tail else "       the app wrote nothing")
+	except OSError:
+		pass
+
+
 def audit(nodes, fields, queued=False):
 	"""Every control, the number of images, and what is wrong."""
 	controls, problems, entries = [], [], []
@@ -513,6 +535,8 @@ def run(args):
 						failures += 1
 						alive = process.poll() is None
 						print(f"FAIL {label}: no accessibility tree with controls from the window (process {'running' if alive else 'exited'})")
+						log.flush()
+						diagnose_no_tree(reader, process.pid, os.path.join(scratch, "app.log"))
 						continue
 					# The expanded panel, the pop-up SKID_OPEN opens after 1.5 s, and the preview
 					# (encoded after 1.5 s) come later than the window, later still on a
