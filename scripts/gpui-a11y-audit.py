@@ -21,7 +21,8 @@ and the About view) it fails on:
   menu item, link) with no accessible name: a screen reader would say only its role;
 - two buttons with the same name, which a screen reader cannot tell apart;
 - a slider whose value is missing or outside its own range;
-- a select that does not say what it holds (AT-SPI: no selected option);
+- a select that does not say what it holds (AT-SPI: no selected option; UI Automation:
+  no value and no selected item);
 - an image with no name;
 - a text or number field the state must have that is not in the tree, or one whose text
   (its value) a screen reader cannot read;
@@ -334,20 +335,18 @@ class UiaReader:
 						value = (pattern.CurrentValue, pattern.CurrentMinimum, pattern.CurrentMaximum)
 					except Exception:  # noqa: BLE001 — no RangeValue pattern
 						value = None
-				node = Node(kind, info.name, kind="control", value=value, enabled=element.is_enabled())
+				text = None
 				if kind == "ComboBox":
-					# Reported, not yet checked: what UI Automation says a select holds, by its
-					# Value pattern or its selected item (ROADMAP.md).
-					held = None
+					# What Narrator and NVDA say a select holds: its Value pattern, else its
+					# selected item; neither is an empty answer, which the audit fails.
 					try:
-						held = element.iface_value.CurrentValue
+						text = element.iface_value.CurrentValue
 					except Exception:  # noqa: BLE001 — no Value pattern
 						try:
-							held = ", ".join(item.window_text() for item in element.get_selection())
+							text = ", ".join(item.window_text() for item in element.get_selection())
 						except Exception:  # noqa: BLE001 — no Selection pattern either
-							held = None
-					node.description = f"holds {held!r}"
-				yield node
+							text = ""
+				yield Node(kind, info.name, kind="control", value=value, text=text, enabled=element.is_enabled())
 			elif kind == "Image":
 				yield Node(kind, info.name, kind="image")
 
@@ -377,8 +376,6 @@ def audit(nodes, fields, queued=False):
 		if node.kind not in ("control", "field"):
 			continue
 		entry = {"role": node.role, "name": node.name}
-		if node.role == "ComboBox" and node.description:
-			print(f"     select {node.name!r} {node.description} (UI Automation)")
 		if not node.name:
 			problems.append(f"{node.role} with no name" + (f" (description: {node.description!r})" if node.description else ""))
 		if node.role.lower() == "slider":
@@ -389,7 +386,7 @@ def audit(nodes, fields, queued=False):
 				entry["value"] = [current, low, high]
 				if not low <= current <= high:
 					problems.append(f"slider {node.name!r} is at {current}, outside {low}..{high}")
-		if node.role == "combo box" and node.text is not None:
+		if node.role.lower() in ("combo box", "combobox") and node.text is not None:
 			entry["value"] = node.text
 			if not node.text.strip():
 				problems.append(f"select {node.name!r} does not say what it holds")
