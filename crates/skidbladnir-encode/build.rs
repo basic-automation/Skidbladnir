@@ -324,6 +324,12 @@ fn link_libjxl() {
 		}
 	} else {
 		let generator = libjxl_msvc_generator();
+		let cache = PathBuf::from(env::var("OUT_DIR").expect("cargo sets OUT_DIR")).join("build/CMakeCache.txt");
+		if generator.is_some() && fs::read_to_string(&cache).is_ok_and(|text| libjxl_release_flags(&text).is_err()) {
+			// A build directory configured before the generator was named keeps the flags
+			// cmake-rs put in its cache; configure it afresh.
+			fs::remove_file(&cache).unwrap_or_else(|error| panic!("remove the stale {}: {error}", cache.display()));
+		}
 		if let Some(generator) = generator {
 			// SAFETY: a build script's main thread, with no other thread running that reads
 			// the environment; the variable is removed again once libjxl is built.
@@ -333,7 +339,10 @@ fn link_libjxl() {
 		if generator.is_some() {
 			// SAFETY: as above.
 			unsafe { env::remove_var("CMAKE_GENERATOR") };
-			check_libjxl_release_flags();
+			let text = fs::read_to_string(&cache).unwrap_or_else(|error| panic!("read libjxl's {}: {error}", cache.display()));
+			if let Err(flags) = libjxl_release_flags(&text) {
+				panic!("libjxl's {flags} is not an optimised release build (see libjxl_msvc_generator in build.rs)");
+			}
 		}
 	}
 }
@@ -367,15 +376,17 @@ fn libjxl_msvc_generator() -> Option<&'static str> {
 	}
 }
 
-/// Fails the build if libjxl's `CMake` cache lacks the optimisation and `NDEBUG` of a
-/// release build, so a Windows build cannot again ship an unoptimised libjxl unnoticed.
-fn check_libjxl_release_flags() {
-	let cache = PathBuf::from(env::var("OUT_DIR").expect("cargo sets OUT_DIR")).join("build/CMakeCache.txt");
-	let text = fs::read_to_string(&cache).unwrap_or_else(|error| panic!("read libjxl's {}: {error}", cache.display()));
-	let build_type = text.lines().find_map(|line| line.strip_prefix("CMAKE_BUILD_TYPE:STRING=")).unwrap_or("Release").to_uppercase();
+/// Whether libjxl's `CMake` cache has the optimisation and `NDEBUG` of a release build, so a
+/// Windows build cannot again ship an unoptimised libjxl unnoticed: the offending cache
+/// entry if not.
+fn libjxl_release_flags(cache: &str) -> Result<(), String> {
+	let build_type = cache.lines().find_map(|line| line.strip_prefix("CMAKE_BUILD_TYPE:STRING=")).unwrap_or("Release").to_uppercase();
 	for language in ["C", "CXX"] {
 		let key = format!("CMAKE_{language}_FLAGS_{build_type}:STRING=");
-		let flags = text.lines().find_map(|line| line.strip_prefix(key.as_str())).unwrap_or_default();
-		assert!((flags.contains("/O2") || flags.contains("/O1")) && flags.contains("/DNDEBUG"), "libjxl's {key}{flags} is not an optimised release build (see libjxl_msvc_generator in build.rs)");
+		let flags = cache.lines().find_map(|line| line.strip_prefix(key.as_str())).unwrap_or_default();
+		if !((flags.contains("/O2") || flags.contains("/O1")) && flags.contains("/DNDEBUG")) {
+			return Err(format!("{key}{flags}"));
+		}
 	}
+	Ok(())
 }
