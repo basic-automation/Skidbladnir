@@ -477,12 +477,15 @@ class AxReader:
 				yield Node("Image", str(name), kind="image")
 
 	def focus(self, element):
-		if self.ax.AXUIElementSetAttributeValue(element, "AXFocused", True) != 0:
-			return False
+		error = self.ax.AXUIElementSetAttributeValue(element, "AXFocused", True)
 		for _ in range(20):
 			time.sleep(0.1)
-			if self.attribute(element, "AXFocused"):
+			if error == 0 and self.attribute(element, "AXFocused"):
 				return True
+		# Which of the two it was: the request refused (an AXError, or not settable), or taken
+		# and never reported.
+		settable = self.ax.AXUIElementIsAttributeSettable(element, "AXFocused", None)
+		print(f"     macOS: setting AXFocused returned AXError {error}; settable {settable}; AXFocused now {self.attribute(element, 'AXFocused')}")
 		return False
 
 

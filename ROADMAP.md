@@ -1741,10 +1741,12 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       (`accesskit_macos` 0.26.3 `setAccessibilityFocused:` → `Action::Focus`), but reports
       a node focused only while the host view has focus, which gpui gives it only while the
       window is key (`gpui-macos` 1.17.2 `window.rs`, `update_view_focus_state(is_active)`);
-      a bare binary started from CI is never the active app. The reader now activates it
-      (`NSRunningApplication.activateWithOptions_`) and says whether that worked; if macOS
-      refuses (macOS 14 restricts activation by another process), skip the focus check on
-      macOS with that reason. Make the step required once it is clean.
+      a bare binary started from CI is not the active app. But activating it
+      (`NSRunningApplication.activateWithOptions_`) worked (run 37261752235: active,
+      `AXFrontmost` and `AXMain` true) and still no field reported the focus, so that is not
+      it either. The reader now prints the AXError the request returns and whether
+      `AXFocused` is settable, to tell a refused request from one taken and never reported.
+      Make the step required once it is clean.
 - [ ] **On CI's Xvfb, some private AT-SPI sessions never get the window's controls**: the
       audit's and keyboard test's single retry absorbs it (every run of 2026-10-04, mostly
       the GPL leg; once on master, run 37180306916). The diagnosis printed since then (CI
@@ -1758,7 +1760,9 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       activation that lands mid-frame leaves the window empty until something draws again,
       which in a window nobody touches is never. Since 2026-10-04 the audit (and the keyboard
       test, through it) resizes the window by a pixel and back when it is listed but empty for
-      5 seconds, and says so in the log; whether that recovers a session is CI's to show.
+      5 seconds, and says so in the log. Its first occurrence in CI (run 37261752235, GPL
+      leg) was recovered by it at once, the state passing with no retry: one case, in
+      keeping with the mechanism, not proof of it.
       A person's first key or pointer move would draw the frame, so it matters little
       outside tests, but it is gpui's to fix: report it upstream once confirmed.
 - [x] The saving percentage is computed **once**, in Rust. `savingOf()` is gone from
