@@ -1735,9 +1735,12 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       2026-10-04; a reported-only CI step). The hosted runner's reader is trusted for
       accessibility. CI run 37258119163 read all 10 states: every control named, every
       select's value and slider range given, Convert disabled with nothing queued. The one
-      problem in each was a text field that, asked to take the focus, did not report it;
-      the reader now brings the app to the front first. Make the step required once it is
-      clean.
+      problem in each was a text field that, asked to take the focus (`AXFocused`), did not
+      report it. Bringing the app to the front first (`AXFrontmost`, `AXMain`) did not
+      change that (run 37259957909), so it is not activation: next, whether AccessKit's
+      macOS adapter passes a focus request on to these fields at all (Linux's `grab_focus`
+      and UI Automation's `SetFocus` both reach them), and whether a bundled `.app` behaves
+      differently from the bare binary. Make the step required once it is clean.
 - [ ] **On CI's Xvfb, some private AT-SPI sessions never get the window's controls**: the
       audit's and keyboard test's single retry absorbs it (every run of 2026-10-04, mostly
       the GPL leg; once on master, run 37180306916). The diagnosis printed since then (CI
