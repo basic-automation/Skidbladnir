@@ -10,7 +10,8 @@ window's accessibility tree (AT-SPI). It fails when a control that says it can t
 focus is never reached, when Tab stops moving (a trap), or when the focus lands on a
 nameless control. Shift+Tab must walk the same cycle backwards. In the WebP panel it also
 presses the keys inside controls: the arrows, Page Up, Home and End on a slider, the arrows
-in a radio group, Down, Enter and Escape in a select, Space on a check box.
+in a radio group, Down, Enter and Escape in a select, the queue's menu (Enter to open, the
+arrows, Home and End, Space on its check item, Escape back to Queue), Space on a check box.
 
 Each format's panel is checked with every disclosure open. It runs in the private AT-SPI
 session scripts/gpui-a11y-audit.py sets up, with a scratch configuration, and the window on
@@ -190,6 +191,50 @@ def inner_keys(reader, app, pid):
 			if chosen()[0]:
 				problems.append("Escape does not close the libwebp preset select")
 
+	# The queue's menu: Enter on Queue opens it on its first item; Down, Up, Home and End move
+	# the highlight; Space ticks "include subfolders" and leaves the menu open; Escape closes
+	# it and gives the focus back to Queue. Enter is never pressed on the first two items,
+	# which open the system's file dialogs.
+	def menu():
+		items = [node for node in reader.walk(app) if node.get_role() in (atspi.Role.MENU_ITEM, atspi.Role.CHECK_MENU_ITEM)]
+		lit = [node.get_name() for node in items if node.get_state_set().contains(atspi.StateType.SELECTED)]
+		return items, lit
+
+	queue = find(atspi.Role.PUSH_BUTTON, "Queue")
+	if queue is None or not focus(queue):
+		problems.append("the Queue button cannot be focused")
+	else:
+		press(pid, "Return")
+		items, lit = menu()
+		names = [node.get_name() for node in items]
+		if len(items) != 3:
+			problems.append(f"Enter on Queue opens {len(items)} menu items, not 3: {names}")
+		else:
+			if lit != names[:1]:
+				problems.append(f"the queue's menu opens with {lit} highlighted, not {names[:1]}")
+			for key, expected in (("Down", 1), ("Up", 0), ("End", 2), ("Home", 0), ("Down", 1), ("Down", 2), ("Down", 2)):
+				press(pid, key)
+				if menu()[1] != [names[expected]]:
+					problems.append(f"{key} in the queue's menu highlights {menu()[1]}, not {[names[expected]]}")
+			subfolders = lambda: next((node for node in menu()[0] if node.get_role() == atspi.Role.CHECK_MENU_ITEM), None)
+			# Space only with the check item highlighted: on another item it would open a
+			# file dialog.
+			if subfolders() is None or menu()[1] != [subfolders().get_name()]:
+				problems.append("the queue menu's check item is not highlighted; Space was not pressed")
+			else:
+				before = subfolders().get_state_set().contains(atspi.StateType.CHECKED)
+				press(pid, "space")
+				after = subfolders()
+				if after is None:
+					problems.append("Space on the queue menu's check item closes the menu")
+				elif after.get_state_set().contains(atspi.StateType.CHECKED) == before:
+					problems.append(f"Space does not toggle {after.get_name()!r} in the queue's menu")
+			press(pid, "Escape")
+			if menu()[0]:
+				problems.append("Escape does not close the queue's menu")
+			elif describe(focused(reader, app)) != describe(find(atspi.Role.PUSH_BUTTON, "Queue")):
+				problems.append(f"Escape leaves the focus on {describe(focused(reader, app))}, not on Queue")
+
 	lossless = find(atspi.Role.CHECK_BOX, "Lossless")
 	if lossless is None or not focus(lossless):
 		problems.append("the Lossless check box cannot be focused")
@@ -253,7 +298,7 @@ def run(args):
 							inner = inner_keys(reader, app, process.pid)
 							problems += inner
 							if not inner:
-								print("ok   webp: the arrows, Page Up, Home and End move the Quality slider; the arrows move a radio group's choice; a select opens, chooses and closes from the keyboard; Space toggles a check box")
+								print("ok   webp: the arrows, Page Up, Home and End move the Quality slider; the arrows move a radio group's choice; a select opens, chooses and closes from the keyboard; the queue's menu opens, moves, ticks and closes from the keyboard; Space toggles a check box")
 						if problems:
 							failures += len(problems)
 							print(f"FAIL {label}: {len(forward)} Tab stops for {len(stops)} controls and {len(groups)} radio groups; {len(problems)} problems:")
