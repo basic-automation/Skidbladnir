@@ -393,15 +393,33 @@ class AxReader:
 		while time.monotonic() < deadline:
 			for window in self.attribute(app, "AXWindows") or []:
 				if any(node.kind in ("control", "field") for node in self.nodes(window)):
-					# Started from a background process, the app is not active, and a field
-					# in a window that is not frontmost cannot hold the keyboard focus (CI's
-					# first macOS run: no field took it). Bring it forward, as a click would.
-					self.ax.AXUIElementSetAttributeValue(app, "AXFrontmost", True)
-					self.ax.AXUIElementSetAttributeValue(window, "AXMain", True)
-					time.sleep(0.5)
+					self.activate(pid, app, window)
 					return window
 			time.sleep(0.5)
 		return None
+
+	def activate(self, pid, app, window):
+		"""Make the app the active one, as a click on its window would. Started from a
+		background process it is not, and gpui tells AccessKit its view has the focus only
+		while the window is key (`gpui-macos` 1.17.2 `window.rs`, `update_view_focus_state`),
+		so no field could report the focus: CI's first macOS runs, where `AXFrontmost` alone
+		did not change that. Says whether it worked, since macOS 14 may refuse an activation
+		another process asks for."""
+		try:
+			from AppKit import NSApplicationActivateIgnoringOtherApps, NSRunningApplication
+
+			running = NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
+			if running is not None:
+				running.activateWithOptions_(NSApplicationActivateIgnoringOtherApps)
+		except ImportError:
+			running = None
+		self.ax.AXUIElementSetAttributeValue(app, "AXFrontmost", True)
+		self.ax.AXUIElementSetAttributeValue(window, "AXMain", True)
+		for _ in range(20):
+			if running is not None and running.isActive():
+				break
+			time.sleep(0.1)
+		print(f"     macOS: the app is {'active' if running is not None and running.isActive() else 'not active'} (AXFrontmost {self.attribute(app, 'AXFrontmost')}, window AXMain {self.attribute(window, 'AXMain')})")
 
 	def walk(self, element):
 		for child in self.attribute(element, "AXChildren") or []:

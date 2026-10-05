@@ -207,7 +207,7 @@ jobs:
         shell: bash
         run: |
           python3 -m venv "$RUNNER_TEMP/ax"
-          "$RUNNER_TEMP/ax/bin/pip" install --quiet pyobjc-framework-ApplicationServices
+          "$RUNNER_TEMP/ax/bin/pip" install --quiet pyobjc-framework-ApplicationServices pyobjc-framework-Cocoa
           "$RUNNER_TEMP/ax/bin/python" scripts/gpui-a11y-audit.py --app target/debug/skidbladnir
 
       - name: HEIC reference decoder for the GPL edition

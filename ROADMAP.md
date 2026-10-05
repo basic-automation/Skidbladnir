@@ -1737,10 +1737,14 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       select's value and slider range given, Convert disabled with nothing queued. The one
       problem in each was a text field that, asked to take the focus (`AXFocused`), did not
       report it. Bringing the app to the front first (`AXFrontmost`, `AXMain`) did not
-      change that (run 37259957909), so it is not activation: next, whether AccessKit's
-      macOS adapter passes a focus request on to these fields at all (Linux's `grab_focus`
-      and UI Automation's `SetFocus` both reach them), and whether a bundled `.app` behaves
-      differently from the bare binary. Make the step required once it is clean.
+      change that (run 37259957909). AccessKit's adapter does pass the request on
+      (`accesskit_macos` 0.26.3 `setAccessibilityFocused:` → `Action::Focus`), but reports
+      a node focused only while the host view has focus, which gpui gives it only while the
+      window is key (`gpui-macos` 1.17.2 `window.rs`, `update_view_focus_state(is_active)`);
+      a bare binary started from CI is never the active app. The reader now activates it
+      (`NSRunningApplication.activateWithOptions_`) and says whether that worked; if macOS
+      refuses (macOS 14 restricts activation by another process), skip the focus check on
+      macOS with that reason. Make the step required once it is clean.
 - [ ] **On CI's Xvfb, some private AT-SPI sessions never get the window's controls**: the
       audit's and keyboard test's single retry absorbs it (every run of 2026-10-04, mostly
       the GPL leg; once on master, run 37180306916). The diagnosis printed since then (CI
