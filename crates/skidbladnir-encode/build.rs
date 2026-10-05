@@ -323,6 +323,59 @@ fn link_libjxl() {
 			pkg_config::Config::new().atleast_version("0.11").probe(library).unwrap_or_else(|error| panic!("JPEG XL needs libjxl: install CMake to build it from source, or the system libjxl development files. {error}"));
 		}
 	} else {
+		let generator = libjxl_msvc_generator();
+		if let Some(generator) = generator {
+			// SAFETY: a build script's main thread, with no other thread running that reads
+			// the environment; the variable is removed again once libjxl is built.
+			unsafe { env::set_var("CMAKE_GENERATOR", generator) };
+		}
 		jpegxl_src::build();
+		if generator.is_some() {
+			// SAFETY: as above.
+			unsafe { env::remove_var("CMAKE_GENERATOR") };
+			check_libjxl_release_flags();
+		}
+	}
+}
+
+/// libjxl on MSVC, built by `jpegxl-src` (whose `cmake::Config` this script cannot reach),
+/// has the problem `msvc_release_build` fixes for the others: with no generator named,
+/// `cmake-rs` replaces `CMAKE_<LANG>_FLAGS_RELEASE`, dropping `/O2 /Ob2 /DNDEBUG`, and until
+/// 1.4.2 every Windows build shipped an unoptimised libjxl with its assertions on. With a
+/// generator named it leaves those flags to `CMake`, which reads `CMAKE_GENERATOR` from the
+/// environment, so name the Visual Studio generator it would have chosen. The runtime is
+/// still the static one: `jpegxl-src` sets `CMAKE_MSVC_RUNTIME_LIBRARY`, which libjxl's
+/// policies honour.
+///
+/// Release builds only (`CMake`'s Release and `RelWithDebInfo`): a debug build keeps
+/// `cmake-rs`'s own debug flags, since `CMake`'s add `/RTC1`, whose runtime checks C objects
+/// built with `jpegxl-src`'s `/Zl` would not find a library for. `None` when not MSVC, in a
+/// debug build, or when the caller chose a generator themselves.
+fn libjxl_msvc_generator() -> Option<&'static str> {
+	use cc::windows_registry::{VsVers, find_vs_version};
+	if env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok("msvc") || env::var("OPT_LEVEL").as_deref() == Ok("0") || env::var_os("CMAKE_GENERATOR").is_some() {
+		return None;
+	}
+	match find_vs_version() {
+		Ok(VsVers::Vs18) => Some("Visual Studio 18 2026"),
+		Ok(VsVers::Vs17) => Some("Visual Studio 17 2022"),
+		Ok(VsVers::Vs16) => Some("Visual Studio 16 2019"),
+		_ => {
+			println!("cargo:warning=no Visual Studio 2019 or later found: libjxl is built with cmake-rs's flags, unoptimised");
+			None
+		}
+	}
+}
+
+/// Fails the build if libjxl's `CMake` cache lacks the optimisation and `NDEBUG` of a
+/// release build, so a Windows build cannot again ship an unoptimised libjxl unnoticed.
+fn check_libjxl_release_flags() {
+	let cache = PathBuf::from(env::var("OUT_DIR").expect("cargo sets OUT_DIR")).join("build/CMakeCache.txt");
+	let text = fs::read_to_string(&cache).unwrap_or_else(|error| panic!("read libjxl's {}: {error}", cache.display()));
+	let build_type = text.lines().find_map(|line| line.strip_prefix("CMAKE_BUILD_TYPE:STRING=")).unwrap_or("Release").to_uppercase();
+	for language in ["C", "CXX"] {
+		let key = format!("CMAKE_{language}_FLAGS_{build_type}:STRING=");
+		let flags = text.lines().find_map(|line| line.strip_prefix(key.as_str())).unwrap_or_default();
+		assert!((flags.contains("/O2") || flags.contains("/O1")) && flags.contains("/DNDEBUG"), "libjxl's {key}{flags} is not an optimised release build (see libjxl_msvc_generator in build.rs)");
 	}
 }
