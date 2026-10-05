@@ -393,6 +393,12 @@ class AxReader:
 		while time.monotonic() < deadline:
 			for window in self.attribute(app, "AXWindows") or []:
 				if any(node.kind in ("control", "field") for node in self.nodes(window)):
+					# Started from a background process, the app is not active, and a field
+					# in a window that is not frontmost cannot hold the keyboard focus (CI's
+					# first macOS run: no field took it). Bring it forward, as a click would.
+					self.ax.AXUIElementSetAttributeValue(app, "AXFrontmost", True)
+					self.ax.AXUIElementSetAttributeValue(window, "AXMain", True)
+					time.sleep(0.5)
 					return window
 			time.sleep(0.5)
 		return None
