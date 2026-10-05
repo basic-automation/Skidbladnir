@@ -1589,7 +1589,11 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       `028fb5a2`, skcms `96d9171c`; the library build needs only those three (sjpeg, lcms,
       libpng, zlib, googletest, libjpeg-turbo and testdata are for tools, tests or
       alternatives). The reference `cjxl` builds (`scripts/build-reference-tools.sh`, the
-      Windows `cjxl` job) take their source from `jpegxl-src` too and move with it.
+      Windows `cjxl` job) take their source from `jpegxl-src` too and move with it. Top-level
+      submodules for the three would need no change to the checkouts, but libjxl cannot
+      simply be pointed at them: `third_party/skcms.cmake` hard-codes
+      `${PROJECT_SOURCE_DIR}/third_party/skcms`, so `build.rs` would assemble a source
+      overlay (libjxl with the three in its `third_party/`) in `OUT_DIR` and configure that.
 
 **Multi-image features the tools have, deferred by the owner (2026-09-28):**
 
@@ -1693,7 +1697,10 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       pressed only once the check item is highlighted, since the other two open file
       dialogs. Swapping Up and Down in the app fails 6 of those checks; the menu is
       highlight-only, so the focus never leaves Queue and the Escape check guards only
-      against losing it.
+      against losing it. Since 2026-10-04 the test reads the focus once it has moved and
+      held still, not at a fixed pause after the key: master's run 37180306916 lost a Tab
+      stop ("Tab never reaches 'App settings'"), which a read before the focus moved would
+      explain (not reproduced, so not proven).
 - [x] **A select's value did not reach AT-SPI** (found and fixed 2026-10-03 by the keyboard
       test): the trigger is a `ComboBox` with `aria_value`, but AccessKit 0.18.1 gives a
       combo box no Text interface (`supports_text_ranges` covers text inputs, labels and
@@ -1704,8 +1711,14 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       select says what it holds; without the option, 9 of its 10 states fail. On Windows
       the audit reads UI Automation's Value (or selected item) for the same check (since
       2026-10-04; passes in CI run 37253214479).
-- [ ] A drop onto the gpui window on Wayland (a native Wayland drag source) and on Windows
-      (OLE drag and drop) is still untested; the X11 test above is the only real drop.
+- [x] A real drop onto the gpui window on Windows (2026-10-04): `scripts/gpui-drop-test.py`
+      opens Explorer on a folder holding a PNG, presses the mouse on the file, moves onto the
+      window and lets go (OLE drag and drop from the real file manager), then invokes "Convert
+      1 file" through UI Automation and checks the WebP on disk. A step in the Windows window
+      job; passed on its first run (CI run 37255781900) and since.
+- [ ] A drop onto the gpui window on Wayland (a native Wayland drag source) is still
+      untested: a Wayland drag needs a real pointer press's serial, which a script cannot
+      fake the way it plays XDND on X11.
 - [ ] AccessKit's AT-SPI mapping reports every button enabled: accesskit_atspi_common
       0.18.1 (`node.rs`) adds `Enabled | Sensitive` unless the role is one of those
       `is_read_only_supported` lists (text inputs, check boxes, sliders and the like), so a
@@ -1714,6 +1727,27 @@ and its claim says "with Kvazaar"; multi-image features are queued below, not bu
       one.
 - [ ] The gpui window on macOS and Windows has not been opened by a person (CI builds and
       tests it; the Windows installer smoke runs the webview window).
+- [x] CI opens the gpui window on macOS (2026-10-04): the macOS rust job runs
+      `scripts/gpui-smoke.sh` against its debug build, converting a PNG to every format and
+      a raw YUV file (5 of 5 in CI run 37258119163). Before, only `release.yml`'s launch
+      screenshot had shown it there.
+- [ ] The gpui window's macOS accessibility tree, read by the audit (`AxReader`,
+      2026-10-04; a reported-only CI step). The hosted runner's reader is trusted for
+      accessibility. CI run 37258119163 read all 10 states: every control named, every
+      select's value and slider range given, Convert disabled with nothing queued. The one
+      problem in each was a text field that, asked to take the focus, did not report it;
+      the reader now brings the app to the front first. Make the step required once it is
+      clean.
+- [ ] **On CI's Xvfb, some private AT-SPI sessions never get the window's controls**: the
+      audit's and keyboard test's single retry absorbs it (every run of 2026-10-04, mostly
+      the GPL leg; once on master, run 37180306916). The diagnosis printed since then (CI
+      run 37258119163) shows the app registered on the AT-SPI desktop with its window as
+      its one child, but nothing inside the window for 90 seconds, so it is AccessKit's
+      tree for the window that does not arrive, not the app's connection. A registry
+      started 3 seconds late does not reproduce it on the dev host. Next: read how
+      `gpui-linux` 1.17.2 hands the window's first tree to AccessKit's X11 adapter (its
+      activation handler lives in gpui, not in the app), and have a failing session print
+      the window's first-frame probe (`SKID_PROBE`) to see whether the window drew at all.
 - [x] The saving percentage is computed **once**, in Rust. `savingOf()` is gone from
       `pages/index.vue`; the conversion report and the preview both carry the core's
       `saving_percent`, and the window only formats it (commit 235dbc0 — this box was left

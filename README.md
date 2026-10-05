@@ -132,7 +132,9 @@ byte against a reference.
   included, has a name and a role a screen reader can announce. CI checks both on every
   change: it tabs through each format's panel and checks every control is reached, and
   reads the window the way a screen reader does, over AT-SPI on Linux and UI Automation
-  on Windows (and with axe in the webview window).
+  on Windows (and with axe in the webview window). It also drops a file onto the window
+  as a file manager does, through X11 on Linux and by dragging it out of Explorer on
+  Windows, and converts it.
 - Your source image is never overwritten, and every write goes through a temporary file,
   so a failed conversion cannot damage a file that was already there. Before a run, the
   window warns when two queued files would be written to the same name (`photo.png` and
@@ -191,8 +193,9 @@ it. If **Smart App Control** is turned on (Windows Security > App & browser cont
 Windows blocks unsigned apps and offers no exception, so Skidbladnir cannot be installed
 on that PC until it is signed.
 
-**macOS (experimental).** The macOS builds are new: CI builds them and runs the test suite
-on macOS, but nobody has opened the app on a real Mac yet, so please
+**macOS (experimental).** The macOS builds are new: CI builds them, runs the test suite
+on macOS and converts to every format through the window there, but nobody has opened the
+app on a real Mac yet, so please
 [report problems](https://github.com/basic-automation/Skidbladnir/issues). Open the `.dmg`,
 drag Skidbladnir into Applications, and open it from there.
 
@@ -476,7 +479,8 @@ binary release is [v0.4.3](https://github.com/basic-automation/Skidbladnir/relea
 Known gaps:
 
 - **macOS is experimental.** The `.dmg`s (Apple silicon and Intel) are built by CI, and
-  the test suite runs on macOS, but nobody has yet opened the app on a real Mac. The
+  the test suite runs on macOS, where CI also opens the window and converts to every
+  format with it, but nobody has yet opened the app on a real Mac. The
   standard edition's Windows installer is installed and exercised by CI on every change,
   and the Linux app (both editions) is launched and driven by CI on every change, though
   not from its `.deb` or AppImage. Each release's `.deb` is installed by CI on Ubuntu 22.04
