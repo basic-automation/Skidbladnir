@@ -41,6 +41,10 @@ spec.loader.exec_module(audit)
 STATES = [state for state in audit.STATES if state[0] in ("webp", "avif", "jxl", "heic")]
 
 
+# The exit status of a state whose window never showed an accessibility tree.
+NO_TREE = 3
+
+
 class NotOurs(Exception):
 	"""The test's window does not have the keyboard: no key is sent."""
 
@@ -264,9 +268,9 @@ def run(args):
 					try:
 						app = reader.find(process.pid)
 						if app is None:
-							failures += 1
 							print(f"FAIL {label}: no accessibility tree")
-							continue
+							# Told apart from a real failure, so main() can try once more.
+							return NO_TREE
 						time.sleep(2)
 						atspi = reader.atspi
 						# What Tab must reach: every control that can take the focus, scrolled into
@@ -332,8 +336,18 @@ def main():
 	if not os.environ.get("DISPLAY") or shutil.which("xdotool") is None:
 		sys.exit("needs an X display (DISPLAY), or XWayland, and xdotool")
 	if "SKIDBLADNIR_A11Y_AUDIT_SESSION" not in os.environ:
-		# Each state in a private session of its own, as the audit runs them.
-		failed = sum(1 for index in range(len(STATES)) if audit.in_private_session(["--app", args.app, "--edition", args.edition, "--state", str(index)], __file__))
+		# Each state in a private session of its own, as the audit runs them, and, as there,
+		# once more in a new session when the window's tree never appeared (on CI's Xvfb,
+		# every other session in one run of 2026-10-04); a state whose keys ran is never
+		# retried.
+		failed = 0
+		for index in range(len(STATES)):
+			command = ["--app", args.app, "--edition", args.edition, "--state", str(index)]
+			status = audit.in_private_session(command, __file__)
+			if status == NO_TREE:
+				print(f"     {STATES[index][0]}: no tree read; once more in a new session")
+				status = audit.in_private_session(command, __file__)
+			failed += 1 if status else 0
 		print("all checks passed" if not failed else f"{failed} of {len(STATES)} states with problems")
 		return 1 if failed else 0
 	return run(args)
