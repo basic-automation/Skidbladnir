@@ -39,7 +39,7 @@ base64 = { workspace = true }
 libwebp-sys = { workspace = true }
 futures = "0.3"
 # Where Tauri keeps the app's config, so both windows share one.
-dirs = "6"
+dirs = "7"
 # The updater: the manifest and the download, and the signature check, as
 # tauri-plugin-updater makes it.
 ureq = "3"
