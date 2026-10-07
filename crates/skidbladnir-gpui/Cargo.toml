@@ -43,7 +43,7 @@ dirs = "6"
 # The updater: the manifest and the download, and the signature check, as
 # tauri-plugin-updater makes it.
 ureq = "3"
-minisign-verify = "0.2"
+minisign-verify = "0.3"
 
 # "Choose images…" with an Images filter, which gpui's own dialog cannot take: the desktop's
 # file-chooser portal on Linux, asked directly through the same `ashpd` gpui uses.
