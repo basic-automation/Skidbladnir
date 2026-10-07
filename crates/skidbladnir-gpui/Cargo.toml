@@ -52,7 +52,7 @@ ashpd = { version = "0.13", default-features = false, features = ["async-io", "f
 url = "2"
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
-rfd = "0.15"
+rfd = "0.16"
 
 # Installing an update: the macOS .app.tar.gz, and the Windows installer through ShellExecuteW.
 [target.'cfg(target_os = "macos")'.dependencies]
