@@ -7273,7 +7273,7 @@ checksum = "33f4fe9184a62d842c9ef383018f3306d8ba224fd9d836f56d7288308847c256"
 
 [[package]]
 name = "skidbladnir"
-version = "1.4.2"
+version = "1.4.3"
 dependencies = [
  "base64 0.23.1",
  "image",
@@ -7327,6 +7327,9 @@ dependencies = [
  "image",
  "libwebp-sys",
  "minisign-verify",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "raw-window-handle",
  "rfd 0.15.4",
  "serde",
  "serde_json",
