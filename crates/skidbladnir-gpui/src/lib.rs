@@ -14,6 +14,8 @@ mod controls;
 mod css_text;
 mod dialogs;
 mod fade;
+#[cfg(target_os = "macos")]
+mod macos;
 mod panels;
 mod shell;
 mod theme;
@@ -68,9 +70,15 @@ pub fn run(given: Options) {
 		}
 		cx.bind_keys([KeyBinding::new("tab", FocusNext, None), KeyBinding::new("shift-tab", FocusPrevious, None)]);
 		// tauri.conf.json: 1280×960, at least 720×560, centred, frameless and transparent.
+		// `app_owns_titlebar_drag`: on macOS the window draws its own title bar and moves itself
+		// (app.rs's `drag_window`). Left to AppKit, the top 28px — where the window's own
+		// minimise, maximise and close sit — is a native drag band whose clicks AppKit holds
+		// back while it waits to see whether they are a double-click.
 		let bounds = Bounds::centered(None, size(px(1280.), px(960.)), cx);
-		let opened = cx.open_window(WindowOptions { window_bounds: Some(WindowBounds::Windowed(bounds)), titlebar: None, window_min_size: Some(size(px(720.), px(560.))), window_background: if std::env::var_os("SKID_OPAQUE").is_some() { WindowBackgroundAppearance::Opaque } else { WindowBackgroundAppearance::Transparent }, window_decorations: Some(WindowDecorations::Client), app_id: Some("skidbladnir".to_owned()), ..Default::default() }, |window, cx| {
+		let opened = cx.open_window(WindowOptions { window_bounds: Some(WindowBounds::Windowed(bounds)), titlebar: None, app_owns_titlebar_drag: true, window_min_size: Some(size(px(720.), px(560.))), window_background: if std::env::var_os("SKID_OPAQUE").is_some() { WindowBackgroundAppearance::Opaque } else { WindowBackgroundAppearance::Transparent }, window_decorations: Some(WindowDecorations::Client), app_id: Some("skidbladnir".to_owned()), ..Default::default() }, |window, cx| {
 			window.set_window_title("Skidbladnir");
+			#[cfg(target_os = "macos")]
+			macos::make_resizable(window);
 			cx.new(|cx| app::Skid::new(window, cx))
 		});
 		match opened {

@@ -58,6 +58,10 @@ rfd = "0.15"
 [target.'cfg(target_os = "macos")'.dependencies]
 tar = "0.4"
 flate2 = { workspace = true }
+# Making the window resizable from its edges (src/macos.rs): gpui's own versions of these.
+raw-window-handle = "0.6"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSButton", "NSControl", "NSResponder", "NSView", "NSWindow"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

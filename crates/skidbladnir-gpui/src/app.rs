@@ -816,7 +816,7 @@ impl Skid {
 			)
 			.child(icon("iconamoon--settings-light", 24., c(FG)))
 			.when(settings_open, |gear| gear.child(self.settings_popover(window, cx)));
-		div().id("rail").role(gpui::Role::Navigation).aria_label("Main menu").relative().child(crate::controls::probe("nav")).flex().flex_none().flex_col().items_center().gap(px(8.)).px(px(16.)).pt(px(32.)).pb(px(16.)).on_mouse_down(MouseButton::Left, |event, window, _| drag_window(event, window)).child(img("skidbladnir-logo.svg").w(px(55.)).h(px(64.))).child(div().id("rail-items").on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).flex().flex_1().flex_col().items_start().gap(px(16.)).px(px(8.)).pt(px(32.)).pb(px(16.)).child(items).child(div().flex_1()).child(gear)).into_any_element()
+		div().id("rail").role(gpui::Role::Navigation).aria_label("Main menu").relative().child(crate::controls::probe("nav")).flex().flex_none().flex_col().items_center().gap(px(8.)).px(px(16.)).pt(px(32.)).pb(px(16.)).on_mouse_down(MouseButton::Left, |event, window, _| drag_window(event, window)).child(drag_area().child(img("skidbladnir-logo.svg").w(px(55.)).h(px(64.)))).child(div().id("rail-items").on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).flex().flex_1().flex_col().items_start().gap(px(16.)).px(px(8.)).pt(px(32.)).pb(px(16.)).child(items).child(drag_area().w_full().flex_1()).child(gear)).into_any_element()
 	}
 
 	fn settings_popover(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
@@ -940,7 +940,7 @@ impl Skid {
 			.w(px(272.))
 			.gap(px(12.))
 			.p(px(16.))
-			.child(div().id("collapse-row").flex().justify_end().on_mouse_down(MouseButton::Left, |event, window, _| drag_window(event, window)).child(link_button("collapse", "Collapse", 90.).press(
+			.child(div().id("collapse-row").flex().justify_end().on_mouse_down(MouseButton::Left, |event, window, _| drag_window(event, window)).child(drag_area().flex_1()).child(link_button("collapse", "Collapse", 90.).press(
 				self,
 				"collapse",
 				"Collapse the sidebar",
@@ -1097,7 +1097,7 @@ impl Skid {
 					cx,
 				))
 			})
-			.child(div().h(px(20.)).flex_1())
+			.child(drag_area().min_h(px(20.)).flex_1().self_stretch())
 			.child(div().flex().items_center().child(window_button("minimise", "material-symbols--minimize", false).press(self, "minimise", "Minimise", Ring::Neutral, 0., |_, window, _| window.minimize_window(), window, cx)).child(window_button("maximise", "mdi--maximize", false).press(self, "maximise", "Maximise", Ring::Neutral, 0., |_, window, _| window.zoom_window(), window, cx)).child(window_button("close", "material-symbols--close", true).press(self, "close", "Close", Ring::Neutral, 0., |_, _, cx| cx.quit(), window, cx)))
 			.into_any_element()
 	}
@@ -1603,7 +1603,16 @@ fn resize_edges(window: &Window) -> Vec<AnyElement> {
 	edges
 }
 
-/// `data-tauri-drag-region`: press to move the window, double-press to maximise it.
+/// Where Windows moves the window: an empty part of a drag region. gpui's
+/// `start_window_move` does nothing on Windows, which drags only what its hit test calls
+/// the caption — and it calls an area the caption over everything inside it, buttons too,
+/// so these hold no controls. Linux and macOS ignore it and use [`drag_window`].
+fn drag_area() -> gpui::Div {
+	div().window_control_area(gpui::WindowControlArea::Drag)
+}
+
+/// `data-tauri-drag-region`: press to move the window, double-press to maximise it (on
+/// Linux and macOS; Windows does both itself over a [`drag_area`]).
 fn drag_window(event: &MouseDownEvent, window: &mut Window) {
 	if event.click_count == 2 {
 		window.zoom_window();
