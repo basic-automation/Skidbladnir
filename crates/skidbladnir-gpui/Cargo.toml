@@ -39,11 +39,11 @@ base64 = { workspace = true }
 libwebp-sys = { workspace = true }
 futures = "0.3"
 # Where Tauri keeps the app's config, so both windows share one.
-dirs = "6"
+dirs = "7"
 # The updater: the manifest and the download, and the signature check, as
 # tauri-plugin-updater makes it.
 ureq = "3"
-minisign-verify = "0.2"
+minisign-verify = "0.3"
 
 # "Choose images…" with an Images filter, which gpui's own dialog cannot take: the desktop's
 # file-chooser portal on Linux, asked directly through the same `ashpd` gpui uses.
@@ -52,7 +52,7 @@ ashpd = { version = "0.13", default-features = false, features = ["async-io", "f
 url = "2"
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
-rfd = "0.15"
+rfd = "0.16"
 
 # Installing an update: the macOS .app.tar.gz, and the Windows installer through ShellExecuteW.
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -64,7 +64,7 @@ objc2 = "0.6"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSButton", "NSControl", "NSResponder", "NSView", "NSWindow"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [lints]
 workspace = true
