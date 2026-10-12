@@ -64,7 +64,7 @@ objc2 = "0.6"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSButton", "NSControl", "NSResponder", "NSView", "NSWindow"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [lints]
 workspace = true
