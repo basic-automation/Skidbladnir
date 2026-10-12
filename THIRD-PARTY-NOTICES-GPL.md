@@ -3858,7 +3858,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## Lucide (Iconify icons, @iconify-json/lucide 1.2.138)
+## Lucide (Iconify icons, @iconify-json/lucide 1.2.139)
 
 By the Lucide contributors, <https://github.com/lucide-icons/lucide>. Licence: ISC.
 
@@ -3908,7 +3908,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## Material Symbols (Iconify icons, @iconify-json/material-symbols 1.2.93)
+## Material Symbols (Iconify icons, @iconify-json/material-symbols 1.2.94)
 
 By Google, <https://github.com/google/material-design-icons>. The Apache License 2.0 text is in the Google Material Icons section above. Licence: Apache-2.0.
 
@@ -3943,7 +3943,7 @@ The MIT license applies to all non-font and non-icon files.
 
 Icons from the Subway Icon Set by Mariusz Ostrowski (<https://github.com/mariuszostrowski/subway>), as Iconify distributes them (its SVG clean-up applied, otherwise unchanged; only the icons the window shows are bundled), under the Creative Commons Attribution 4.0 International licence, <https://creativecommons.org/licenses/by/4.0/>. The licensor offers them as-is and as-available, with no warranties. Licence: CC-BY-4.0.
 
-## VSCode Icons (Iconify icons, @iconify-json/vscode-icons 1.2.83)
+## VSCode Icons (Iconify icons, @iconify-json/vscode-icons 1.2.84)
 
 By Roberto Huertas, <https://github.com/vscode-icons/vscode-icons>. Licence: MIT.
 
@@ -7826,7 +7826,7 @@ CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```
 ### ISC License
 
-Used by `libloading` 0.7.4, `libloading` 0.8.9.
+Used by `libloading` 0.8.9.
 
 ```text
 Copyright © 2015, Simonas Kazlauskas
@@ -11187,7 +11187,7 @@ DEALINGS IN THE SOFTWARE.
 ```
 ### MIT License
 
-Used by `dirs-sys` 0.4.1, `dirs-sys` 0.5.0, `dirs` 5.0.1, `dirs` 6.0.0, `dirs` 7.0.0.
+Used by `dirs-sys` 0.4.1, `dirs-sys` 0.5.0, `dirs` 5.0.1, `dirs` 7.0.0.
 
 ```text
 Copyright (c) 2018-2019 dirs-rs contributors
@@ -14408,7 +14408,7 @@ SOFTWARE.
 ```
 ### MIT License
 
-Used by `rfd` 0.15.4, `rfd` 0.16.0.
+Used by `rfd` 0.16.0.
 
 ```text
 MIT License
@@ -14775,7 +14775,7 @@ SOFTWARE.
 ```
 ### MIT License
 
-Used by `accesskit` 0.24.1, `accesskit_atspi_common` 0.18.1, `accesskit_consumer` 0.36.0, `accesskit_consumer` 0.37.0, `accesskit_consumer` 0.38.0, `accesskit_macos` 0.26.3, `accesskit_unix` 0.21.1, `accesskit_windows` 0.33.1, `atomig-macro` 0.4.0, `block2` 0.6.2, `block` 0.1.6, `brotli-decompressor` 5.0.3, `brotli-decompressor` 6.0.1, `chrono` 0.4.45, `dispatch2` 0.3.1, `dlopen2` 0.8.2, `dlopen2_derive` 0.4.3, `dpi` 0.1.2, `gpu-descriptor-types` 0.2.0, `gpu-descriptor` 0.3.2, `harfrust` 0.5.2, `leak` 0.1.2, `leaky-cow` 0.1.1, `libm` 0.2.16, `libwebp-sys` 0.14.4, `lyon` 1.0.19, `lyon_algorithms` 1.0.21, `lyon_geom` 1.0.19, `lyon_path` 1.0.19, `lyon_tessellation` 1.0.22, `mac-notification-sys` 0.6.15, `malloc_buf` 0.0.6, `minisign-verify` 0.2.5, `objc-sys` 0.3.5, `objc2-app-kit` 0.2.2, `objc2-app-kit` 0.3.2, `objc2-core-foundation` 0.3.2, `objc2-core-graphics` 0.3.2, `objc2-core-location` 0.3.2, `objc2-encode` 4.1.0, `objc2-exception-helper` 0.1.1, `objc2-foundation` 0.2.2, `objc2-foundation` 0.3.2, `objc2-metal` 0.3.2, `objc2-osa-kit` 0.3.2, `objc2-quartz-core` 0.3.2, `objc2-user-notifications` 0.3.2, `objc2-web-kit` 0.3.2, `objc2` 0.5.2, `objc2` 0.6.4, `pathfinder_geometry` 0.5.1, `pathfinder_simd` 0.5.6, `profiling-procmacros` 1.0.18, `profiling` 1.0.18, `pulp-wasm-simd-flag` 0.1.1, `seahash` 4.1.0, `svg_fmt` 0.4.5, `taffy` 0.13.0, `tauri-plugin-dialog` 2.8.1, `tauri-plugin-fs` 2.6.0, `tauri-plugin-updater` 2.13.1, `tauri-winrt-notification` 0.8.1, `webview2-com-macros` 0.8.1, `webview2-com-sys` 0.39.1, `webview2-com` 0.39.1, `windows-collections` 0.2.0, `windows-collections` 0.3.2, `windows-core` 0.61.2, `windows-core` 0.62.2, `windows-future` 0.2.1, `windows-future` 0.3.2, `windows-implement` 0.60.2, `windows-interface` 0.59.3, `windows-link` 0.1.3, `windows-link` 0.2.1, `windows-numerics` 0.2.0, `windows-numerics` 0.3.1, `windows-registry` 0.5.3, `windows-registry` 0.6.1, `windows-result` 0.3.4, `windows-result` 0.4.1, `windows-strings` 0.4.2, `windows-strings` 0.5.1, `windows-sys` 0.48.0, `windows-sys` 0.59.0, `windows-sys` 0.60.2, `windows-sys` 0.61.2, `windows-targets` 0.48.5, `windows-targets` 0.52.6, `windows-targets` 0.53.5, `windows-threading` 0.1.0, `windows-threading` 0.2.1, `windows-version` 0.1.7, `windows` 0.61.3, `windows` 0.62.2, `windows_x86_64_gnu` 0.48.5, `windows_x86_64_gnu` 0.52.6, `windows_x86_64_gnu` 0.53.1, `windows_x86_64_msvc` 0.48.5, `windows_x86_64_msvc` 0.52.6, `windows_x86_64_msvc` 0.53.1, `xim-ctext` 0.3.0, `xim-parser` 0.2.2, `zune-inflate` 0.2.54.
+Used by `accesskit` 0.24.1, `accesskit_atspi_common` 0.18.1, `accesskit_consumer` 0.36.0, `accesskit_consumer` 0.37.0, `accesskit_consumer` 0.38.0, `accesskit_macos` 0.26.3, `accesskit_unix` 0.21.1, `accesskit_windows` 0.33.1, `atomig-macro` 0.4.0, `block2` 0.6.2, `block` 0.1.6, `brotli-decompressor` 5.0.3, `brotli-decompressor` 6.0.1, `chrono` 0.4.45, `dispatch2` 0.3.1, `dlopen2` 0.8.2, `dlopen2_derive` 0.4.3, `dpi` 0.1.2, `gpu-descriptor-types` 0.2.0, `gpu-descriptor` 0.3.2, `harfrust` 0.5.2, `leak` 0.1.2, `leaky-cow` 0.1.1, `libm` 0.2.16, `libwebp-sys` 0.14.4, `lyon` 1.0.19, `lyon_algorithms` 1.0.21, `lyon_geom` 1.0.19, `lyon_path` 1.0.19, `lyon_tessellation` 1.0.22, `mac-notification-sys` 0.6.15, `malloc_buf` 0.0.6, `minisign-verify` 0.2.5, `minisign-verify` 0.3.0, `objc-sys` 0.3.5, `objc2-app-kit` 0.2.2, `objc2-app-kit` 0.3.2, `objc2-core-foundation` 0.3.2, `objc2-core-graphics` 0.3.2, `objc2-core-location` 0.3.2, `objc2-encode` 4.1.0, `objc2-exception-helper` 0.1.1, `objc2-foundation` 0.2.2, `objc2-foundation` 0.3.2, `objc2-metal` 0.3.2, `objc2-osa-kit` 0.3.2, `objc2-quartz-core` 0.3.2, `objc2-user-notifications` 0.3.2, `objc2-web-kit` 0.3.2, `objc2` 0.5.2, `objc2` 0.6.4, `pathfinder_geometry` 0.5.1, `pathfinder_simd` 0.5.6, `profiling-procmacros` 1.0.18, `profiling` 1.0.18, `pulp-wasm-simd-flag` 0.1.1, `seahash` 4.1.0, `svg_fmt` 0.4.5, `taffy` 0.13.0, `tauri-plugin-dialog` 2.8.1, `tauri-plugin-fs` 2.6.0, `tauri-plugin-updater` 2.13.1, `tauri-winrt-notification` 0.8.1, `webview2-com-macros` 0.8.1, `webview2-com-sys` 0.39.1, `webview2-com` 0.39.1, `windows-collections` 0.2.0, `windows-collections` 0.3.2, `windows-core` 0.61.2, `windows-core` 0.62.2, `windows-future` 0.2.1, `windows-future` 0.3.2, `windows-implement` 0.60.2, `windows-interface` 0.59.3, `windows-link` 0.1.3, `windows-link` 0.2.1, `windows-numerics` 0.2.0, `windows-numerics` 0.3.1, `windows-registry` 0.5.3, `windows-registry` 0.6.1, `windows-result` 0.3.4, `windows-result` 0.4.1, `windows-strings` 0.4.2, `windows-strings` 0.5.1, `windows-sys` 0.48.0, `windows-sys` 0.60.2, `windows-sys` 0.61.2, `windows-targets` 0.48.5, `windows-targets` 0.53.5, `windows-threading` 0.1.0, `windows-threading` 0.2.1, `windows-version` 0.1.7, `windows` 0.61.3, `windows` 0.62.2, `windows_x86_64_gnu` 0.48.5, `windows_x86_64_gnu` 0.53.1, `windows_x86_64_msvc` 0.48.5, `windows_x86_64_msvc` 0.53.1, `xim-ctext` 0.3.0, `xim-parser` 0.2.2, `zune-inflate` 0.2.54.
 
 ```text
 MIT License
