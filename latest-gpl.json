@@ -1,43 +1,43 @@
 {
-  "version": "1.4.3",
-  "pub_date": "2026-10-12T20:09:12Z",
+  "version": "1.4.4",
+  "pub_date": "2026-10-13T15:34:10Z",
   "platforms": {
     "linux-aarch64-appimage": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDFtUUhkOW1ZNExUdElBUHJtQUU4NFBJNVBTc0pPV1QyRS9nYXhXVE1wY01tUTZyT1QzeEVVNkRSNjRNekhpeU5UQnp6bmUrbVJoN1lSc2U1ZVNvQ0x3YktrOVgxWWdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxODMwNTU0CWZpbGU6U2tpZGJsYWRuaXJfMS40LjNfYWFyY2g2NC5BcHBJbWFnZQl2ZXJzaW9uOjEuNC4zCkFBb1MyWEdSZnAvTGphWkNhbW1zc3E3YVlBWDJ1QzN3NC9JQW4rVm5FMXNTYjBBN0lreStRekNxVGVqTm1DNTVoR2RDczQzRkZMY2RDNUE3QUxXSUJBPT0K",
-      "url": "https://github.com/basic-automation/Skidbladnir/releases/download/v1.4.3/Skidbladnir-GPL_1.4.3_aarch64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDFtUUhkOW1ZNERITWRJNkdmYlAvdEtvRlE5aEUxWVg4UkFzS2JsMmNHTmFRYVAvWFFtay9DaGNMQkVLSUx5RHZVU3FwbFNjKzVmaUlXWmd6YWZzbjZIMTUyQ1UrWGcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxOTA0MTc1CWZpbGU6U2tpZGJsYWRuaXJfMS40LjRfYWFyY2g2NC5BcHBJbWFnZQl2ZXJzaW9uOjEuNC40CkQ0MTZZc3hWYi8rRHRuZ3Z1UlV3d0lzS1Vwb0J2aEtWUmVKdEF5bktaU1pZTVZOVU1Jd0FZeTRiREUrZFJ4WlRRN2RKdTBSUElJd21WVGdvdVJQTERnPT0K",
+      "url": "https://github.com/basic-automation/Skidbladnir/releases/download/v1.4.4/Skidbladnir-GPL_1.4.4_aarch64.AppImage"
     },
     "darwin-aarch64-app": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDFtUUhkOW1ZNEFvQUdxSGI1RDFxaUJYTEFydU5jMERXUzVmTzN2WWtHcG1UaFhsWE81Y1BHVTRsUWRRbXdrVHdXL0VLVW0wWDZZY2lIQ1Fka2hXcVVMeEVTZTd6RXdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxODMwMTcyCWZpbGU6U2tpZGJsYWRuaXIuYXBwLnRhci5negl2ZXJzaW9uOjEuNC4zCjFCbURjQ0lSdGN5VFU1a1JRbHdEbkJYL29ON1VCUTdtOUFKelphN3dhc2c0a0RSeTJUVEZFNmhQWitpdjZDQk1yaTBBWmJyWHh5OVJHUzczNlZSV0NRPT0K",
-      "url": "https://github.com/basic-automation/Skidbladnir/releases/download/v1.4.3/Skidbladnir-GPL_1.4.3_aarch64.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDFtUUhkOW1ZNEVjdVNzNzFCQ3dnaDlDM1cxN3I4cWVxeStTWXp6SFFoNjE1QVZkK3lTY2x6elo3allUVjFHRVE5ZzFqeHNXWjF5bmxZMGUyYUJlNHduZVZTTVdjR1FNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxOTAzMjE1CWZpbGU6U2tpZGJsYWRuaXIuYXBwLnRhci5negl2ZXJzaW9uOjEuNC40CkI4bEc5MldJdEFscUxVNjVQdW81Z3IwMFV3Q3JhazVoRjRRWFdiM2FMWUN0ZlUvWHdGQTF6Z3dWa0twOWdxVG1oZEF0VDJYb3k0WHIzbFVPN0lxYkFnPT0K",
+      "url": "https://github.com/basic-automation/Skidbladnir/releases/download/v1.4.4/Skidbladnir-GPL_1.4.4_aarch64.app.tar.gz"
     },
     "linux-aarch64-rpm": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDFtUUhkOW1ZNE5YTjU0dGhjUXRTV2Q3aVcyUjNVcWhjUS92OUI2ZHJrL2dVWU1kMi9DRG9uT010MXRlQjl0Q09YZW9CUDVRRzgvQlhBU1k0clpzUS9LM0NkQXpVT1FZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxODMwNDMzCWZpbGU6U2tpZGJsYWRuaXItMS40LjMtMS5hYXJjaDY0LnJwbQl2ZXJzaW9uOjEuNC4zCnZxaDNKVExzSmxkeTVwQkJ4MlhpcnZGQmMwa3JrT1liQnVHVnE0bGhMa3RkTVJKMS9GRFNGZEZ3TXd3VmlOc0xhdWRhUVJHckV6citod1BMZ0V6TEJRPT0K",
-      "url": "https://github.com/basic-automation/Skidbladnir/releases/download/v1.4.3/Skidbladnir-GPL_1.4.3_aarch64.rpm"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDFtUUhkOW1ZNElKN0pNRTRRclNqN2crMXBvREszWkt0dnVrL0kxYzZzRUVjRDJkWDd2a1lnMEJhbENLOHk2QU92emNSaERaNXEzcGkvTkluVG56T2FteVdvcjhFbHc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxOTA0MDU1CWZpbGU6U2tpZGJsYWRuaXItMS40LjQtMS5hYXJjaDY0LnJwbQl2ZXJzaW9uOjEuNC40CnVmRmU5aXBsWUhNR3lxM3BmcDRqSXdrcWpDcHBUM0pJeVRva0NML0lMT2VNUlNUN05Gc1dGNnpLYkFPeUNSejJJMWlvNUg1VVA1Q1hyMzZWSTVFeURnPT0K",
+      "url": "https://github.com/basic-automation/Skidbladnir/releases/download/v1.4.4/Skidbladnir-GPL_1.4.4_aarch64.rpm"
     },
     "linux-x86_64-appimage": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDFtUUhkOW1ZNExrTHByd2pMeVcrakh1c0NBUXhDUzN1WGQwa212UEMxUmhMS1lzVWNlMmp2Q2lTTHFMZk5EMDI1dUY5S3ZMRzZRWWV3RXE2dXBwZGRQRzZuZGhSWUFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxODMwNzYxCWZpbGU6U2tpZGJsYWRuaXJfMS40LjNfYW1kNjQuQXBwSW1hZ2UJdmVyc2lvbjoxLjQuMwpkY1dZb1V4NVpScmRmUmR2NFd1N3plVVpMQXNXdnAyRGJkak8zS1JybVZ0bmdFQVpZQnh4L2taaUJ2QVZxSnhpU0FqR1dCcytVRHJkSTlFZHZPK3ZEZz09Cg==",
-      "url": "https://github.com/basic-automation/Skidbladnir/releases/download/v1.4.3/Skidbladnir-GPL_1.4.3_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDFtUUhkOW1ZNFBEVDJUYW5mL2NYNVozdnJYUGRHQUxYZTZsc0cwa29tM0prcjYxdG4rV0NSN2xiNC9UWVRnZUN6c1ZGeHBla0ZWaGFKc2l0ZWt2SmlRcVZuVmZCeEFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxOTA0ODE5CWZpbGU6U2tpZGJsYWRuaXJfMS40LjRfYW1kNjQuQXBwSW1hZ2UJdmVyc2lvbjoxLjQuNApqNFBRS2FFVUJ6OWdJa0lvZUFxYUNWTGwzaFE2aGhPKzY4blZyYTdpUXpTd0JoVEp3NGZGYWQyN3lNZldtTUhld3BiODZsY2t4aVJ4b0J4TEVhUVpDdz09Cg==",
+      "url": "https://github.com/basic-automation/Skidbladnir/releases/download/v1.4.4/Skidbladnir-GPL_1.4.4_amd64.AppImage"
     },
     "linux-x86_64-deb": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDFtUUhkOW1ZNEFQQ29MZlg0cm01Y3lQSlVyZDhiZ21YNklENXNBcUc0MzFHbnRJVERBZjlISjIzMmJaSGpoM3Jic3cvc3lSbVJOZXNIWmVuc0t1MUQxSkd6WU5qUkFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxODMwNjE0CWZpbGU6U2tpZGJsYWRuaXJfMS40LjNfYW1kNjQuZGViCXZlcnNpb246MS40LjMKVy82YmlRTllIamNzdS9VYWRDWVNjcG85bksvYkVtZi9NRHJMQmVDb1JBaExnc2N1d28xY3Q1YkNtdElCRTgzOGNnR2Y0aDJhaUF3Ukk5dUJ1SjBkRHc9PQo=",
-      "url": "https://github.com/basic-automation/Skidbladnir/releases/download/v1.4.3/Skidbladnir-GPL_1.4.3_amd64.deb"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDFtUUhkOW1ZNFBDOXhEZXRUdzZlcWszaGp2RHVHWk5WaGQzazBNK2tSb2tkdnJSSjZkZi9DYU9aYWFBUVBkWXErVyt4N3JIWWZtQzVjRTJ4Mlk1SEcwQ00zV1Z5TGdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxOTA0NjUxCWZpbGU6U2tpZGJsYWRuaXJfMS40LjRfYW1kNjQuZGViCXZlcnNpb246MS40LjQKNjR4OXc3RHJmdkZ1QlVKaGlsMWVsT3F1K0YySmVySHFUWlQwVmhzQXpjU0RIOVFQakh5eG0ybUdjMVVFeitLTWZLTWYzcDRGcUNmUEtYYWlyeXR5Q0E9PQo=",
+      "url": "https://github.com/basic-automation/Skidbladnir/releases/download/v1.4.4/Skidbladnir-GPL_1.4.4_amd64.deb"
     },
     "linux-aarch64-deb": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDFtUUhkOW1ZNERXb1V3Y3RmNExWSjhTK1RtT1NRV2VqY1RadmduTGhjdVkrNU1HQnBBL2FpZmZsaW1JcmJWOWhxRkZ3TTJabTZsZTdHMnBSZmM1N0x6VnQvR2xXWUFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxODMwNDMzCWZpbGU6U2tpZGJsYWRuaXJfMS40LjNfYXJtNjQuZGViCXZlcnNpb246MS40LjMKMTErWEwraGN1MjJYK25XWkx4VHdyclpFbmZhV0E3cmo4YTFvVHBHUHBmdUt2MW9YSFJ6SGlyQTZiem1BbUhUVEdhV05uODgxeStFTmRMZDJHSlYwQ2c9PQo=",
-      "url": "https://github.com/basic-automation/Skidbladnir/releases/download/v1.4.3/Skidbladnir-GPL_1.4.3_arm64.deb"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDFtUUhkOW1ZNEFSNi9lamlrM003dFF5WmtIclRQOUlXMzJTVDVrcWxvb1pDUTRaZHhJUVcrVVBHaUJ4eGwwK2FZV0c2MDdCWi84cWxtTlFkN3N4OTFNbTljNzNabndjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxOTA0MDU1CWZpbGU6U2tpZGJsYWRuaXJfMS40LjRfYXJtNjQuZGViCXZlcnNpb246MS40LjQKS1VZTW80eEdxWS9Ub1VUU1h3VGlEOUFwdUhDeWhBNFlyNnc4TUE4bkdsNXBMT1RnbkJTQnNEUUJ5dnhBQUQ3RmR3WEcwZkxuM3lseHVneld5c1RXQ3c9PQo=",
+      "url": "https://github.com/basic-automation/Skidbladnir/releases/download/v1.4.4/Skidbladnir-GPL_1.4.4_arm64.deb"
     },
     "windows-x86_64-nsis": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDFtUUhkOW1ZNERQNzJUamN1TnI4bGZiNmVWWW5oNWVhV1Zqb0dYNmxBSHFlVW0wQzA4M2JHV2ordFR1MUZKRm1UL3JDdzZoVGE1T2FWU1QzSUhhOVdxaDlLUzNrd0FBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxODMxNTEzCWZpbGU6U2tpZGJsYWRuaXJfMS40LjNfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjEuNC4zCnd2VnZabDVoMnB1U0tISGE2cHVnaDJtQU9FbGRWNHpXTmZBbFR2aWdTcm9ST2tSaXRvOUx6RTd1cFBqdFR2MTBNTithRXo4YmlkZC9VRSt5dVdGL0NRPT0K",
-      "url": "https://github.com/basic-automation/Skidbladnir/releases/download/v1.4.3/Skidbladnir-GPL_1.4.3_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDFtUUhkOW1ZNElSV0ZRaytPNkZHcmI0d3lKZ2xzellicEVlUG12OFFHTVNwai9VeFloN01tN2V4UC9yOUY4Z3d3Zi9RY1cyakNmSHJuZ2Ezd3Y1UnJQUktKSVZaSVFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxOTA1MDcxCWZpbGU6U2tpZGJsYWRuaXJfMS40LjRfeDY0LXNldHVwLmV4ZQl2ZXJzaW9uOjEuNC40Cmx6L29pQ0dPSFNHYjJ6dUM2Vy9tTlZtNnJ3S0h6OVRqdDBQQ29obWhxaFlhbTl6Unp1RVkzSkhGQkZVcUZWRTcwL0lrWjBFWXVJK05XbDkwWlorZUFnPT0K",
+      "url": "https://github.com/basic-automation/Skidbladnir/releases/download/v1.4.4/Skidbladnir-GPL_1.4.4_x64-setup.exe"
     },
     "darwin-x86_64-app": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDFtUUhkOW1ZNE8yTjBUR3Zoc0VQY0lXYXRmOWYzREt1a0FOaXFkditoWDUzaS9uYy9ocjJVWU9OanB2OXVwN2QxQ242RWlORW5tMHhBckdDTGdnUmI4L3NEOHEzekFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxODM1MzYzCWZpbGU6U2tpZGJsYWRuaXIuYXBwLnRhci5negl2ZXJzaW9uOjEuNC4zClNYbzM4UElNN3lYU3JERm5zNXB5MDRLTUFwL1liZXdJSHFRR0pyOXprSm15SUQvVHpNbGh6MGNIdERMRlJVeXQ1Z2NlOGFEb3RQSGVDekxmR1BTbEJ3PT0K",
-      "url": "https://github.com/basic-automation/Skidbladnir/releases/download/v1.4.3/Skidbladnir-GPL_1.4.3_x64.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDFtUUhkOW1ZNE9kS1Vjcm1xYmFGY0M5RjdxdGlGbnRPVEpQcGU4MHNZYjlQV2JPbXZxSDR1MkJsWjJnMytsMGlyeWsxNjUxbHdXRmlJZ3ZoeGNFWnNZaDlIN0xWQlFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxOTA1MjIwCWZpbGU6U2tpZGJsYWRuaXIuYXBwLnRhci5negl2ZXJzaW9uOjEuNC40ClVOWWVxWUxyVmtCVUt3Z1VuVk9Ub1h3QklpQmI0MWVyTmIyK1pSbEVWbmc2T3lmbUU5b2M4M1Y5TEJqTURqVWNyNlYwcXl3YjdIMWlUcm5Zamw4eURRPT0K",
+      "url": "https://github.com/basic-automation/Skidbladnir/releases/download/v1.4.4/Skidbladnir-GPL_1.4.4_x64.app.tar.gz"
     },
     "linux-x86_64-rpm": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDFtUUhkOW1ZNEJXNnMvaTBFSC9yM1lSUUplUU5td2RnbU5yR0ExUWNRakdMMmxiMHlROHpqbjZ6OHdYaVR6c1lKN0hoYzhvZ1RXZFNWNG95OFpwdG5zK1k0bGR1cXdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxODMwNjE0CWZpbGU6U2tpZGJsYWRuaXItMS40LjMtMS54ODZfNjQucnBtCXZlcnNpb246MS40LjMKVFlPWlp1bVl0SkFNYzZLNGNoWklYTTZSSEJMTVJaOUZGWUc3R1FoMW02US9mWUtwYlIxQU5IeExZZ0ZVOG1aMjVLNkkxQzFjVjhEbXVha0p0L1QwRHc9PQo=",
-      "url": "https://github.com/basic-automation/Skidbladnir/releases/download/v1.4.3/Skidbladnir-GPL_1.4.3_x86_64.rpm"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDFtUUhkOW1ZNERwUmNpTjhqT1IyT1kzaXc5QUFlMXdJMkVzTmNzbG13SjU2eHVaWU1mYldQTHZhUWxIUDIxWTFFSDgxeTlzeVlnTmVNMVRZWWVRcGZGc1A4SmRXWHdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxOTA0NjUxCWZpbGU6U2tpZGJsYWRuaXItMS40LjQtMS54ODZfNjQucnBtCXZlcnNpb246MS40LjQKc2dBZ1ZGUDNVOGU2YjExZUtrZHliMUVpTkNpU1dGeWdUMEhnRTczWDkxTW52RG5zaWZQd0hJZmxGYUdkZG9IaVp2dVVGR0U1b2dySDNhMU1BQThtQVE9PQo=",
+      "url": "https://github.com/basic-automation/Skidbladnir/releases/download/v1.4.4/Skidbladnir-GPL_1.4.4_x86_64.rpm"
     }
   },
-  "notes": "A patch release for the window, prompted by a user report that it could not be moved.\n\n## Fixed\n- **Windows: the window can be moved.** Drag it by the empty part of the title bar, the logo or the empty space in the sidebar; double-click there to maximise. gpui's window-move call does nothing on Windows, so the window now marks those areas as its caption instead.\n- **macOS: the window resizes from its edges.** A gpui window without a system title bar wasn't resizable. The greyed-out traffic lights over the sidebar are gone as well; Skidbladnir draws its own window buttons.\n- **macOS: the window buttons respond at once.** The top 28px was a native drag strip, and AppKit held back clicks there while it checked for a double-click. The app now handles that strip itself.\n\nInstallers for Windows, macOS (Apple Silicon and Intel) and Linux are attached by the release workflow; existing installs update themselves.\n\nNote: merged before PR CI finished on Windows and macOS (#80); the release workflow's builds are the first full builds of this code on those platforms."
+  "notes": "A new app icon.\n\n## Changed\n- **The app icon is the Viking ship from the hero illustration**, replacing the green thumbs-up the app has carried since its 2019 Electron days. It shows in the Windows taskbar and Start menu, the macOS Dock and Finder, Linux launchers, and on every installer. The sidebar logo inside the app is unchanged.\n\nInstallers for Windows, macOS (Apple Silicon and Intel) and Linux are attached by the release workflow; existing installs update themselves. On some desktops the old icon stays cached until you log out or restart."
 }
