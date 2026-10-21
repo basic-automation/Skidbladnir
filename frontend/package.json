@@ -25,13 +25,13 @@
     "@iconify-json/vscode-icons": "^1.2.84",
     "@tauri-apps/cli": "^2.12.0",
     "axe-core": "^4.13.0",
-    "nuxt": "^4.0.0",
+    "nuxt": "^4.6.2",
     "tailwindcss": "^4.1.0",
     "vue": "^3.5.0",
     "vue-router": "^5.3.1"
   },
   "dependencies": {
-    "@nuxt/ui": "^4.11.2",
+    "@nuxt/ui": "^4.12.0",
     "@tauri-apps/api": "^2.12.0",
     "@tauri-apps/plugin-dialog": "^2.0.0"
   }
