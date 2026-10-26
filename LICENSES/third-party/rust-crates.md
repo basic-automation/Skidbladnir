@@ -2189,7 +2189,7 @@ express Statement of Purpose.
 ```
 ### Community Data License Agreement Permissive 2.0
 
-Used by `webpki-roots` 1.0.9.
+Used by `webpki-roots` 1.0.11.
 
 ```text
 # Community Data License Agreement - Permissive - Version 2.0
@@ -2800,7 +2800,7 @@ THIS SOFTWARE.
 ```
 ### ISC License
 
-Used by `rustls-webpki` 0.103.15.
+Used by `rustls-webpki` 0.103.16.
 
 ```text
 Except as otherwise noted, this project is licensed under the following
@@ -4962,7 +4962,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 ### MIT License
 
-Used by `hyper-rustls` 0.27.10, `rustls-native-certs` 0.8.4, `rustls` 0.23.45.
+Used by `hyper-rustls` 0.27.10, `rustls-native-certs` 0.8.4, `rustls` 0.23.46.
 
 ```text
 Copyright (c) 2016 Joseph Birr-Pixton <jpixton@gmail.com>
@@ -9730,7 +9730,7 @@ SOFTWARE.
 ```
 ### MIT License
 
-Used by `accesskit` 0.24.1, `accesskit_atspi_common` 0.18.1, `accesskit_consumer` 0.36.0, `accesskit_consumer` 0.37.0, `accesskit_consumer` 0.38.0, `accesskit_macos` 0.26.3, `accesskit_unix` 0.21.1, `accesskit_windows` 0.33.1, `atomig-macro` 0.4.0, `block2` 0.6.2, `block` 0.1.6, `brotli-decompressor` 5.0.3, `brotli-decompressor` 6.0.1, `chrono` 0.4.45, `dispatch2` 0.3.1, `dlopen2` 0.8.2, `dlopen2_derive` 0.4.3, `dpi` 0.1.2, `gpu-descriptor-types` 0.2.0, `gpu-descriptor` 0.3.2, `harfrust` 0.5.2, `leak` 0.1.2, `leaky-cow` 0.1.1, `libm` 0.2.16, `libwebp-sys` 0.14.4, `lyon` 1.0.19, `lyon_algorithms` 1.0.21, `lyon_geom` 1.0.19, `lyon_path` 1.0.19, `lyon_tessellation` 1.0.22, `mac-notification-sys` 0.6.15, `malloc_buf` 0.0.6, `minisign-verify` 0.2.5, `minisign-verify` 0.3.0, `objc-sys` 0.3.5, `objc2-app-kit` 0.2.2, `objc2-app-kit` 0.3.2, `objc2-core-foundation` 0.3.2, `objc2-core-graphics` 0.3.2, `objc2-core-location` 0.3.2, `objc2-encode` 4.1.0, `objc2-exception-helper` 0.1.1, `objc2-foundation` 0.2.2, `objc2-foundation` 0.3.2, `objc2-metal` 0.3.2, `objc2-osa-kit` 0.3.2, `objc2-quartz-core` 0.3.2, `objc2-user-notifications` 0.3.2, `objc2-web-kit` 0.3.2, `objc2` 0.5.2, `objc2` 0.6.4, `pathfinder_geometry` 0.5.1, `pathfinder_simd` 0.5.6, `profiling-procmacros` 1.0.18, `profiling` 1.0.18, `pulp-wasm-simd-flag` 0.1.1, `seahash` 4.1.0, `svg_fmt` 0.4.5, `taffy` 0.13.0, `tauri-plugin-dialog` 2.8.1, `tauri-plugin-fs` 2.6.0, `tauri-plugin-updater` 2.13.1, `tauri-winrt-notification` 0.8.1, `webview2-com-macros` 0.8.1, `webview2-com-sys` 0.39.1, `webview2-com` 0.39.1, `windows-collections` 0.2.0, `windows-collections` 0.3.2, `windows-core` 0.61.2, `windows-core` 0.62.2, `windows-future` 0.2.1, `windows-future` 0.3.2, `windows-implement` 0.60.2, `windows-interface` 0.59.3, `windows-link` 0.1.3, `windows-link` 0.2.1, `windows-numerics` 0.2.0, `windows-numerics` 0.3.1, `windows-registry` 0.5.3, `windows-registry` 0.6.1, `windows-result` 0.3.4, `windows-result` 0.4.1, `windows-strings` 0.4.2, `windows-strings` 0.5.1, `windows-sys` 0.48.0, `windows-sys` 0.60.2, `windows-sys` 0.61.2, `windows-targets` 0.48.5, `windows-targets` 0.53.5, `windows-threading` 0.1.0, `windows-threading` 0.2.1, `windows-version` 0.1.7, `windows` 0.61.3, `windows` 0.62.2, `windows_x86_64_gnu` 0.48.5, `windows_x86_64_gnu` 0.53.1, `windows_x86_64_msvc` 0.48.5, `windows_x86_64_msvc` 0.53.1, `xim-ctext` 0.3.0, `xim-parser` 0.2.2, `zune-inflate` 0.2.54.
+Used by `accesskit` 0.24.1, `accesskit_atspi_common` 0.18.1, `accesskit_consumer` 0.36.0, `accesskit_consumer` 0.37.0, `accesskit_consumer` 0.38.0, `accesskit_macos` 0.26.3, `accesskit_unix` 0.21.1, `accesskit_windows` 0.33.1, `atomig-macro` 0.4.0, `block2` 0.6.2, `block` 0.1.6, `brotli-decompressor` 5.0.3, `brotli-decompressor` 6.0.1, `chrono` 0.4.45, `dispatch2` 0.3.1, `dlopen2` 0.8.2, `dlopen2_derive` 0.4.3, `dpi` 0.1.2, `gpu-descriptor-types` 0.2.0, `gpu-descriptor` 0.3.2, `harfrust` 0.5.2, `leak` 0.1.2, `leaky-cow` 0.1.1, `libm` 0.2.16, `libwebp-sys` 0.14.4, `lyon` 1.0.19, `lyon_algorithms` 1.0.21, `lyon_geom` 1.0.19, `lyon_path` 1.0.19, `lyon_tessellation` 1.0.22, `mac-notification-sys` 0.6.15, `malloc_buf` 0.0.6, `minisign-verify` 0.2.5, `minisign-verify` 0.3.0, `objc-sys` 0.3.5, `objc2-app-kit` 0.2.2, `objc2-app-kit` 0.3.2, `objc2-core-foundation` 0.3.2, `objc2-core-graphics` 0.3.2, `objc2-core-location` 0.3.2, `objc2-encode` 4.1.0, `objc2-exception-helper` 0.1.1, `objc2-foundation` 0.2.2, `objc2-foundation` 0.3.2, `objc2-metal` 0.3.2, `objc2-osa-kit` 0.3.2, `objc2-quartz-core` 0.3.2, `objc2-user-notifications` 0.3.2, `objc2-web-kit` 0.3.2, `objc2` 0.5.2, `objc2` 0.6.4, `pathfinder_geometry` 0.5.1, `pathfinder_simd` 0.5.6, `profiling-procmacros` 1.0.18, `profiling` 1.0.18, `pulp-wasm-simd-flag` 0.1.1, `seahash` 4.1.0, `svg_fmt` 0.4.5, `taffy` 0.13.0, `tauri-plugin-dialog` 2.8.1, `tauri-plugin-fs` 2.6.0, `tauri-plugin-updater` 2.13.1, `tauri-winrt-notification` 0.8.1, `webview2-com-macros` 0.8.1, `webview2-com-sys` 0.39.1, `webview2-com` 0.39.1, `windows-collections` 0.2.0, `windows-collections` 0.3.2, `windows-core` 0.57.0, `windows-core` 0.61.2, `windows-core` 0.62.2, `windows-future` 0.2.1, `windows-future` 0.3.2, `windows-implement` 0.57.0, `windows-implement` 0.60.2, `windows-interface` 0.57.0, `windows-interface` 0.59.3, `windows-link` 0.1.3, `windows-link` 0.2.1, `windows-numerics` 0.2.0, `windows-numerics` 0.3.1, `windows-registry` 0.5.3, `windows-result` 0.1.2, `windows-result` 0.3.4, `windows-result` 0.4.1, `windows-strings` 0.4.2, `windows-strings` 0.5.1, `windows-sys` 0.48.0, `windows-sys` 0.60.2, `windows-sys` 0.61.2, `windows-targets` 0.48.5, `windows-targets` 0.52.6, `windows-targets` 0.53.5, `windows-threading` 0.1.0, `windows-threading` 0.2.1, `windows-version` 0.1.7, `windows` 0.57.0, `windows` 0.61.3, `windows` 0.62.2, `windows_x86_64_gnu` 0.48.5, `windows_x86_64_gnu` 0.52.6, `windows_x86_64_gnu` 0.53.1, `windows_x86_64_msvc` 0.48.5, `windows_x86_64_msvc` 0.52.6, `windows_x86_64_msvc` 0.53.1, `xim-ctext` 0.3.0, `xim-parser` 0.2.2, `zune-inflate` 0.2.54.
 
 ```text
 MIT License

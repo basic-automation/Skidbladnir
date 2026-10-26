@@ -30,7 +30,17 @@ version = 2
 unmaintained = "workspace"
 # No blanket ignores. An advisory that genuinely does not apply gets an entry here with a
 # comment saying why, so the reasoning is reviewable rather than invisible.
-ignore = []
+ignore = [
+	# `zip` 4.x, which tauri-plugin-updater 2.13 and 2.14 both pin: extraction keeps SUID/SGID
+	# bits, follows symlink targets outside the destination, and applies permissions through
+	# symlinks. The updater is the only thing here that unpacks a ZIP, and only an update
+	# `download()` has already checked against the minisign key in tauri.conf.json, so the
+	# archive is one release.yml signed, never an attacker's. Drop these when the plugin
+	# moves to zip 9.
+	{ id = "RUSTSEC-2026-0367", reason = "zip only extracts minisign-verified updates" },
+	{ id = "RUSTSEC-2026-0368", reason = "zip only extracts minisign-verified updates" },
+	{ id = "RUSTSEC-2026-0369", reason = "zip only extracts minisign-verified updates" },
+]
 
 [licenses]
 version = 2
