@@ -90,8 +90,11 @@ fn link_libraw() {
 	build.files(&files);
 	if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
 		build.define("LIBRAW_NODLL", None).define("WIN32", None);
+		// The static C runtime, as libjxl's C++ objects are and as `heic_jpeg.cc` is: on MSVC
+		// they must all agree. `CARGO_CFG_TARGET_FEATURE` cannot be relied on for it, since
+		// CI's RUSTFLAGS replace `.cargo/config.toml`'s `+crt-static`.
 		if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
-			build.flag("/EHsc");
+			build.flag("/EHsc").static_crt(true);
 		}
 		println!("cargo:rustc-link-lib=ws2_32");
 	}
