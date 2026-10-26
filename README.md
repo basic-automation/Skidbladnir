@@ -55,6 +55,9 @@ with the exceptions listed under [What "every option" means](#what-every-option-
 - **OpenEXR** (`.exr`): half or float RGB, RGBA or gray, any channel layer, every compression
   but HTJ2K
 - **Raw YUV** (`.yuv`): bare 8-bit I420 planes, at the size you give, as `cwebp -s` reads them
+- **Canon CR3** camera raw, developed by LibRaw as `dcraw` would with the camera's white
+  balance (`-w`), into sRGB at 16 bits, turned upright. A camera LibRaw does not list yet is
+  refused rather than developed in guessed colour. Its Exif is not carried over yet
 - **SVG** (and gzip-compressed `.svgz`), drawn at its own size, or straight at the size a resize asks for (only the crop, if there is one) so its edges
   stay sharp, with its transparency kept; text in the system's fonts, and only images
   embedded in the file (one it links to is never opened)
@@ -298,7 +301,8 @@ same source as the library the app links (`scripts/build-reference-tools.sh`). P
   inputs or `-T` tiled input, and `cjxl` from an animated GIF or APNG. They are queued in
   [ROADMAP.md](ROADMAP.md), Phase 8.
 - **The input formats Skidbladnir reads**: PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC,
-  GIF, PNM/PAM, PFM, PGX, Y4M, SVG, EXR and raw YUV. Raw YUV is read as `cwebp -s` reads it:
+  GIF, PNM/PAM, PFM, PGX, Y4M, SVG, EXR, raw YUV and Canon CR3. No reference tool reads a
+  CR3, so it is developed once and given to every encoder as a 16-bit image. Raw YUV is read as `cwebp -s` reads it:
   into WebP as its planes are, byte for byte, and converted to RGB by libwebp for the other
   formats, whose tools do not read it. EXR is read as `cjxl` reads it — linear light, its
   premultiplied alpha, chromaticities and white luminance, and its other channels kept as
@@ -531,7 +535,8 @@ Skidbladnir is a window around other people's encoders, and is only as good as t
 [Kvazaar](https://github.com/ultravideo/kvazaar) (Ultra Video Group, Tampere University),
 [x265](https://bitbucket.org/multicoreware/x265_git) (MulticoreWare) and
 [libjpeg-turbo](https://libjpeg-turbo.org) (which includes the work of the Independent
-JPEG Group). The decoders are [rav1d](https://github.com/memorysafety/rav1d) through
+JPEG Group). Camera raw files are developed by [LibRaw](https://www.libraw.org) (LibRaw
+LLC, under CDDL-1.0). The decoders are [rav1d](https://github.com/memorysafety/rav1d) through
 [avif-decode](https://crates.io/crates/avif-decode), and
 [jxl-oxide](https://github.com/tirr-c/jxl-oxide). The window is
 [Tauri](https://tauri.app), [Nuxt](https://nuxt.com), [Nuxt UI](https://ui.nuxt.com) and

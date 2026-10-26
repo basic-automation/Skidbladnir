@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Regenerate the third-party notices from the licence files of the native libraries the
 app ships, read from the exact sources that are built: the libwebp-sys and jpegxl-src
-crates in Cargo's registry, and the libavif, libaom, libjpeg-turbo, libheif, libde265,
-Kvazaar and x265 submodules.
+crates in Cargo's registry, and the libavif, libaom, libjpeg-turbo, LibRaw, libheif,
+libde265, Kvazaar and x265 submodules.
 
     scripts/third-party-notices.py [--check]
 
@@ -43,6 +43,7 @@ common = [
 	(f"libavif {submodule('libavif')}", "BSD-2-Clause", "AVIF writing, statically linked, with parts of its avifenc app adapted in native/avif_shim.c and its JPEG reader (apps/shared/avifjpeg.c, with third_party/iccjpeg) compiled into it.", [root / "third_party/libavif/LICENSE"]),
 	(f"libaom {submodule('aom')}", "BSD-2-Clause", "The AV1 encoder for AVIF, statically linked.", [root / "third_party/aom/LICENSE", root / "third_party/aom/PATENTS"]),
 	(f"libjpeg-turbo {submodule('libjpeg-turbo')}", "IJG and BSD-3-Clause (and Zlib for its SIMD code)", "JPEG decoding, statically linked. This software is based in part on the work of the Independent JPEG Group.", [root / "third_party/libjpeg-turbo/LICENSE.md", root / "third_party/libjpeg-turbo/README.ijg"]),
+	(f"LibRaw {submodule('LibRaw')}", "CDDL-1.0 (LibRaw is offered under LGPL-2.1 or CDDL-1.0; Skidbladnir takes CDDL-1.0)", "Camera raw (CR3) decoding, statically linked, unmodified. It includes code from dcraw by Dave Coffin, DCB demosaicing and FBDD denoising by Jacek Gozdz (BSD-3-Clause), the X3F library by Roland Karlsson (BSD-style) and parts of the Adobe DNG SDK 1.4 (MIT), as its COPYRIGHT file says.", [root / "third_party/LibRaw/COPYRIGHT", root / "third_party/LibRaw/LICENSE.CDDL"]),
 	(f"libheif {submodule('libheif')} image readers (heifio)", "MIT", "heif-enc's JPEG reader and Exif helpers (heifio/decoder_jpeg.cc, heifio/exif.cc), compiled into the app by native/heic_jpeg.cc. Unlike the rest of libheif they are MIT-licensed.", [(root / "third_party/libheif/heifio/decoder_jpeg.cc", "/*", "*/")]),
 ]
 # The window's font and the Iconify icon collections it bundles (the webview window from npm,
@@ -86,6 +87,8 @@ lgpl = ["**libheif and libde265 (LGPL-3.0).** They are shipped as one shared lib
 	"<https://github.com/strukturag/libheif> and <https://github.com/strukturag/libde265>;",
 	"`scripts/build-libheif.sh` in Skidbladnir's repository is how the shipped library is",
 	"built from them.", "",
+	"**LibRaw (CDDL-1.0).** It is compiled into the app unmodified from the exact upstream",
+	"tag named below, whose source is at <https://github.com/LibRaw/LibRaw>.", "",
 	"**The Linux AppImage's system libraries.** So that it runs where they are missing, the",
 	"AppImage also carries the Ubuntu 22.04 libraries the app needs (GTK, WebKitGTK, GLib and",
 	"others, most of them LGPL), each package's Debian copyright file inside it at",
