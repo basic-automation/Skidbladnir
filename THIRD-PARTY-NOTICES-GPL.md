@@ -4196,7 +4196,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-## Codicons (Iconify icons, @iconify-json/codicon 1.2.73)
+## Codicons (Iconify icons, @iconify-json/codicon 1.2.76)
 
 Icons from Codicons by Microsoft Corporation (<https://github.com/microsoft/vscode-codicons>), as Iconify distributes them (its SVG clean-up applied, otherwise unchanged; only the icons the window shows are bundled), under the Creative Commons Attribution 4.0 International licence, <https://creativecommons.org/licenses/by/4.0/>. The licensor offers them as-is and as-available, with no warranties. Licence: CC-BY-4.0.
 
@@ -4208,7 +4208,7 @@ By Team Redux, <https://github.com/dovy/elusive-icons>. The Elusive Icons font i
 
 Icons from IconaMoon by Dariush Habibpour (<https://github.com/dariushhpg1/IconaMoon>), as Iconify distributes them (its SVG clean-up applied, otherwise unchanged; only the icons the window shows are bundled), under the Creative Commons Attribution 4.0 International licence, <https://creativecommons.org/licenses/by/4.0/>. The licensor offers them as-is and as-available, with no warranties. Licence: CC-BY-4.0.
 
-## Iconoir (Iconify icons, @iconify-json/iconoir 1.2.11)
+## Iconoir (Iconify icons, @iconify-json/iconoir 1.2.12)
 
 By Luca Burgio, <https://github.com/iconoir-icons/iconoir>. Licence: MIT.
 
@@ -4236,7 +4236,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## Lucide (Iconify icons, @iconify-json/lucide 1.2.139)
+## Lucide (Iconify icons, @iconify-json/lucide 1.2.147)
 
 By the Lucide contributors, <https://github.com/lucide-icons/lucide>. Licence: ISC.
 
@@ -4286,7 +4286,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## Material Symbols (Iconify icons, @iconify-json/material-symbols 1.2.94)
+## Material Symbols (Iconify icons, @iconify-json/material-symbols 1.2.96)
 
 By Google, <https://github.com/google/material-design-icons>. The Apache License 2.0 text is in the Google Material Icons section above. Licence: Apache-2.0.
 
@@ -4321,7 +4321,7 @@ The MIT license applies to all non-font and non-icon files.
 
 Icons from the Subway Icon Set by Mariusz Ostrowski (<https://github.com/mariuszostrowski/subway>), as Iconify distributes them (its SVG clean-up applied, otherwise unchanged; only the icons the window shows are bundled), under the Creative Commons Attribution 4.0 International licence, <https://creativecommons.org/licenses/by/4.0/>. The licensor offers them as-is and as-available, with no warranties. Licence: CC-BY-4.0.
 
-## VSCode Icons (Iconify icons, @iconify-json/vscode-icons 1.2.84)
+## VSCode Icons (Iconify icons, @iconify-json/vscode-icons 1.2.94)
 
 By Roberto Huertas, <https://github.com/vscode-icons/vscode-icons>. Licence: MIT.
 
@@ -4384,7 +4384,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ### MIT
 
-Used by `@floating-ui/vue` 1.1.11.
+Used by `@floating-ui/vue` 2.0.1.
 
 ```text
 MIT License
@@ -4440,7 +4440,7 @@ SOFTWARE.
 
 ### MIT
 
-Used by `@iconify/vue` 5.0.3.
+Used by `@iconify/vue` 5.0.4.
 
 ```text
 MIT License
@@ -4468,7 +4468,7 @@ SOFTWARE.
 
 ### Apache-2.0
 
-Used by `@internationalized/number` 3.6.8.
+Used by `@internationalized/number` 3.6.9.
 
 ```text
 Apache License
@@ -4676,7 +4676,7 @@ Apache License
 
 ### MIT
 
-Used by `@nuxt/icon` 2.5.1.
+Used by `@nuxt/icon` 2.6.1.
 
 ```text
 MIT License
@@ -4704,7 +4704,7 @@ SOFTWARE.
 
 ### MIT
 
-Used by `@nuxt/ui` 4.11.3.
+Used by `@nuxt/ui` 4.12.0.
 
 ```text
 MIT License
@@ -4748,7 +4748,7 @@ SOFTWARE.
 
 ### Apache-2.0 OR MIT
 
-Used by `@tauri-apps/api` 2.12.1.
+Used by `@tauri-apps/api` 2.12.4.
 
 ```text
 Apache License
@@ -4974,7 +4974,7 @@ Creator: Person: Daniel Thompson-Yvetot
 
 ### MIT OR Apache-2.0
 
-Used by `@tauri-apps/plugin-dialog` 2.8.1.
+Used by `@tauri-apps/plugin-dialog` 2.8.3.
 
 ```text
 SPDXVersion: SPDX-2.1
@@ -5001,7 +5001,7 @@ Creator: Person: Daniel Thompson-Yvetot
 
 ### MIT
 
-Used by `@unhead/vue` 3.4.2, `unhead` 3.4.2.
+Used by `@unhead/vue` 3.4.3, `unhead` 3.4.3.
 
 ```text
 MIT License
@@ -5029,7 +5029,7 @@ SOFTWARE.
 
 ### MIT
 
-Used by `@vue/reactivity` 3.5.43, `@vue/runtime-core` 3.5.43, `@vue/runtime-dom` 3.5.43, `@vue/shared` 3.5.43, `vue` 3.5.43.
+Used by `@vue/reactivity` 3.5.44, `@vue/runtime-core` 3.5.44, `@vue/runtime-dom` 3.5.44, `@vue/shared` 3.5.44, `vue` 3.5.44.
 
 ```text
 The MIT License (MIT)
@@ -5248,7 +5248,7 @@ SOFTWARE.
 
 ### MIT
 
-Used by `nuxt` 4.5.2.
+Used by `nuxt` 4.6.3.
 
 ```text
 The MIT License (MIT)
@@ -5276,7 +5276,7 @@ SOFTWARE.
 
 ### MIT
 
-Used by `reka-ui` 2.10.5.
+Used by `reka-ui` 2.11.0.
 
 ```text
 MIT License
@@ -5360,35 +5360,7 @@ SOFTWARE.
 
 ### MIT
 
-Used by `unctx` 3.0.1.
-
-```text
-MIT License
-
-Copyright (c) 2022 - Pooya Parsa <pooya@pi0.io>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
-### MIT
-
-Used by `vue-router` 5.3.1.
+Used by `vue-router` 5.4.0.
 
 ```text
 The MIT License (MIT)
