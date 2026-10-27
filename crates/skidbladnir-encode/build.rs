@@ -40,6 +40,13 @@
 //! or taken from the system with `SKIDBLADNIR_LIBJPEG=system` or without `CMake`. The
 //! AVIF and HEIC shims compile `avifenc`'s and `heif-enc`'s own JPEG readers against it, and
 //! `native/jpeg_shim.c` is the plain decode `cwebp` and `cjxl` do.
+//!
+//! `LibRaw` develops camera raw input (`.cr3`). It is offered under LGPL-2.1 or CDDL-1.0; this
+//! app takes CDDL-1.0, a file-level copyleft like the MPL-2.0 already in the tree, met by
+//! shipping `LibRaw` unmodified with its notice and source. It has no build system this can
+//! drive on every platform, so its sources are compiled here with `cc`, as its
+//! `Makefile.dist` lists them, from `third_party/LibRaw`, the thread-safe build
+//! (`libraw_r`), without the optional zlib, libjpeg, LCMS, `RawSpeed` or DNG SDK.
 
 use std::{env, fs, path::PathBuf, process::Command};
 
@@ -48,6 +55,7 @@ fn main() {
 	link_libjxl();
 	link_libavif(&jpeg);
 	link_libheif(&jpeg);
+	link_libraw();
 	let mut shim = cc::Build::new();
 	shim.file("native/jpeg_shim.c").warnings(false);
 	jpeg.include(&mut shim);
@@ -55,6 +63,42 @@ fn main() {
 	println!("cargo:rerun-if-changed=native/jpeg_shim.c");
 	// After every shim that calls it, so a static libjpeg resolves their references.
 	jpeg.link();
+}
+
+/// `LibRaw` and `native/raw_shim.cc` against it, as one static library.
+fn link_libraw() {
+	println!("cargo:rerun-if-changed=native/raw_shim.cc");
+	let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"));
+	let source = manifest.join("../../third_party/LibRaw");
+	assert!(source.join("libraw/libraw.h").exists(), "camera raw input needs LibRaw: run `git submodule update --init third_party/LibRaw`");
+	let mut build = cc::Build::new();
+	build.cpp(true).include(&source).file(manifest.join("native/raw_shim.cc")).warnings(false).opt_level(3);
+	// Every source under src/ but the `_ph.cpp` placeholders, which Makefile.dist leaves out.
+	let mut files = Vec::new();
+	let mut pending = vec![source.join("src")];
+	while let Some(dir) = pending.pop() {
+		for entry in fs::read_dir(&dir).expect("read third_party/LibRaw/src").flatten() {
+			let path = entry.path();
+			if path.is_dir() {
+				pending.push(path);
+			} else if path.extension().is_some_and(|extension| extension == "cpp") && !path.file_stem().is_some_and(|stem| stem.to_string_lossy().ends_with("_ph")) {
+				files.push(path);
+			}
+		}
+	}
+	files.sort();
+	build.files(&files);
+	if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+		build.define("LIBRAW_NODLL", None).define("WIN32", None);
+		// The static C runtime, as libjxl's C++ objects are and as `heic_jpeg.cc` is: on MSVC
+		// they must all agree. `CARGO_CFG_TARGET_FEATURE` cannot be relied on for it, since
+		// CI's RUSTFLAGS replace `.cargo/config.toml`'s `+crt-static`.
+		if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+			build.flag("/EHsc").static_crt(true);
+		}
+		println!("cargo:rustc-link-lib=ws2_32");
+	}
+	build.compile("skidraw");
 }
 
 /// A macOS build for the other architecture (the Intel release is built on Apple Silicon):

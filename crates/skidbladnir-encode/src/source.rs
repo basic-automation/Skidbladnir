@@ -68,6 +68,8 @@ pub enum SourceFormat {
 	/// such a file has no signature, and readable only with its size
 	/// ([`EncodeJob::yuv_size`]).
 	Yuv,
+	/// Canon CR3 camera raw, developed by `LibRaw` ([`crate::raw`]).
+	Cr3,
 }
 
 impl SourceFormat {
@@ -84,6 +86,7 @@ impl SourceFormat {
 			[b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => Some(Self::Webp),
 			[_, _, _, _, b'f', b't', b'y', b'p', ..] if is_avif_ftyp(bytes) => Some(Self::Avif),
 			[_, _, _, _, b'f', b't', b'y', b'p', ..] if is_heic_ftyp(bytes) => Some(Self::Heic),
+			[_, _, _, _, b'f', b't', b'y', b'p', ..] if ftyp_has_brand(bytes, &[b"crx "]) => Some(Self::Cr3),
 			[0xff, 0x0a, ..] | [0, 0, 0, 0x0c, b'J', b'X', b'L', b' ', 0x0d, 0x0a, 0x87, 0x0a, ..] => Some(Self::Jxl),
 			[b'G', b'I', b'F', b'8', b'7' | b'9', b'a', ..] => Some(Self::Gif),
 			[b'P', b'5'..=b'7', b' ' | b'\t' | b'\r' | b'\n', ..] => Some(Self::Pnm),
@@ -115,6 +118,7 @@ impl SourceFormat {
 			Self::Y4m => "Y4M",
 			Self::Exr => "EXR",
 			Self::Yuv => "YUV",
+			Self::Cr3 => "CR3",
 		}
 	}
 
@@ -212,7 +216,7 @@ pub enum SourceError {
 		source: io::Error,
 	},
 	/// The leading bytes match none of the accepted formats.
-	#[error("`{path}` is not a PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC or GIF image")]
+	#[error("`{path}` is not a PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC, GIF or CR3 image")]
 	Unsupported {
 		/// The path that failed.
 		path: PathBuf,
@@ -399,6 +403,13 @@ pub fn decode_with(path: &Path, bytes: Vec<u8>, yuv_size: Option<RawSize>) -> Re
 		SourceFormat::Y4m => {
 			let (width, height, pixels, deep, has_alpha) = crate::avif::decode_y4m(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?;
 			Decoded { width, height, pixels, deep, gray: false, has_alpha }
+		}
+		SourceFormat::Cr3 => {
+			let raw = crate::raw::develop(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?;
+			let deep: Vec<u16> = raw.samples.as_chunks::<3>().0.iter().flat_map(|&[r, g, b]| [r, g, b, u16::MAX]).collect();
+			// The high byte of each sample, as for a 16-bit PNG.
+			let pixels = deep.iter().map(|&v| u8::try_from(v >> 8).unwrap_or(u8::MAX)).collect();
+			Decoded { width: raw.width, height: raw.height, pixels, deep: Some(deep), gray: false, has_alpha: false }
 		}
 		SourceFormat::Pfm => {
 			let image = crate::pnm::pfm(&bytes).map_err(|detail| SourceError::Decode { path: path.to_path_buf(), format: format.name(), detail })?;
@@ -1254,6 +1265,34 @@ mod tests {
 		}
 	}
 
+	/// A CR3 is known by its `crx ` brand, and one `LibRaw` cannot read fails as a decode
+	/// error with `LibRaw`'s reason.
+	#[test]
+	fn identifies_a_cr3_by_its_brand() {
+		let mut ftyp = vec![0, 0, 0, 0x18, b'f', b't', b'y', b'p', b'c', b'r', b'x', b' ', 0, 0, 0, 1, b'c', b'r', b'x', b' ', b'i', b's', b'o', b'm'];
+		assert_eq!(SourceFormat::sniff(&ftyp), Some(SourceFormat::Cr3));
+		ftyp.extend([0; 64]);
+		let error = super::decode(Path::new("broken.cr3"), ftyp).expect_err("no raw data behind the header");
+		assert!(matches!(error, super::SourceError::Decode { format: "CR3", .. }), "{error}");
+	}
+
+	/// A real CR3, when `SKIDBLADNIR_CR3` names one (they are megabytes, so none is kept
+	/// in the tree): developed to 16-bit sRGB and converted to every format.
+	#[test]
+	fn converts_a_cr3_to_every_format() {
+		let Some(input) = std::env::var_os("SKIDBLADNIR_CR3").map(PathBuf::from) else { return };
+		let scratch = Scratch::new("cr3");
+		let inspected = super::inspect_paths(std::slice::from_ref(&input));
+		assert!(inspected[0].supported && inspected[0].format == Some("CR3"), "{inspected:?}");
+		let image = load(&input).expect("a CR3 develops");
+		assert_eq!((image.format, image.has_alpha, image.gray, image.deep.is_some()), (SourceFormat::Cr3, false, false, true));
+		for format in [OutputFormat::Webp, OutputFormat::Avif, OutputFormat::Jxl, OutputFormat::Heic] {
+			let output = scratch.join(&format!("photo.{}", format.extension()));
+			let conversion = encode_file(&EncodeJob { format, ..EncodeJob::default() }, &input, &output).unwrap_or_else(|error| panic!("{format:?}: {error}"));
+			assert_eq!((conversion.width, conversion.height), (image.width, image.height), "{format:?}");
+		}
+	}
+
 	/// A `.yuv` file is raw I420, known by its extension: offered to the queue and found by
 	/// a scan, read only at the size the job gives, and converted to every format.
 	#[test]
@@ -1391,7 +1430,7 @@ mod tests {
 		let input = scratch.join("notes.txt");
 		fs::write(&input, b"this is not an image").expect("write the file");
 		let error = load(&input).expect_err("must refuse");
-		assert!(error.to_string().contains("not a PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC or GIF"), "got {error}");
+		assert!(error.to_string().contains("not a PNG, JPEG, TIFF, WebP, AVIF, JPEG XL, HEIC, GIF or CR3"), "got {error}");
 	}
 
 	/// WebP input goes through libwebp itself, so a WebP -> WebP conversion does not

@@ -34,8 +34,8 @@ impl Metadata {
 			// `cwebp` cannot read these at all. Their decoders' own metadata is used. (A GIF
 			// goes to WebP through the animation encoder, as `gif2webp`, never through here.)
 			// A PNM file has no metadata to carry, and nor do raw YUV planes; an EXR's attributes
-			// are not Exif, ICC or XMP.
-			SourceFormat::Avif | SourceFormat::Jxl | SourceFormat::Heic | SourceFormat::Gif | SourceFormat::Pnm | SourceFormat::Pfm | SourceFormat::Pgx | SourceFormat::Svg | SourceFormat::Y4m | SourceFormat::Exr | SourceFormat::Yuv => Self::default(),
+			// are not Exif, ICC or XMP. A CR3's Exif is not carried yet.
+			SourceFormat::Avif | SourceFormat::Jxl | SourceFormat::Heic | SourceFormat::Gif | SourceFormat::Pnm | SourceFormat::Pfm | SourceFormat::Pgx | SourceFormat::Svg | SourceFormat::Y4m | SourceFormat::Exr | SourceFormat::Yuv | SourceFormat::Cr3 => Self::default(),
 		}
 	}
 

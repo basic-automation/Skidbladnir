@@ -42,6 +42,22 @@ fn reference_cwebp() -> Option<PathBuf> {
 	Command::new("cwebp").arg("-version").output().ok().filter(|out| out.status.success()).map(|_| PathBuf::from("cwebp"))
 }
 
+/// [`reference_cwebp`], if it can read a TIFF. A `cwebp` that is only on `PATH` may have been
+/// built without libtiff (Homebrew's, on the macOS runners), and is then no reference for
+/// TIFF input: the TIFF tests say they did not run, as they do with no `cwebp` at all, so
+/// `SKIDBLADNIR_REQUIRE_PARITY=1` still fails on one.
+fn reference_cwebp_for_tiff() -> Option<PathBuf> {
+	let cwebp = reference_cwebp()?;
+	let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tiff-rgb8.tif");
+	let probe = env::temp_dir().join(format!("skidbladnir-parity-tiff-probe-{}.webp", std::process::id()));
+	let reads = Command::new(&cwebp).arg("-quiet").arg(&fixture).arg("-o").arg(&probe).output().is_ok_and(|out| out.status.success());
+	let _ = fs::remove_file(&probe);
+	if !reads {
+		eprintln!("the reference cwebp ({}) cannot read a TIFF: it was built without libtiff", cwebp.display());
+	}
+	reads.then_some(cwebp)
+}
+
 /// Parse the version `cwebp -version` prints on its first line, e.g. `1.6.0`.
 fn reference_version(cwebp: &Path) -> Option<(i32, i32, i32)> {
 	let out = Command::new(cwebp).arg("-version").output().ok()?;
@@ -907,7 +923,7 @@ fn matches_reference_cwebp_through_a_jpeg_file() {
 #[test]
 fn matches_reference_cwebp_through_a_tiff_file() {
 	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
-	let Some(cwebp) = reference_cwebp() else {
+	let Some(cwebp) = reference_cwebp_for_tiff() else {
 		let message = "TIFF-SOURCE PARITY NOT RUN: no reference cwebp found.";
 		assert!(!require, "{message}");
 		eprintln!("{message}");
@@ -967,7 +983,7 @@ fn matches_reference_cwebp_through_a_tiff_file() {
 #[test]
 fn unassociated_alpha_tiff_keeps_its_colours() {
 	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
-	let Some(cwebp) = reference_cwebp() else {
+	let Some(cwebp) = reference_cwebp_for_tiff() else {
 		let message = "UNASSOCIATED-ALPHA TIFF NOT CHECKED: no reference cwebp found.";
 		assert!(!require, "{message}");
 		eprintln!("{message}");
@@ -1054,7 +1070,7 @@ fn tiff(width: u32, height: u32, bits: u16, samples: u16, raster: &[u8], extra: 
 #[test]
 fn matches_reference_cwebp_through_an_associated_alpha_tiff() {
 	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
-	let Some(cwebp) = reference_cwebp() else {
+	let Some(cwebp) = reference_cwebp_for_tiff() else {
 		let message = "ASSOCIATED-ALPHA TIFF PARITY NOT RUN: no reference cwebp found.";
 		assert!(!require, "{message}");
 		eprintln!("{message}");
@@ -1127,7 +1143,7 @@ fn matches_reference_cwebp_through_an_associated_alpha_tiff() {
 #[test]
 fn matches_reference_cwebp_through_a_straight_alpha_tiff_when_asked() {
 	let require = env::var("SKIDBLADNIR_REQUIRE_PARITY").is_ok_and(|v| v == "1");
-	let Some(cwebp) = reference_cwebp().filter(|cwebp| reference_version(cwebp) == Some(skidbladnir_encode::encoder::linked_encoder_version())) else {
+	let Some(cwebp) = reference_cwebp_for_tiff().filter(|cwebp| reference_version(cwebp) == Some(skidbladnir_encode::encoder::linked_encoder_version())) else {
 		let message = "STRAIGHT-ALPHA TIFF PARITY NOT RUN: no reference cwebp of the linked libwebp version.";
 		assert!(!require, "{message}");
 		eprintln!("{message}");

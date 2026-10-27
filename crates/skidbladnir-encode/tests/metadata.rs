@@ -215,6 +215,7 @@ fn keeps_metadata_exactly_as_cwebp_does() {
 	let jobs = [("lossy", WebpSettings::default()), ("lossless", WebpSettings { lossless: true, exact: true, ..WebpSettings::default() })];
 	let kinds = ["all", "icc", "exif", "xmp", "exif,xmp", "none"];
 	let mut failures = Vec::new();
+	let mut unchecked = 0;
 	let mut compared = 0;
 	for (name, input) in &sources {
 		let source_bytes = fs::read(input).expect("read");
@@ -228,6 +229,14 @@ fn keeps_metadata_exactly_as_cwebp_does() {
 				let case = format!("{name}, {mode}, -metadata {kind}");
 				let (ours, theirs) = match both(&cwebp, &job, input, &dir, &tag) {
 					(Ok(ours), Ok(theirs)) => (ours, theirs),
+					// A `cwebp` that only happened to be on `PATH` may have been built without
+					// libtiff (Homebrew's, on the macOS runners): that is no reference for a
+					// TIFF, so the case goes unchecked rather than failed. The parity jobs name
+					// their own `cwebp` and require it, so there it still fails.
+					(Ok(_), Err(why)) if !require && env::var_os("SKIDBLADNIR_REFERENCE_CWEBP").is_none() && why.contains("TIFF support not compiled") => {
+						unchecked += 1;
+						continue;
+					}
 					(ours, theirs) => {
 						failures.push(format!("{case}: ours {:?}, cwebp {:?}", ours.map(|b| b.len()), theirs.map(|b| b.len())));
 						continue;
@@ -263,6 +272,9 @@ fn keeps_metadata_exactly_as_cwebp_does() {
 
 	let _ = fs::remove_dir_all(&dir);
 	assert!(failures.is_empty(), "METADATA FAILED ({} of {compared}):\n{}", failures.len(), failures.join("\n"));
+	if unchecked > 0 {
+		eprintln!("METADATA: {unchecked} TIFF conversions not checked: the cwebp on PATH was built without libtiff (set SKIDBLADNIR_REFERENCE_CWEBP)");
+	}
 	eprintln!("METADATA OK: {compared} conversions ({} sources x 2 modes x {} -metadata choices) match cwebp byte for byte; malformed ICC refused as cwebp refuses it", sources.len(), kinds.len());
 }
 

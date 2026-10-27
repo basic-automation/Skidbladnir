@@ -28,6 +28,7 @@ pub mod jxl;
 pub mod metadata;
 mod png_gamma;
 pub mod pnm;
+mod raw;
 pub mod settings;
 pub mod source;
 pub mod svg;
